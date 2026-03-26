@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: la-erp-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: la_erp
+      POSTGRES_USER: la_erp
+      POSTGRES_PASSWORD: la_erp
+    volumes:
+      - la-erp-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  la-erp-postgres-data:

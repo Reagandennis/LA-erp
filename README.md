@@ -1,36 +1,89 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LA-ERP
 
-## Getting Started
+LA-ERP is a Next.js 16 App Router application with:
 
-First, run the development server:
+- PostgreSQL via Prisma
+- Revocable JWT-backed sessions stored in the database
+- Administrator-managed accounts only
+- Server-enforced role and permission checks
+- Audit visibility for auth and admin actions
+
+## Local setup
+
+1. Copy the environment template:
+
+```bash
+cp .env.example .env
+```
+
+2. Start PostgreSQL:
+
+```bash
+docker compose up -d postgres
+```
+
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+4. Generate the Prisma client and apply migrations:
+
+```bash
+npm run db:generate
+npm run db:migrate -- --name init
+```
+
+5. Seed the RBAC baseline and bootstrap admin:
+
+```bash
+npm run db:seed
+```
+
+6. Start the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`.env.example` defines the required values:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_NAME`
+- `BOOTSTRAP_ADMIN_PASSWORD`
 
-## Learn More
+The seed step creates or updates the bootstrap administrator from those values.
 
-To learn more about Next.js, take a look at the following resources:
+## Core scripts
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run dev
+npm run build
+npm run lint
+npm run test
+npm run db:generate
+npm run db:migrate -- --name init
+npm run db:seed
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Access model
 
-## Deploy on Vercel
+- Public self-signup is disabled.
+- Accounts are created from the admin workspace.
+- `/dashboard` and `/admin` are optimistically gated by `proxy.ts`.
+- Route handlers still perform final authorization checks against the database.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Verification
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The current automated checks are:
+
+```bash
+npm run lint
+npm run build
+npm run test
+```
