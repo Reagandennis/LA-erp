@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { SESSION_COOKIE_NAME, verifySessionToken } from '@/lib/session-token';
 
-const protectedPrefixes = ['/dashboard', '/admin', '/modules'];
+const protectedPrefixes = ['/dashboard', '/admin'];
 const authPages = ['/', '/auth/login', '/auth/signup'];
 
 export default function proxy(request: NextRequest) {

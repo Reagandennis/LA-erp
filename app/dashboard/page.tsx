@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import LogoutButton from '@/app/ui/logout-button';
 import { getServerAuth } from '@/lib/auth';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { getAccessibleModulesForUser, userHasRole } from '@/lib/user';
+import { userHasRole } from '@/lib/user';
 
 export default async function DashboardPage() {
   const auth = await getServerAuth();
@@ -14,12 +14,11 @@ export default async function DashboardPage() {
   }
 
   const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
-  const accessibleModules = await getAccessibleModulesForUser(auth.user);
 
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">LA-ERP</h1>
             <p className="text-sm text-gray-600">Dashboard</p>
@@ -28,40 +27,43 @@ export default async function DashboardPage() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          <section className="lg:col-span-2 bg-white rounded-lg shadow p-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">
+      <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <div className="mb-8 grid grid-cols-1 gap-8 lg:grid-cols-3">
+          <section className="rounded-lg bg-white p-8 shadow lg:col-span-2">
+            <h2 className="mb-2 text-3xl font-bold text-gray-900">
               Welcome back, {auth.user.name}
             </h2>
-            <p className="text-gray-600 mb-6">
-              Your dashboard now reflects only the modules you are allowed to use.
+            <p className="mb-6 text-gray-600">
+              Review your account status, roles, and the permissions active on
+              this session.
             </p>
 
             <div className="space-y-6">
               <div>
-                <p className="text-sm text-gray-600 uppercase tracking-wide">Email</p>
+                <p className="text-sm uppercase tracking-wide text-gray-600">Email</p>
                 <p className="text-lg font-medium text-gray-900">{auth.user.email}</p>
               </div>
               <div>
-                <p className="text-sm text-gray-600 uppercase tracking-wide">Account status</p>
-                <p className="text-lg font-medium text-gray-900 capitalize">
+                <p className="text-sm uppercase tracking-wide text-gray-600">
+                  Account status
+                </p>
+                <p className="text-lg font-medium capitalize text-gray-900">
                   {auth.user.status}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-600 uppercase tracking-wide">Access model</p>
+                <p className="text-sm uppercase tracking-wide text-gray-600">
+                  Access model
+                </p>
                 <p className="text-lg font-medium text-gray-900">
-                  {isAdmin
-                    ? 'Administrator access across all modules'
-                    : 'Restricted to assigned modules only'}
+                  {isAdmin ? 'Administrator access' : 'Role-based access'}
                 </p>
               </div>
             </div>
           </section>
 
-          <section className="bg-white rounded-lg shadow p-8">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Quick stats</h3>
+          <section className="rounded-lg bg-white p-8 shadow">
+            <h3 className="mb-4 text-lg font-bold text-gray-900">Quick stats</h3>
             <div className="space-y-4">
               <div>
                 <p className="text-sm text-gray-600">Assigned roles</p>
@@ -75,77 +77,90 @@ export default async function DashboardPage() {
                   {auth.user.permissions.length}
                 </p>
               </div>
-              <div>
-                <p className="text-sm text-gray-600">Accessible modules</p>
-                <p className="text-2xl font-bold text-slate-900">
-                  {accessibleModules.length}
-                </p>
-              </div>
             </div>
           </section>
         </div>
 
-        <section className="bg-white rounded-lg shadow p-8">
-          <div className="flex items-center justify-between gap-4 mb-6 flex-col sm:flex-row">
+        <section className="rounded-lg bg-white p-8 shadow">
+          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-xl font-bold text-gray-900">Your modules</h3>
-              <p className="text-gray-600 mt-1">
-                Open only the workspaces you have been granted access to.
+              <h3 className="text-xl font-bold text-gray-900">Role access</h3>
+              <p className="mt-1 text-gray-600">
+                Your account can only perform actions granted by your assigned
+                roles and permissions.
               </p>
             </div>
             {isAdmin && (
               <Link
                 href="/admin"
-                className="px-5 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+                className="rounded-lg bg-emerald-600 px-5 py-3 font-medium text-white transition-colors hover:bg-emerald-700"
               >
                 Manage user access
               </Link>
             )}
           </div>
 
-          {accessibleModules.length > 0 ? (
-            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {accessibleModules.map((module) => (
-                <Link
-                  key={module.id}
-                  href={`/modules/${module.slug}`}
-                  className="rounded-2xl border border-gray-200 p-5 hover:border-emerald-400 hover:shadow-md transition-all bg-gradient-to-br from-white to-gray-50"
-                >
-                  <p className="text-xs uppercase tracking-[0.22em] text-gray-500 mb-3">
-                    {module.category}
-                  </p>
-                  <h4 className="text-lg font-bold text-gray-900">{module.name}</h4>
-                  <p className="text-sm text-gray-600 mt-2 leading-6">
-                    {module.description}
-                  </p>
-                  <p className="text-sm text-emerald-700 mt-4 font-medium">
-                    Open module
-                  </p>
-                </Link>
-              ))}
+          <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-2xl border border-gray-200 p-6">
+              <h4 className="text-lg font-bold text-gray-900">Assigned roles</h4>
+              {auth.user.roles.length > 0 ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {auth.user.roles.map((role) => (
+                    <span
+                      key={role.id}
+                      className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium capitalize text-emerald-800"
+                    >
+                      {role.name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-gray-600">
+                  No roles are currently assigned to this account.
+                </p>
+              )}
             </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-gray-300 p-8 text-center">
-              <h4 className="text-lg font-bold text-gray-900">No modules assigned yet</h4>
-              <p className="text-gray-600 mt-2">
-                Ask an administrator to grant access to one or more dashboard modules.
-              </p>
+
+            <div className="rounded-2xl border border-gray-200 p-6">
+              <h4 className="text-lg font-bold text-gray-900">
+                Effective permissions
+              </h4>
+              {auth.user.permissions.length > 0 ? (
+                <div className="mt-4 grid gap-2">
+                  {auth.user.permissions.map((permission) => (
+                    <div
+                      key={permission.id}
+                      className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2"
+                    >
+                      <code className="text-sm text-gray-700">{permission.name}</code>
+                      <span className="text-xs capitalize text-gray-500">
+                        {permission.action}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-gray-600">
+                  No permissions are currently active for this account.
+                </p>
+              )}
             </div>
-          )}
+          </div>
         </section>
 
         {isAdmin && (
-          <section className="mt-8 bg-gradient-to-r from-slate-900 to-slate-800 rounded-lg shadow p-8 text-white">
-            <div className="flex items-center justify-between gap-4 flex-col sm:flex-row">
+          <section className="mt-8 rounded-lg bg-gradient-to-r from-slate-900 to-slate-800 p-8 text-white shadow">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-xl font-bold mb-1">Administrator access</h3>
+                <h3 className="mb-1 text-xl font-bold">Administrator access</h3>
                 <p className="text-slate-300">
-                  Suspend accounts, deactivate users, and assign several modules at once.
+                  Manage users, statuses, roles, and audit visibility from one
+                  workspace.
                 </p>
               </div>
               <Link
                 href="/admin"
-                className="px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+                className="rounded-lg bg-emerald-600 px-6 py-3 font-medium text-white transition-colors hover:bg-emerald-700"
               >
                 Open admin workspace
               </Link>

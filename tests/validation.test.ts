@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  loginSchema,
-  managedUserSchema,
-  managedUserUpdateSchema,
-} from '../lib/validation';
+import { loginSchema, managedUserSchema, managedUserUpdateSchema } from '../lib/validation';
 
 describe('validation schemas', () => {
   it('normalizes login email addresses', () => {

@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 
 import { hashPassword } from '../lib/auth';
-import { DEFAULT_MODULES } from '../lib/module-catalog';
 import {
   ADMIN_ROLE_NAME,
   DEFAULT_PERMISSIONS,
@@ -72,21 +71,6 @@ async function seedRbac() {
   }
 }
 
-async function seedModules() {
-  for (const moduleDefinition of DEFAULT_MODULES) {
-    await prisma['module'].upsert({
-      where: { slug: moduleDefinition.slug },
-      update: {
-        name: moduleDefinition.name,
-        description: moduleDefinition.description,
-        category: moduleDefinition.category,
-        sortOrder: moduleDefinition.sortOrder,
-      },
-      create: moduleDefinition,
-    });
-  }
-}
-
 async function seedBootstrapAdmin() {
   const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
   const name = process.env.BOOTSTRAP_ADMIN_NAME?.trim() || 'Platform Admin';
@@ -140,7 +124,6 @@ async function seedBootstrapAdmin() {
 
 async function main() {
   await seedRbac();
-  await seedModules();
   await seedBootstrapAdmin();
 }
 

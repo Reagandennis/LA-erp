@@ -18,9 +18,35 @@ model User {
   updatedAt      DateTime   @updatedAt
   userRoles      UserRole[]
   userModules    UserModule[]
+  createdTasks   PlannerTask[] @relation("CreatedTasks")
+  assignedTasks  PlannerTask[] @relation("AssignedTasks")
   sessions       Session[]
   auditLogs      AuditLog[] @relation("AuditActor")
   auditTargets   AuditLog[] @relation("AuditTarget")
+}
+
+enum PlannerTaskType {
+  personal
+  group
+}
+
+enum PlannerTaskKind {
+  task
+  folder
+}
+
+enum PlannerTaskStatus {
+  todo
+  in_progress
+  blocked
+  done
+}
+
+enum PlannerTaskPriority {
+  low
+  medium
+  high
+  urgent
 }
 
 model Role {
@@ -78,6 +104,36 @@ model UserModule {
   module     Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 
   @@unique([userId, moduleId])
+}
+
+model PlannerTask {
+  id             String              @id @default(cuid())
+  title          String
+  description    String?
+  kind           PlannerTaskKind     @default(task)
+  taskType       PlannerTaskType     @default(group)
+  status         PlannerTaskStatus   @default(todo)
+  priority       PlannerTaskPriority @default(medium)
+  estimateMinutes Int?
+  progressPercent Int                @default(0)
+  startAt        DateTime?
+  dueAt          DateTime?
+  completedAt    DateTime?
+  parentTaskId   String?
+  sortOrder      Int                 @default(0)
+  creatorUserId  Int
+  assigneeUserId Int?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  parent         PlannerTask?        @relation("PlannerTaskHierarchy", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  children       PlannerTask[]       @relation("PlannerTaskHierarchy")
+  creator        User                @relation("CreatedTasks", fields: [creatorUserId], references: [id], onDelete: Cascade)
+  assignee       User?               @relation("AssignedTasks", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, dueAt])
+  @@index([assigneeUserId])
+  @@index([taskType, startAt, dueAt])
+  @@index([parentTaskId, sortOrder])
 }
 
 model RolePermission {

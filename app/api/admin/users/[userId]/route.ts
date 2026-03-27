@@ -59,23 +59,6 @@ async function guardAdminMutation(request: NextRequest) {
   return result;
 }
 
-async function modulesExist(moduleIds: number[]) {
-  if (moduleIds.length === 0) {
-    return true;
-  }
-
-  const modules = await prisma['module'].findMany({
-    where: {
-      id: {
-        in: moduleIds,
-      },
-    },
-    select: { id: true },
-  });
-
-  return modules.length === moduleIds.length;
-}
-
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ userId: string }> },
@@ -112,7 +95,7 @@ export async function PUT(
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  const { roleIds, moduleIds, status } = validation.data;
+  const { roleIds, status } = validation.data;
   const targetIsAdmin = userHasRole(targetBefore, ADMIN_ROLE_NAME);
 
   if (auth.user.id === userId) {
@@ -164,18 +147,10 @@ export async function PUT(
     }
   }
 
-  if (moduleIds && !(await modulesExist(moduleIds))) {
-    return NextResponse.json(
-      { error: 'One or more selected modules are invalid' },
-      { status: 400 },
-    );
-  }
-
   const updatedUser = await updateManagedUser({
     userId,
     status,
     roleIds,
-    moduleIds,
   });
 
   if (!updatedUser) {
@@ -191,7 +166,6 @@ export async function PUT(
     metadata: {
       status: status ?? null,
       roleIds: roleIds ?? null,
-      moduleIds: moduleIds ?? null,
     },
     request,
   });

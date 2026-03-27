@@ -25,21 +25,13 @@ export const managedUserSchema = z.object({
   password: passwordSchema,
   status: userStatusSchema.default('active'),
   roleIds: z.array(z.number().int().positive()).min(1, 'Select at least one role'),
-  moduleIds: z.array(z.number().int().positive()).default([]),
 });
 
 export const managedUserUpdateSchema = z
   .object({
     status: userStatusSchema.optional(),
     roleIds: z.array(z.number().int().positive()).min(1).optional(),
-    moduleIds: z.array(z.number().int().positive()).optional(),
   })
-  .refine(
-    (value) =>
-      value.status !== undefined ||
-      value.roleIds !== undefined ||
-      value.moduleIds !== undefined,
-    {
+  .refine((value) => value.status !== undefined || value.roleIds !== undefined, {
     message: 'At least one field must be updated',
-    },
-  );
+  });

@@ -8,7 +8,6 @@ import { requireAdminRequest } from '@/lib/request-auth';
 import {
   createManagedUser,
   getUserByEmail,
-  listAllModules,
   listManagedUsers,
   listRolesWithPermissions,
 } from '@/lib/user';
@@ -29,25 +28,6 @@ async function ensureRolesExist(roleIds: number[]) {
   return roles.length === roleIds.length;
 }
 
-async function ensureModulesExist(moduleIds: number[]) {
-  if (moduleIds.length === 0) {
-    return true;
-  }
-
-  const modules = await prisma['module'].findMany({
-    where: {
-      id: {
-        in: moduleIds,
-      },
-    },
-    select: {
-      id: true,
-    },
-  });
-
-  return modules.length === moduleIds.length;
-}
-
 export async function GET(request: NextRequest) {
   const { response } = await requireAdminRequest(request);
 
@@ -55,13 +35,12 @@ export async function GET(request: NextRequest) {
     return response;
   }
 
-  const [users, roles, modules] = await Promise.all([
+  const [users, roles] = await Promise.all([
     listManagedUsers(),
     listRolesWithPermissions(),
-    listAllModules(),
   ]);
 
-  return NextResponse.json({ users, roles, modules });
+  return NextResponse.json({ users, roles });
 }
 
 export async function POST(request: NextRequest) {
@@ -100,11 +79,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { email, name, password, roleIds, moduleIds, status } = validation.data;
-  const [existingUser, rolesExist, modulesExist] = await Promise.all([
+  const { email, name, password, roleIds, status } = validation.data;
+  const [existingUser, rolesExist] = await Promise.all([
     getUserByEmail(email),
     ensureRolesExist(roleIds),
-    ensureModulesExist(moduleIds),
   ]);
 
   if (existingUser) {
@@ -121,20 +99,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!modulesExist) {
-    return NextResponse.json(
-      { error: 'One or more selected modules are invalid' },
-      { status: 400 },
-    );
-  }
-
   const user = await createManagedUser({
     email,
     name,
     passwordHash: await hashPassword(password),
     status,
     roleIds,
-    moduleIds,
   });
 
   await recordAuditEvent({
@@ -146,7 +116,6 @@ export async function POST(request: NextRequest) {
     metadata: {
       email: user.email,
       roleIds,
-      moduleIds,
       status: user.status,
     },
     request,

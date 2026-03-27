@@ -17,15 +17,6 @@ export interface RoleSummary {
   description: string;
 }
 
-export interface ModuleSummary {
-  id: number;
-  slug: string;
-  name: string;
-  description: string;
-  category: string;
-  sortOrder: number;
-}
-
 export interface AccessUser {
   id: number;
   email: string;
@@ -36,7 +27,6 @@ export interface AccessUser {
   sessionVersion: number;
   roles: RoleSummary[];
   permissions: PermissionSummary[];
-  modules: ModuleSummary[];
 }
 
 export interface AuditLogSummary {
@@ -56,10 +46,6 @@ export function userHasRole(user: AccessUser, roleName: string) {
   return user.roles.some((role) => role.name === roleName);
 }
 
-export function userHasModule(user: AccessUser, moduleSlug: string) {
-  return user.modules.some((module) => module.slug === moduleSlug);
-}
-
 export const userAccessInclude = {
   userRoles: {
     include: {
@@ -72,11 +58,6 @@ export const userAccessInclude = {
           },
         },
       },
-    },
-  },
-  userModules: {
-    include: {
-      module: true,
     },
   },
 } satisfies Prisma.UserInclude;
@@ -105,32 +86,6 @@ function serializePermission(
   };
 }
 
-function serializeModule(
-  module: UserWithAccess['userModules'][number]['module'],
-): ModuleSummary {
-  return {
-    id: module.id,
-    slug: module.slug,
-    name: module.name,
-    description: module.description,
-    category: module.category,
-    sortOrder: module.sortOrder,
-  };
-}
-
-function buildModuleSummaryFromList(
-  module: Awaited<ReturnType<typeof listAllModules>>[number],
-): ModuleSummary {
-  return {
-    id: module.id,
-    slug: module.slug,
-    name: module.name,
-    description: module.description,
-    category: module.category,
-    sortOrder: module.sortOrder,
-  };
-}
-
 export function buildAccessUser(user: UserWithAccess): AccessUser {
   const roles = user.userRoles.map((assignment) => serializeRole(assignment.role));
   const permissions = new Map<number, PermissionSummary>();
@@ -144,10 +99,6 @@ export function buildAccessUser(user: UserWithAccess): AccessUser {
     }
   }
 
-  const modules = user.userModules
-    .map((assignment) => serializeModule(assignment.module))
-    .sort((left, right) => left.sortOrder - right.sortOrder);
-
   return {
     id: user.id,
     email: user.email,
@@ -160,7 +111,6 @@ export function buildAccessUser(user: UserWithAccess): AccessUser {
     permissions: [...permissions.values()].sort((left, right) =>
       left.name.localeCompare(right.name),
     ),
-    modules,
   };
 }
 
@@ -210,12 +160,6 @@ export async function listRolesWithPermissions() {
   }));
 }
 
-export async function listAllModules() {
-  return prisma['module'].findMany({
-    orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
-  });
-}
-
 export async function listManagedUsers() {
   const users = await prisma.user.findMany({
     include: userAccessInclude,
@@ -233,7 +177,6 @@ export async function createManagedUser(input: {
   passwordHash: string;
   status: string;
   roleIds: number[];
-  moduleIds: number[];
 }) {
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
@@ -245,11 +188,6 @@ export async function createManagedUser(input: {
         userRoles: {
           createMany: {
             data: input.roleIds.map((roleId) => ({ roleId })),
-          },
-        },
-        userModules: {
-          createMany: {
-            data: input.moduleIds.map((moduleId) => ({ moduleId })),
           },
         },
       },
@@ -264,7 +202,6 @@ export async function updateManagedUser(input: {
   userId: number;
   status?: string;
   roleIds?: number[];
-  moduleIds?: number[];
 }) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.user.findUnique({
@@ -277,9 +214,7 @@ export async function updateManagedUser(input: {
     }
 
     const shouldResetSessions =
-      input.status !== undefined ||
-      input.roleIds !== undefined ||
-      input.moduleIds !== undefined;
+      input.status !== undefined || input.roleIds !== undefined;
 
     await tx.user.update({
       where: { id: input.userId },
@@ -304,21 +239,6 @@ export async function updateManagedUser(input: {
           roleId,
         })),
       });
-    }
-
-    if (input.moduleIds !== undefined) {
-      await tx.userModule.deleteMany({
-        where: { userId: input.userId },
-      });
-
-      if (input.moduleIds.length > 0) {
-        await tx.userModule.createMany({
-          data: input.moduleIds.map((moduleId) => ({
-            userId: input.userId,
-            moduleId,
-          })),
-        });
-      }
     }
 
     if (shouldResetSessions) {
@@ -395,21 +315,6 @@ export async function isUserAdmin(userId: number) {
     user?.userRoles.some((assignment) => assignment.role.name === ADMIN_ROLE_NAME) ??
     false
   );
-}
-
-export async function getAccessibleModulesForUser(user: AccessUser) {
-  if (userHasRole(user, ADMIN_ROLE_NAME)) {
-    const modules = await listAllModules();
-    return modules.map(buildModuleSummaryFromList);
-  }
-
-  return user.modules;
-}
-
-export async function getModuleBySlug(slug: string) {
-  return prisma['module'].findUnique({
-    where: { slug },
-  });
 }
 
 export async function getRecentAuditLogs(limit = 25): Promise<AuditLogSummary[]> {
