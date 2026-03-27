@@ -266,4 +266,18 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     category: 'Time',
     sortOrder: 37,
   },
+  {
+    slug: 'weather',
+    name: 'Weather',
+    description: 'Real-time weather updates and forecasts for operational planning.',
+    category: 'Tools',
+    sortOrder: 38,
+  },
+  {
+    slug: 'flight-tracker',
+    name: 'Flight Tracker',
+    description: 'Monitor flight statuses and schedules for logistics and travel.',
+    category: 'Tools',
+    sortOrder: 39,
+  },
 ];
