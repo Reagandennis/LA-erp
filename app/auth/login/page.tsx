@@ -42,117 +42,72 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex">
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 flex-col justify-between p-12 text-white">
-        <div>
-          <p className="text-sm uppercase tracking-[0.3em] text-emerald-300 mb-4">
-            Secure Operations
-          </p>
-          <h1 className="text-5xl font-bold">LA-ERP</h1>
-        </div>
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-2xl font-semibold mb-2">Administrator-managed access</h2>
-            <p className="text-slate-300">
-              Accounts, roles, and permissions are issued centrally to reduce
-              exposure and tighten operational control.
-            </p>
-          </div>
-          <div className="grid gap-4 text-sm text-slate-200">
-            <div className="rounded-2xl border border-white/10 p-4">
-              Revocable database-backed sessions
-            </div>
-            <div className="rounded-2xl border border-white/10 p-4">
-              Role-based authorization and audit visibility
-            </div>
-            <div className="rounded-2xl border border-white/10 p-4">
-              Rate-limited authentication endpoints
-            </div>
-          </div>
-        </div>
-      </div>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', padding: '16px' }}>
+      <div style={{ width: '100%', maxWidth: '400px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '24px', textAlign: 'center' }}>Sign In</h1>
 
-      <div className="flex-1 flex items-center justify-center px-6 py-12 sm:px-12">
-        <div className="w-full max-w-md">
-          <Link
-            href="/"
-            className="text-sm text-emerald-700 font-medium hover:text-emerald-800 inline-block mb-6"
+        {error && (
+          <div style={{ padding: '12px', marginBottom: '16px', backgroundColor: '#fee', border: '1px solid #fcc', color: '#c00', fontSize: '14px' }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setEmail(event.target.value)}
+              placeholder="you@company.com"
+              autoComplete="email"
+              required
+              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', fontSize: '14px', fontFamily: 'monospace' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value)}
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', fontSize: '14px', fontFamily: 'monospace' }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            style={{
+              padding: '10px',
+              marginTop: '16px',
+              backgroundColor: isLoading ? '#ccc' : '#000',
+              color: '#fff',
+              border: '1px solid #000',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+            }}
           >
+            {isLoading ? 'Signing in...' : 'Sign in'}
+          </button>
+        </form>
+
+        <p style={{ textAlign: 'center', fontSize: '12px', marginTop: '16px', color: '#666' }}>
+          <Link href="/" style={{ color: '#666', textDecoration: 'underline' }}>
             Back to home
           </Link>
-
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">
-              Sign in to your account
-            </h2>
-            <p className="text-gray-600">
-              Your account must be provisioned by an administrator before you can
-              access the platform.
-            </p>
-          </div>
-
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Email address
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setEmail(event.target.value)
-                }
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-white text-gray-900"
-                placeholder="you@company.com"
-                autoComplete="email"
-                required
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setPassword(event.target.value)
-                }
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-white text-gray-900"
-                placeholder="Enter your password"
-                autoComplete="current-password"
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mt-6"
-            >
-              {isLoading ? 'Signing in...' : 'Sign in'}
-            </button>
-          </form>
-
-          <p className="text-center text-xs text-gray-500 mt-6">
-            Need access? Contact your administrator.
-          </p>
-        </div>
+        </p>
       </div>
     </div>
   );
