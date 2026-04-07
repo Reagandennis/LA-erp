@@ -10,6 +10,7 @@ type TaskRecord = {
   title: string;
   description: string | null;
   priority: string;
+  status: string;
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
@@ -32,6 +33,7 @@ type PersonalTodoCollectionClient = {
       title: string;
       description: string | null;
       priority: string;
+      status: string;
       dueDate: Date | null;
       completed: boolean;
       completedAt: Date | null;
@@ -57,6 +59,7 @@ function serializeTask(task: TaskRecord) {
     title: task.title,
     description: task.description,
     priority: task.priority,
+    status: task.status,
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -136,6 +139,7 @@ export async function POST(request: NextRequest) {
           ? validation.data.description
           : null,
       priority: validation.data.priority,
+      status: validation.data.status,
       dueDate,
       completed: isCompleted,
       completedAt: isCompleted ? new Date() : null,

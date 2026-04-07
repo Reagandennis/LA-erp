@@ -99,6 +99,7 @@ type ApiTask = {
   title: string;
   description: string | null;
   priority: string;
+  status?: string;
   dueDate: string | null;
   completed: boolean;
   createdAt: string;
@@ -118,7 +119,7 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
     const apiTasks = data?.tasks ?? [];
     return apiTasks.map((task) => {
       const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : null;
-      const status = task.completed ? 'In review' : 'Backlog';
+      const status = task.status ?? (task.completed ? 'In review' : 'Backlog');
       const priority = task.priority
         ? (task.priority[0].toUpperCase() + task.priority.slice(1))
         : 'Medium';
@@ -333,6 +334,7 @@ export default function TodoPersonalPage() {
           title: createTask.title,
           description: createDescription || null,
           priority: createTask.priority.toLowerCase(),
+          status: createTask.status,
           dueDate: createTask.dueDate,
           completed: false,
         }),
@@ -537,6 +539,67 @@ export default function TodoPersonalPage() {
     };
   }, [selectedTask]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const updateTaskStatus = async (task: Task, nextStatus: string) => {
+    setTasks((current) =>
+      current.map((item) =>
+        item.id === task.id
+          ? {
+              ...item,
+              status: nextStatus,
+            }
+          : item,
+      ),
+    );
+
+    if (!task.dbId) {
+      return;
+    }
+
+    try {
+      await fetch(`/api/planning/tasks/${task.dbId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+    } catch {
+      // ignore
+    }
+  };
+  const handleKanbanDragOver = (event: React.DragEvent<HTMLUListElement>) => {
+    event.preventDefault();
+  };
+  const handleKanbanDrop = (event: React.DragEvent<HTMLUListElement>) => {
+    event.preventDefault();
+    const nextStatus = event.currentTarget.dataset.status;
+    if (draggedTask && nextStatus && draggedTask.status !== nextStatus) {
+      updateTaskStatus(draggedTask, nextStatus);
+      setDraggedTask(null);
+    }
+  };
+  const handleKanbanDragStart = (event: React.DragEvent<HTMLButtonElement>) => {
+    const taskId = event.currentTarget.dataset.taskId;
+    if (!taskId) {
+      return;
+    }
+    const task = tasks.find((item) => item.id === taskId);
+    if (task) {
+      setDraggedTask(task);
+    }
+  };
+  const handleKanbanDragEnd = () => {
+    setDraggedTask(null);
+  };
+  const handleKanbanTaskOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const taskId = event.currentTarget.dataset.taskId;
+    if (!taskId) {
+      return;
+    }
+    const task = tasks.find((item) => item.id === taskId);
+    if (task) {
+      openTaskDrawer(task);
+    }
+  };
   useEffect(() => {
     const controller = new AbortController();
     fetchTasks(controller.signal)
@@ -637,13 +700,27 @@ export default function TodoPersonalPage() {
             </div>
 
             {/* Tasks Container */}
-            <div className={`p-4 space-y-3 min-h-96 overflow-y-auto ${STATUS_COLORS[status as keyof typeof STATUS_COLORS]}`}>
+            <ul
+              className={`p-4 space-y-3 min-h-96 overflow-y-auto ${STATUS_COLORS[status as keyof typeof STATUS_COLORS]}`}
+              data-status={status}
+              onDragOver={handleKanbanDragOver}
+              onDrop={handleKanbanDrop}
+              aria-label={`${statusLabel} tasks`}
+            >
               {statusTasks.length > 0 ? (
                 statusTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow cursor-pointer"
-                  >
+                  <li key={task.id}>
+                    <button
+                      draggable
+                      data-task-id={task.id}
+                      onDragStart={handleKanbanDragStart}
+                      onDragEnd={handleKanbanDragEnd}
+                      onClick={handleKanbanTaskOpen}
+                      type="button"
+                      className={`w-full text-left bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing ${
+                        draggedTask?.id === task.id ? 'opacity-60' : ''
+                      }`}
+                    >
                     <div className="flex items-start justify-between mb-2">
                       <span className="text-xs font-semibold text-gray-500">{task.id}</span>
                     </div>
@@ -676,14 +753,15 @@ export default function TodoPersonalPage() {
                         </div>
                       )}
                     </div>
-                  </div>
+                    </button>
+                  </li>
                 ))
               ) : (
-                <div className="flex items-center justify-center h-32 text-gray-400">
+                <li className="flex items-center justify-center h-32 text-gray-400">
                   <p className="text-sm">No tasks</p>
-                </div>
+                </li>
               )}
-            </div>
+            </ul>
           </div>
         );
       })}

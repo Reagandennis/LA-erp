@@ -8,6 +8,7 @@ type TaskUpdateInput = {
   title?: string;
   description?: string | null;
   priority?: string;
+  status?: string;
   dueDate?: string | null;
   completed?: boolean;
 };
@@ -17,6 +18,7 @@ type TaskRecord = {
   title: string;
   description: string | null;
   priority: string;
+  status: string;
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
@@ -31,6 +33,7 @@ type PersonalTodoDetailClient = {
       title?: string;
       description?: string | null;
       priority?: string;
+      status?: string;
       dueDate?: Date | null;
       completed?: boolean;
       completedAt?: Date | null;
@@ -62,6 +65,7 @@ function serializeTask(task: TaskRecord) {
     title: task.title,
     description: task.description,
     priority: task.priority,
+    status: task.status,
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -97,6 +101,7 @@ function normalizeUpdateInput(input: TaskUpdateInput) {
             ? input.description
             : null,
       priority: input.priority,
+      status: input.status,
       dueDate,
       completed: input.completed,
       completedAt:

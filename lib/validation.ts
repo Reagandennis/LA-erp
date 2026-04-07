@@ -45,6 +45,7 @@ export const managedUserUpdateSchema = z
   );
 
 export const personalTodoPrioritySchema = z.enum(['low', 'medium', 'high']);
+export const personalTodoStatusSchema = z.enum(['Backlog', 'In progress', 'In review']);
 
 export const personalTodoCreateSchema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(160, 'Title is too long'),
@@ -55,6 +56,7 @@ export const personalTodoCreateSchema = z.object({
     .optional()
     .nullable(),
   priority: personalTodoPrioritySchema.default('medium'),
+  status: personalTodoStatusSchema.default('Backlog'),
   dueDate: z.string().trim().optional().nullable(),
   completed: z.boolean().optional(),
 });
@@ -69,6 +71,7 @@ export const personalTodoUpdateSchema = z
       .optional()
       .nullable(),
     priority: personalTodoPrioritySchema.optional(),
+    status: personalTodoStatusSchema.optional(),
     dueDate: z.string().trim().optional().nullable(),
     completed: z.boolean().optional(),
   })
@@ -77,6 +80,7 @@ export const personalTodoUpdateSchema = z
       value.title !== undefined ||
       value.description !== undefined ||
       value.priority !== undefined ||
+      value.status !== undefined ||
       value.dueDate !== undefined ||
       value.completed !== undefined,
     {

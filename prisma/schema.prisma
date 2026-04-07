@@ -34,6 +34,7 @@ model PersonalTodo {
   title       String
   description String?
   priority    String   @default("medium")
+  status      String   @default("Backlog")
   dueDate     DateTime?
   completed   Boolean  @default(false)
   completedAt DateTime?
