@@ -1,12 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
-
-const PRIORITY_COLORS = {
-  High: 'bg-red-100 text-red-800',
-  Medium: 'bg-yellow-100 text-yellow-800',
-  Low: 'bg-emerald-100 text-emerald-800',
-};
+import React, { useEffect, useRef, useState } from 'react';
 
 const STATUS_COLORS = {
   Backlog: 'bg-gray-50',
@@ -14,10 +8,46 @@ const STATUS_COLORS = {
   'In review': 'bg-green-50',
 };
 
+type MentionUser = {
+  id: string;
+  name: string;
+  initials: string;
+  color: string;
+};
+
+const USER_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500'];
+
+const getInitials = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'NA';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+};
+
+const formatFileSize = (size: number) => {
+  if (!Number.isFinite(size)) {
+    return '0 B';
+  }
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  const kb = size / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  const mb = kb / 1024;
+  if (mb < 1024) {
+    return `${mb.toFixed(1)} MB`;
+  }
+  const gb = mb / 1024;
+  return `${gb.toFixed(1)} GB`;
+};
+
 type ViewType = 'list' | 'kanban' | 'gantt' | 'calendar' | 'dashboard';
 
 type Task = {
   id: string;
+  dbId?: number | null;
   title: string;
   priority: 'High' | 'Medium' | 'Low';
   list: string;
@@ -26,33 +56,526 @@ type Task = {
   assignees: number;
 };
 
+type Subtask = {
+  id: string;
+  title: string;
+  completed: boolean;
+};
+
+type CommentItem = {
+  id: string;
+  author: string;
+  time: string;
+  text: string;
+};
+
+type AttachmentItem = {
+  id: number;
+  filename: string;
+  size: number;
+  mimeType: string;
+  createdAt: string;
+};
+
+type NotificationItem = {
+  id: number;
+  todoId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+type ApiComment = {
+  id: number;
+  text: string;
+  author: string;
+  createdAt: string;
+};
+
+type ApiTask = {
+  id: number;
+  isShared?: boolean;
+  title: string;
+  description: string | null;
+  priority: string;
+  dueDate: string | null;
+  completed: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
+  try {
+    const response = await fetch('/api/planning/tasks', {
+      credentials: 'include',
+      signal,
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const data = (await response.json().catch(() => null)) as { tasks?: ApiTask[] } | null;
+    const apiTasks = data?.tasks ?? [];
+    return apiTasks.map((task) => {
+      const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : null;
+      const status = task.completed ? 'In review' : 'Backlog';
+      const priority = task.priority
+        ? (task.priority[0].toUpperCase() + task.priority.slice(1))
+        : 'Medium';
+      return {
+        id: `PT-${task.id}`,
+        dbId: task.id,
+        title: task.title,
+        priority: priority as Task['priority'],
+        list: task.isShared ? 'Shared' : 'Personal',
+        dueDate,
+        status,
+        assignees: 0,
+      };
+    });
+  } catch {
+    return [];
+  }
+};
+
 export default function TodoPersonalPage() {
   const [activeView, setActiveView] = useState<ViewType>('kanban');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editedTask, setEditedTask] = useState<Task | null>(null);
-  const [subtasks, setSubtasks] = useState<Array<{ id: string; title: string; completed: boolean }>>([]);
-  const [notes, setNotes] = useState<string>('');
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
+  const [subtasksByTask, setSubtasksByTask] = useState<Record<string, Subtask[]>>({});
+  const [commentsByTask, setCommentsByTask] = useState<Record<string, CommentItem[]>>({});
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [attachmentsByTask, setAttachmentsByTask] = useState<Record<string, AttachmentItem[]>>({});
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [commentInput, setCommentInput] = useState<string>('');
+  const loadComments = async (task: Task) => {
+    if (!task.dbId) {
+      setComments([]);
+      setCommentsByTask((current) => ({
+        ...current,
+        [task.id]: [],
+      }));
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/planning/tasks/${task.dbId}/comments`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json().catch(() => null)) as { comments?: ApiComment[] } | null;
+      const mapped = (data?.comments ?? []).map((comment) => ({
+        id: String(comment.id),
+        author: comment.author,
+        time: new Date(comment.createdAt).toLocaleString(),
+        text: comment.text,
+      }));
+      setComments(mapped);
+      setCommentsByTask((current) => ({
+        ...current,
+        [task.id]: mapped,
+      }));
+    } catch {
+      // ignore
+    }
+  };
+  const toggleLegacySubtask = (subtaskId: string) => {
+    updateSubtasks(
+      subtasks.map((subtask) =>
+        subtask.id === subtaskId
+          ? {
+              ...subtask,
+              completed: !subtask.completed,
+            }
+          : subtask,
+      ),
+    );
+  };
+  const removeLegacySubtask = (subtaskId: string) => {
+    updateSubtasks(subtasks.filter((subtask) => subtask.id !== subtaskId));
+  };
+  const updateSubtasks = (next: Subtask[]) => {
+    setSubtasks(next);
+    if (selectedTask) {
+      setSubtasksByTask((current) => ({
+        ...current,
+        [selectedTask.id]: next,
+      }));
+    }
+  };
+  const openTaskDrawer = (task: Task) => {
+    setSelectedTask(task);
+    setEditedTask({ ...task });
+    updateSubtasks(subtasksByTask[task.id] ?? []);
+    if (commentsByTask[task.id]) {
+      setComments(commentsByTask[task.id] ?? []);
+    } else {
+      void loadComments(task);
+    }
+    setAttachments(attachmentsByTask[task.id] ?? []);
+    setCommentInput('');
+  };
+  const handleSendComment = async () => {
+    if (!selectedTask || !commentInput.trim()) {
+      return;
+    }
+    if (!selectedTask.dbId) {
+      return;
+    }
+    const mentionedUserIds = availableUsers
+      .filter((user) => commentInput.toLowerCase().includes(`@${user.name.toLowerCase()}`))
+      .map((user) => Number(user.id))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    try {
+      const response = await fetch(`/api/planning/tasks/${selectedTask.dbId}/comments`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: commentInput.trim(),
+          userIds: Array.from(new Set(mentionedUserIds)),
+        }),
+      });
+      if (!response.ok) {
+        return;
+      }
+      setCommentInput('');
+      await loadComments(selectedTask);
+      await fetch('/api/planning/notifications', { credentials: 'include' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.notifications) {
+            setNotifications(data.notifications as NotificationItem[]);
+          }
+        })
+        .catch(() => {
+          // ignore
+        });
+    } catch {
+      // ignore
+    }
+  };
+  const toggleTaggedUser = (userId: string) => {
+    setTaggedUsers((current) =>
+      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId],
+    );
+  };
+  const toggleCreateTaggedUser = (userId: string) => {
+    setCreateTaggedUsers((current) =>
+      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId],
+    );
+  };
+  const handleNotesChange = (value: string) => {
+    setCommentInput(value);
+    const mentionMatch = /@([\w-]*)$/.exec(value);
+    if (mentionMatch) {
+      setMentionQuery(mentionMatch[1]);
+      setShowMentions(true);
+    } else {
+      setShowMentions(false);
+    }
+  };
+  const handleCreateNotesChange = (value: string) => {
+    setCreateNotes(value);
+    const mentionMatch = /@([\w-]*)$/.exec(value);
+    if (mentionMatch) {
+      setCreateMentionQuery(mentionMatch[1]);
+      setShowCreateMentions(true);
+    } else {
+      setShowCreateMentions(false);
+    }
+  };
+  const applyMention = (name: string) => {
+    setCommentInput((current) => current.replace(/@[\w-]*$/, `@${name} `));
+    setShowMentions(false);
+  };
+  const applyCreateMention = (name: string) => {
+    setCreateNotes((current) => current.replace(/@[\w-]*$/, `@${name} `));
+    setShowCreateMentions(false);
+  };
+  const resetCreateDrawer = () => {
+    setCreateTask({
+      id: '',
+      title: '',
+      priority: 'Medium',
+      list: '',
+      dueDate: null,
+      status: 'Backlog',
+      assignees: 0,
+    });
+    setCreateSubtasks([]);
+    setCreateNotes('');
+    setCreateDescription('');
+    setCreateDueTime('');
+    setCreateAttachments([]);
+    setCreateError('');
+  };
+  const handleCreateDrawerSave = async () => {
+    if (!createTask.title.trim()) {
+      return;
+    }
+    setCreateError('');
+    const generatedId = createTask.id.trim() || `NT-${createIdRef.current++}`;
+    let createdDbId: number | null = null;
+
+    try {
+      const response = await fetch('/api/planning/tasks', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: createTask.title,
+          description: createDescription || null,
+          priority: createTask.priority.toLowerCase(),
+          dueDate: createTask.dueDate,
+          completed: false,
+        }),
+      });
+
+      if (!response.ok) {
+        setCreateError('Unable to save task. Please sign in again.');
+        return;
+      }
+      const data = (await response.json().catch(() => null)) as { task?: { id: number } } | null;
+      createdDbId = data?.task?.id ?? null;
+    } catch {
+      setCreateError('Unable to save task. Please try again.');
+      return;
+    }
+
+    if (!createdDbId) {
+      setCreateError('Unable to save task. Please try again.');
+      return;
+    }
+
+    if (createdDbId && createAttachments.length > 0) {
+      try {
+        const formData = new FormData();
+        createAttachments.forEach((file) => formData.append('files', file));
+        await fetch(`/api/planning/tasks/${createdDbId}/attachments`, {
+          method: 'POST',
+          credentials: 'include',
+          body: formData,
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchTasks()
+      .then((nextTasks) => {
+        setTasks(nextTasks);
+      })
+      .catch(() => {
+        // ignore
+      });
+    if (createSubtasks.length > 0) {
+      setSubtasksByTask((current) => ({
+        ...current,
+        [generatedId]: createSubtasks,
+      }));
+    }
+    if (createNotes.trim().length > 0) {
+      const seededComment: CommentItem = {
+        id: `${generatedId}-c-${createIdRef.current++}`,
+        author: 'You',
+        time: 'just now',
+        text: createNotes.trim(),
+      };
+      setCommentsByTask((current) => ({
+        ...current,
+        [generatedId]: [seededComment],
+      }));
+    }
+    setShowCreateDrawer(false);
+    resetCreateDrawer();
+  };
+  const addCreateSubtask = () => {
+    if (!createSubtaskTitle.trim()) {
+      return;
+    }
+    setCreateSubtasks((current) => [
+      ...current,
+      { id: `${createIdRef.current++}`, title: createSubtaskTitle.trim(), completed: false },
+    ]);
+    setCreateSubtaskTitle('');
+  };
+  const toggleCreateSubtask = (subtaskId: string) => {
+    setCreateSubtasks((current) =>
+      current.map((item) =>
+        item.id === subtaskId
+          ? {
+              ...item,
+              completed: !item.completed,
+            }
+          : item,
+      ),
+    );
+  };
+  const removeCreateSubtask = (subtaskId: string) => {
+    setCreateSubtasks((current) => current.filter((item) => item.id !== subtaskId));
+  };
+
   const [description, setDescription] = useState<string>('');
   const [dueTime, setDueTime] = useState<string>('');
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([
-    { id: 'KY-473', title: 'Define User Personas', priority: 'High', list: 'USER', dueDate: 'Mon, 15 May 2026', status: 'Backlog', assignees: 5 },
-    { id: 'AB-156', title: 'Evaluate Market Trends', priority: 'Medium', list: 'Research', dueDate: 'Tue, 16 May 2026', status: 'Backlog', assignees: 4 },
-    { id: 'OR-020', title: 'Gather User Feedback', priority: 'Low', list: 'USER', dueDate: 'Wed, 17 May 2026', status: 'Backlog', assignees: 3 },
-    { id: 'LM-204', title: 'Optimize Content Strategy', priority: 'Low', list: 'Marketing', dueDate: null, status: 'Backlog', assignees: 2 },
-    { id: 'ST-858', title: 'Assess User Engagement', priority: 'Low', list: 'USER', dueDate: null, status: 'Backlog', assignees: 3 },
-    
-    { id: 'OH-312', title: 'Map User Journeys', priority: 'High', list: 'USER', dueDate: 'Thu, 18 May 2026', status: 'In progress', assignees: 4 },
-    { id: 'EF-928', title: 'Analyze Traffic Sources', priority: 'Medium', list: 'Marketing', dueDate: null, status: 'In progress', assignees: 2 },
-    { id: 'YZ-466', title: 'Implement Analytics Tools', priority: 'Medium', list: 'Marketing', dueDate: null, status: 'In progress', assignees: 3 },
-    { id: 'CD-587', title: 'Conduct Usability Testing', priority: 'Low', list: 'USER', dueDate: 'Fri, 19 May 2026', status: 'In progress', assignees: 4 },
-    { id: 'WK-123', title: 'Refine User Interface', priority: 'Low', list: 'UI Design', dueDate: 'Sun, 21 May 2026', status: 'In progress', assignees: 3 },
-    { id: 'OP-789', title: 'Launch Beta Testing', priority: 'Low', list: 'Beta Testing', dueDate: 'Mon, 22 May 2026', status: 'In progress', assignees: 2 },
-    
-    { id: 'JK-341', title: 'Create Wireframes', priority: 'High', list: 'UI Design', dueDate: 'Sat, 20 May 2026', status: 'In review', assignees: 4 },
-    { id: 'UV-678', title: 'Run A/B Testing', priority: 'High', list: 'Beta Testing', dueDate: 'Tue, 23 May 2026', status: 'In review', assignees: 3 },
-    { id: 'MJ-045', title: 'Develop Feature Roadmap', priority: 'Low', list: 'Big Picture', dueDate: 'Wed, 24 May 2026', status: 'In review', assignees: 2 },
-  ]);
+  const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string>('');
+  const [showMentions, setShowMentions] = useState(false);
+  const [showCreateDrawer, setShowCreateDrawer] = useState(false);
+  const [createTask, setCreateTask] = useState<Task>({
+    id: '',
+    title: '',
+    priority: 'Medium',
+    list: '',
+    dueDate: null,
+    status: 'Backlog',
+    assignees: 0,
+  });
+  const [createSubtasks, setCreateSubtasks] = useState<Array<{ id: string; title: string; completed: boolean }>>([]);
+  const [createSubtaskTitle, setCreateSubtaskTitle] = useState<string>('');
+  const [createNotes, setCreateNotes] = useState<string>('');
+  const [createDescription, setCreateDescription] = useState<string>('');
+  const [createDueTime, setCreateDueTime] = useState<string>('');
+  const [createAttachments, setCreateAttachments] = useState<File[]>([]);
+  const [createError, setCreateError] = useState<string>('');
+  const createIdRef = useRef(1000);
+  const [createTaggedUsers, setCreateTaggedUsers] = useState<string[]>([]);
+  const [createMentionQuery, setCreateMentionQuery] = useState<string>('');
+  const [showCreateMentions, setShowCreateMentions] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<MentionUser[]>([]);
+  useEffect(() => {
+    let isActive = true;
+    const loadUsers = async () => {
+      try {
+        const response = await fetch('/api/users/mentions', { credentials: 'include' });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json().catch(() => null)) as
+          | { users?: Array<{ id: number; name: string | null; email: string }> }
+          | null;
+        const users = (data?.users ?? []).map((user, index) => {
+          const name = user.name || user.email.split('@')[0] || 'Unknown';
+          return {
+            id: String(user.id),
+            name,
+            initials: getInitials(name),
+            color: USER_COLORS[index % USER_COLORS.length],
+          } as MentionUser;
+        });
+        if (isActive) {
+          setAvailableUsers(users);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void loadUsers();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTask) {
+      return;
+    }
+
+    let isActive = true;
+
+    const loadAttachments = async () => {
+      if (!selectedTask.dbId) {
+        if (isActive) {
+          setAttachments([]);
+          setAttachmentsByTask((current) => ({
+            ...current,
+            [selectedTask.id]: [],
+          }));
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/planning/tasks/${selectedTask.dbId}/attachments`, {
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json().catch(() => null)) as { attachments?: AttachmentItem[] } | null;
+        if (!isActive) {
+          return;
+        }
+        const nextAttachments = data?.attachments ?? [];
+        setAttachments(nextAttachments);
+        setAttachmentsByTask((current) => ({
+          ...current,
+          [selectedTask.id]: nextAttachments,
+        }));
+      } catch {
+        // ignore
+      }
+    };
+
+    void loadAttachments();
+    const interval = setInterval(() => {
+      void loadAttachments();
+    }, 5000);
+
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [selectedTask]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchTasks(controller.signal)
+      .then((nextTasks) => {
+        setTasks(nextTasks);
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadNotifications = async () => {
+      try {
+        const response = await fetch('/api/planning/notifications', { credentials: 'include' });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json().catch(() => null)) as { notifications?: NotificationItem[] } | null;
+        if (!isActive) {
+          return;
+        }
+        setNotifications(data?.notifications ?? []);
+      } catch {
+        // ignore
+      }
+    };
+
+    loadNotifications().catch(() => {
+      // ignore
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   const statuses = ['Backlog', 'In progress', 'In review'];
 
@@ -179,13 +702,11 @@ export default function TodoPersonalPage() {
               onDragStart={() => setDraggedTask(task)}
               onDragEnd={() => setDraggedTask(null)}
               onClick={() => {
-                setSelectedTask(task);
-                setEditedTask({ ...task });
+                openTaskDrawer(task);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
-                  setSelectedTask(task);
-                  setEditedTask({ ...task });
+                  openTaskDrawer(task);
                 }
               }}
               className={`w-full text-left p-4 flex items-center justify-between hover:bg-gray-50 transition-colors cursor-grab active:cursor-grabbing ${
@@ -229,7 +750,7 @@ export default function TodoPersonalPage() {
               setSelectedTask(null);
               setEditedTask(null);
               setSubtasks([]);
-              setNotes('');
+              setCommentInput('');
               setDescription('');
               setDueTime('');
             }}
@@ -239,7 +760,7 @@ export default function TodoPersonalPage() {
                 setSelectedTask(null);
                 setEditedTask(null);
                 setSubtasks([]);
-                setNotes('');
+                setCommentInput('');
                 setDescription('');
                 setDueTime('');
               }
@@ -308,6 +829,33 @@ export default function TodoPersonalPage() {
                 <div className="flex -space-x-2">
                   {renderAssignees(editedTask.assignees)}
                 </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {availableUsers.map((user: MentionUser) => {
+                    const isTagged = taggedUsers.includes(user.id);
+                    return (
+                      <button
+                        key={user.id}
+                        type="button"
+                        onClick={() => toggleTaggedUser(user.id)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                          isTagged
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                            : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-200'
+                        }`}
+                      >
+                        <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
+                          {user.initials}
+                        </div>
+                        {user.name}
+                        {isTagged && (
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
+                          </svg>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Timeline Date */}
@@ -343,32 +891,32 @@ export default function TodoPersonalPage() {
                   <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z" />
                   </svg>
-                  <p className="text-sm font-semibold text-gray-900">Attachments (2)</p>
+                  <p className="text-sm font-semibold text-gray-900">Attachments ({attachments.length})</p>
                 </div>
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors">
-                    <div className="w-10 h-10 bg-indigo-500 rounded flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-900">Quality-Testing-Task.pdf</p>
-                      <p className="text-xs text-gray-500">12.40 MB • Preview</p>
-                    </div>
+                {attachments.length === 0 ? (
+                  <p className="text-sm text-gray-500">No attachments yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {attachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                      >
+                        <div className="w-10 h-10 bg-indigo-500 rounded flex items-center justify-center">
+                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">{attachment.filename}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatFileSize(attachment.size)} • {new Date(attachment.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors">
-                    <div className="w-10 h-10 bg-blue-500 rounded flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-900">test-cases.xlsx</p>
-                      <p className="text-xs text-gray-500">2.34 MB • Preview</p>
-                    </div>
-                  </div>
-                </div>
+                )}
                 <button className="w-full mt-3 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 transition-colors flex items-center justify-center gap-2">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -380,24 +928,71 @@ export default function TodoPersonalPage() {
               {/* Comments */}
               <div className="mb-6 pb-6 border-b border-gray-200">
                 <div className="flex items-center justify-between mb-4">
-                  <p className="text-sm font-semibold text-gray-900">Comment (2)</p>
-                  <button className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">See All</button>
+                  <p className="text-sm font-semibold text-gray-900">Comments ({comments.length})</p>
                 </div>
                 <div className="space-y-4">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="w-8 h-8 rounded-full bg-gray-300 shrink-0"></div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">Olivier Giroud</p>
-                        <p className="text-xs text-gray-500">11 minute ago</p>
+                  {comments.length === 0 ? (
+                    <p className="text-sm text-gray-500">No comments yet.</p>
+                  ) : (
+                    comments.map((comment) => (
+                      <div key={comment.id}>
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-8 h-8 rounded-full bg-gray-300 shrink-0"></div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{comment.author}</p>
+                            <p className="text-xs text-gray-500">{comment.time}</p>
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-600 ml-11">{comment.text}</p>
                       </div>
-                    </div>
-                    <p className="text-sm text-gray-600 ml-11">This task is crucial for ensuring the successful deployment of the new software version. It is essential to conduct thorough testing to identify and address any issues before the release.</p>
-                    <div className="flex gap-4 ml-11 mt-2">
-                      <button className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">Reply Comment</button>
-                      <button className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">Link Comment</button>
-                    </div>
+                    ))
+                  )}
+                </div>
+                <div className="mt-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={commentInput}
+                      onChange={(e) => handleNotesChange(e.target.value)}
+                      placeholder="Write a comment..."
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendComment}
+                      className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                      aria-label="Send comment"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12l16-8-4 8 4 8-16-8z" />
+                      </svg>
+                    </button>
                   </div>
+                  {showMentions && (
+                    <div className="mt-2 border border-gray-200 rounded-lg bg-white shadow-sm max-h-40 overflow-y-auto">
+                      {availableUsers
+                        .filter((user: MentionUser) =>
+                          user.name.toLowerCase().includes(mentionQuery.toLowerCase()),
+                        )
+                        .map((user: MentionUser) => (
+                          <button
+                            key={user.id}
+                            type="button"
+                            onClick={() => applyMention(user.name)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50"
+                          >
+                            <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
+                              {user.initials}
+                            </div>
+                            <span className="text-sm text-gray-700">{user.name}</span>
+                          </button>
+                        ))}
+                      {availableUsers.filter((user: MentionUser) =>
+                        user.name.toLowerCase().includes(mentionQuery.toLowerCase()),
+                      ).length === 0 && (
+                        <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -416,9 +1011,7 @@ export default function TodoPersonalPage() {
                         type="checkbox"
                         checked={subtask.completed}
                         onChange={() => {
-                          setSubtasks(subtasks.map(st => 
-                            st.id === subtask.id ? { ...st, completed: !st.completed } : st
-                          ));
+                          toggleLegacySubtask(subtask.id);
                         }}
                         className="w-4 h-4 mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                       />
@@ -426,10 +1019,10 @@ export default function TodoPersonalPage() {
                         <p className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
                           {subtask.title}
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">Evaluate the software's speed, responsiveness, and resource usage</p>
+                        <p className="text-xs text-gray-500 mt-1">Evaluate the software&apos;s speed, responsiveness, and resource usage</p>
                       </div>
                       <button
-                        onClick={() => setSubtasks(subtasks.filter(st => st.id !== subtask.id))}
+                        onClick={() => removeLegacySubtask(subtask.id)}
                         className="text-gray-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -441,18 +1034,6 @@ export default function TodoPersonalPage() {
                 </div>
               </div>
 
-              {/* Notes/Description */}
-              <div className="mb-6">
-                <label htmlFor="drawer-notes" className="block text-sm font-semibold text-gray-900 mb-3">Notes</label>
-                <textarea
-                  id="drawer-notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Add notes..."
-                  rows={4}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
-                />
-              </div>
             </div>
 
             {/* Footer */}
@@ -464,7 +1045,7 @@ export default function TodoPersonalPage() {
                   setSelectedTask(null);
                   setEditedTask(null);
                   setSubtasks([]);
-                  setNotes('');
+                  setCommentInput('');
                   setDescription('');
                   setDueTime('');
                 }}
@@ -478,7 +1059,7 @@ export default function TodoPersonalPage() {
                     setSelectedTask(null);
                     setEditedTask(null);
                     setSubtasks([]);
-                    setNotes('');
+                    setCommentInput('');
                     setDescription('');
                     setDueTime('');
                   }}
@@ -492,7 +1073,7 @@ export default function TodoPersonalPage() {
                     setSelectedTask(null);
                     setEditedTask(null);
                     setSubtasks([]);
-                    setNotes('');
+                    setCommentInput('');
                     setDescription('');
                     setDueTime('');
                   }}
@@ -776,6 +1357,21 @@ export default function TodoPersonalPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
+        {notifications.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-900">
+            <p className="text-sm font-semibold mb-2">Shared with you</p>
+            <div className="space-y-2">
+              {notifications.slice(0, 3).map((notification) => (
+                <div key={notification.id} className="text-sm text-emerald-800">
+                  {notification.message}
+                  <span className="ml-2 text-xs text-emerald-600">
+                    {new Date(notification.createdAt).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 mb-8">
           <div>
@@ -794,6 +1390,18 @@ export default function TodoPersonalPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 00-1 1v2.586a1 1 0 00.293.707l6.414 6.414a1 1 0 00.293.707V21a1 1 0 001 1h2a1 1 0 001-1v-6.293a1 1 0 00.293-.707l6.414-6.414a1 1 0 00.293-.707V5a1 1 0 00-1-1h-9z" />
               </svg>
               Sort
+            </button>
+            <button
+              onClick={() => {
+                resetCreateDrawer();
+                setShowCreateDrawer(true);
+              }}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 text-sm font-medium"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Create Task
             </button>
           </div>
         </div>
@@ -822,6 +1430,287 @@ export default function TodoPersonalPage() {
         {activeView === 'gantt' && renderGanttView()}
         {activeView === 'calendar' && renderCalendarView()}
         {activeView === 'dashboard' && renderDashboardView()}
+
+        {showCreateDrawer && (
+          <>
+            <button
+              type="button"
+              className="fixed inset-0 backdrop-blur-sm z-40 transition-opacity duration-300 cursor-default"
+              onClick={() => {
+                setShowCreateDrawer(false);
+                resetCreateDrawer();
+              }}
+              aria-label="Close create task drawer"
+            />
+
+            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+                <p className="text-xs text-gray-500">Create new task</p>
+                <button
+                  onClick={() => {
+                    setShowCreateDrawer(false);
+                    resetCreateDrawer();
+                  }}
+                  className="p-2 text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-6">
+                <div className="mb-6">
+                  <div className="flex items-center gap-3 mb-3">
+                    <select
+                      value={createTask.priority}
+                      onChange={(e) => setCreateTask((current) => ({ ...current, priority: e.target.value as Task['priority'] }))}
+                      className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold"
+                    >
+                      <option value="High">High</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Low">Low</option>
+                    </select>
+                    <select
+                      value={createTask.status}
+                      onChange={(e) => setCreateTask((current) => ({ ...current, status: e.target.value }))}
+                      className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold"
+                    >
+                      <option value="Backlog">Backlog</option>
+                      <option value="In progress">In progress</option>
+                      <option value="In review">In review</option>
+                    </select>
+                  </div>
+                  <input
+                    value={createTask.title}
+                    onChange={(e) => setCreateTask((current) => ({ ...current, title: e.target.value }))}
+                    placeholder="Task title"
+                    className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-emerald-500"
+                  />
+                  <textarea
+                    value={createDescription}
+                    onChange={(e) => setCreateDescription(e.target.value)}
+                    placeholder="Add a detailed description..."
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                  />
+                  {createError && (
+                    <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                      {createError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197" />
+                    </svg>
+                    <p className="text-sm font-semibold text-gray-900">Assignees</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {availableUsers.map((user: MentionUser) => {
+                      const isTagged = createTaggedUsers.includes(user.id);
+                      return (
+                        <button
+                          key={user.id}
+                          type="button"
+                          onClick={() => toggleCreateTaggedUser(user.id)}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                            isTagged
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                              : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-200'
+                          }`}
+                        >
+                          <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
+                            {user.initials}
+                          </div>
+                          {user.name}
+                          {isTagged && (
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z" />
+                    </svg>
+                    <p className="text-sm font-semibold text-gray-900">Timeline Date</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="date"
+                      value={createTask.dueDate ?? ''}
+                      onChange={(e) => setCreateTask((current) => ({ ...current, dueDate: e.target.value || null }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <input
+                      type="time"
+                      value={createDueTime}
+                      onChange={(e) => setCreateDueTime(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z" />
+                    </svg>
+                    <p className="text-sm font-semibold text-gray-900">Type</p>
+                  </div>
+                  <input
+                    value={createTask.list}
+                    onChange={(e) => setCreateTask((current) => ({ ...current, list: e.target.value }))}
+                    placeholder="Task type"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z" />
+                    </svg>
+                    <p className="text-sm font-semibold text-gray-900">Attachments</p>
+                  </div>
+                  <label className="w-full flex flex-col items-center justify-center gap-2 px-4 py-6 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 transition-colors cursor-pointer">
+                    <input
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => setCreateAttachments(Array.from(e.target.files ?? []))}
+                    />
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span className="text-sm font-medium">Add attachments (any file type)</span>
+                  </label>
+                  {createAttachments.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {createAttachments.map((file) => (
+                        <div key={file.name} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
+                          <span className="truncate">{file.name}</span>
+                          <span className="text-xs text-gray-500">{Math.round(file.size / 1024)} KB</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
+                    </svg>
+                    <p className="text-sm font-semibold text-gray-900">Subtasks</p>
+                  </div>
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      value={createSubtaskTitle}
+                      onChange={(e) => setCreateSubtaskTitle(e.target.value)}
+                      placeholder="New subtask"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={addCreateSubtask}
+                      className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {createSubtasks.map((subtask) => (
+                      <div key={subtask.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                        <input
+                          type="checkbox"
+                          checked={subtask.completed}
+                          onChange={() => toggleCreateSubtask(subtask.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <p className="flex-1 text-sm text-gray-900">{subtask.title}</p>
+                        <button
+                          type="button"
+                          onClick={() => removeCreateSubtask(subtask.id)}
+                          className="text-gray-300 hover:text-red-600"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <label htmlFor="create-notes" className="block text-sm font-semibold text-gray-900 mb-3">Notes</label>
+                  <textarea
+                    id="create-notes"
+                    value={createNotes}
+                    onChange={(e) => handleCreateNotesChange(e.target.value)}
+                    placeholder="Add notes..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                  />
+                  {showCreateMentions && (
+                    <div className="mt-2 border border-gray-200 rounded-lg bg-white shadow-sm max-h-40 overflow-y-auto">
+                      {availableUsers
+                        .filter((user: MentionUser) =>
+                          user.name.toLowerCase().includes(createMentionQuery.toLowerCase()),
+                        )
+                        .map((user: MentionUser) => (
+                        <button
+                          key={user.id}
+                          type="button"
+                          onClick={() => applyCreateMention(user.name)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50"
+                        >
+                          <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
+                            {user.initials}
+                          </div>
+                          <span className="text-sm text-gray-700">{user.name}</span>
+                        </button>
+                      ))}
+                      {availableUsers.filter((user: MentionUser) =>
+                        user.name.toLowerCase().includes(createMentionQuery.toLowerCase()),
+                      ).length === 0 && (
+                        <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6 space-y-3">
+                <button
+                  onClick={handleCreateDrawerSave}
+                  className="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold transition-colors"
+                >
+                  Save Task
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCreateDrawer(false);
+                    resetCreateDrawer();
+                  }}
+                  className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

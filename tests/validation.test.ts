@@ -4,6 +4,8 @@ import {
   loginSchema,
   managedUserSchema,
   managedUserUpdateSchema,
+  personalTodoCreateSchema,
+  personalTodoUpdateSchema,
 } from '../lib/validation';
 
 describe('validation schemas', () => {
@@ -30,6 +32,21 @@ describe('validation schemas', () => {
 
   it('rejects empty managed-user update payloads', () => {
     const result = managedUserUpdateSchema.safeParse({});
+
+    expect(result.success).toBe(false);
+  });
+
+  it('requires a title for personal todo creation', () => {
+    const result = personalTodoCreateSchema.safeParse({
+      title: '   ',
+      priority: 'medium',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects empty personal todo updates', () => {
+    const result = personalTodoUpdateSchema.safeParse({});
 
     expect(result.success).toBe(false);
   });

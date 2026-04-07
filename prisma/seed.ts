@@ -1,6 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-
-import { hashPassword } from '../lib/auth';
+import bcrypt from 'bcryptjs';
 import { DEFAULT_MODULES } from '../lib/module-catalog';
 import {
   ADMIN_ROLE_NAME,
@@ -98,7 +97,7 @@ async function seedBootstrapAdmin() {
     );
   }
 
-  const passwordHash = await hashPassword(password);
+  const passwordHash = await bcrypt.hash(password, 12);
   const adminRole = await prisma.role.findUnique({
     where: { name: ADMIN_ROLE_NAME },
   });
