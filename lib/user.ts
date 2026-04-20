@@ -1,3 +1,5 @@
+import 'server-only';
+
 import { Prisma } from '@prisma/client';
 
 import { ADMIN_ROLE_NAME } from './rbac';

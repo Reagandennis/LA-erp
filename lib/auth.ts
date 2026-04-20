@@ -1,8 +1,11 @@
+import 'server-only';
+
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 
 import { prisma } from './prisma';
+import { isPrismaDatabaseUnavailableError } from './prisma-errors';
 import {
   SESSION_COOKIE_NAME,
   getSessionCookieValue,
@@ -73,14 +76,27 @@ async function resolveAuthenticatedUser(token: string | null) {
     return null;
   }
 
-  const session = await prisma.session.findUnique({
-    where: { id: payload.sid },
-    include: {
-      user: {
-        include: userAccessInclude,
+  let session;
+
+  try {
+    session = await prisma.session.findUnique({
+      where: { id: payload.sid },
+      include: {
+        user: {
+          include: userAccessInclude,
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    if (isPrismaDatabaseUnavailableError(error)) {
+      console.warn(
+        '[auth] Database unavailable while resolving the current session. Treating the request as unauthenticated.',
+      );
+      return null;
+    }
+
+    throw error;
+  }
 
   if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) {
     return null;

@@ -12,7 +12,7 @@ export const passwordSchema = z
   .string()
   .min(8, 'Password must be at least 8 characters')
   .regex(/[A-Za-z]/, 'Password must contain at least one letter')
-  .regex(/[0-9]/, 'Password must contain at least one number');
+  .regex(/\d/, 'Password must contain at least one number');
 
 export const loginSchema = z.object({
   email: emailSchema,
@@ -43,3 +43,55 @@ export const managedUserUpdateSchema = z
     message: 'At least one field must be updated',
     },
   );
+
+export const personalTodoPrioritySchema = z.enum(['low', 'medium', 'high']);
+export const personalTodoStatusSchema = z.enum(['Backlog', 'In progress', 'In review']);
+
+export const personalTodoCreateSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(160, 'Title is too long'),
+  description: z
+    .string()
+    .trim()
+    .max(1000, 'Description is too long')
+    .optional()
+    .nullable(),
+  priority: personalTodoPrioritySchema.default('medium'),
+  status: personalTodoStatusSchema.default('Backlog'),
+  dueDate: z.string().trim().optional().nullable(),
+  completed: z.boolean().optional(),
+});
+
+export const personalTodoUpdateSchema = z
+  .object({
+    title: z.string().trim().min(1, 'Title is required').max(160, 'Title is too long').optional(),
+    description: z
+      .string()
+      .trim()
+      .max(1000, 'Description is too long')
+      .optional()
+      .nullable(),
+    priority: personalTodoPrioritySchema.optional(),
+    status: personalTodoStatusSchema.optional(),
+    dueDate: z.string().trim().optional().nullable(),
+    completed: z.boolean().optional(),
+  })
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.description !== undefined ||
+      value.priority !== undefined ||
+      value.status !== undefined ||
+      value.dueDate !== undefined ||
+      value.completed !== undefined,
+    {
+      message: 'At least one field must be updated',
+    },
+  );
+
+export const personalTodoBoardSchema = z.object({
+  columns: z
+    .array(z.string().trim().min(1, 'Column name is required').max(40, 'Column name is too long'))
+    .min(1, 'At least one column is required')
+    .max(20, 'Too many columns'),
+  columnColors: z.record(z.string().trim()).optional(),
+});
