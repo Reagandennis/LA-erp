@@ -83,22 +83,11 @@ async function parseJson(response: Response) {
   return payload;
 }
 
-function toggleId(id: number, selectedIds: number[]) {
+function toggleId(id: number, selectedIds: number[]): number[] {
   if (selectedIds.includes(id)) {
     return selectedIds.filter((value) => value !== id);
   }
-
   return [...selectedIds, id];
-}
-
-function buildRoleAssignments(roleIds: number[], roles: AdminRole[]) {
-  return roles
-    .filter((role) => roleIds.includes(role.id))
-    .map((role) => ({
-      id: role.id,
-      name: role.name,
-      description: role.description,
-    }));
 }
 
 function buildModuleAssignments(moduleIds: number[], modules: AdminModule[]) {
@@ -115,726 +104,579 @@ export default function AdminClient({
   initialLogs,
 }: AdminClientProps) {
   const router = useRouter();
-  const [users, setUsers] = useState(initialUsers);
-  const [roles, setRoles] = useState(initialRoles);
-  const [modules, setModules] = useState(initialModules);
-  const [logs, setLogs] = useState(initialLogs);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(
-    initialUsers[0]?.id ?? null,
-  );
-  const [createForm, setCreateForm] = useState<{
-    name: string;
-    email: string;
-    password: string;
-    status: string;
-    roleIds: number[];
-    moduleIds: number[];
-  }>({
+  const [users, setUsers] = useState<AdminUser[]>(initialUsers);
+  const [roles, setRoles] = useState<AdminRole[]>(initialRoles);
+  const [modules, setModules] = useState<AdminModule[]>(initialModules);
+  const [logs, setLogs] = useState<AdminAuditLog[]>(initialLogs);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'roles' | 'overview'>('users');
+  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  
+  const [createForm, setCreateForm] = useState({
     name: '',
     email: '',
     password: '',
     status: 'active',
-    roleIds: initialRoles
-      .filter((role) => role.name === 'viewer')
-      .map((role) => role.id),
-    moduleIds: [],
+    roleIds: initialRoles.filter((r) => r.name === 'viewer').map((r) => r.id),
+    moduleIds: [] as number[],
   });
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  
+  const [error, setError] = useState<string>('');
+  const [success, setSuccess] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  const selectedUser =
-    users.find((user) => user.id === selectedUserId) ?? users[0] ?? null;
+  const selectedUser = users.find((u) => u.id === selectedUserId) ?? null;
 
   const filteredUsers = users.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase()),
+    (u) =>
+      u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.email.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   const syncData = async () => {
     setIsSyncing(true);
-
     try {
-      const [usersResponse, logsResponse] = await Promise.all([
+      const [usersRes, logsRes] = await Promise.all([
         fetch('/api/admin/users', { credentials: 'include' }),
         fetch('/api/admin/audit', { credentials: 'include' }),
       ]);
-      const [usersPayload, logsPayload] = await Promise.all([
-        parseJson(usersResponse),
-        parseJson(logsResponse),
-      ]);
-
-      setUsers(usersPayload?.users || []);
-      setRoles(usersPayload?.roles || []);
-      setModules(usersPayload?.modules || []);
-      setLogs(logsPayload?.logs || []);
-    } catch (caughtError) {
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to refresh admin data',
-      );
+      const [uPayload, lPayload] = await Promise.all([parseJson(usersRes), parseJson(logsRes)]);
+      setUsers(uPayload?.users || []);
+      setRoles(uPayload?.roles || []);
+      setModules(uPayload?.modules || []);
+      setLogs(lPayload?.logs || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const resetMessages = () => {
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
     setSuccess('');
-  };
-
-  const handleCreateUser = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    resetMessages();
     setIsSubmitting(true);
-
     try {
-      const response = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(createForm),
       });
-      const payload = await parseJson(response);
-
+      const payload = await parseJson(res);
       if (payload?.user) {
-        setUsers((currentUsers) => [payload.user as AdminUser, ...currentUsers]);
-        setSelectedUserId((payload.user as AdminUser).id);
-        setCreateForm({
-          name: '',
-          email: '',
-          password: '',
-          status: 'active',
-          roleIds: roles.filter((role) => role.name === 'viewer').map((role) => role.id),
-          moduleIds: [],
-        });
-        setSuccess('User created successfully');
+        setUsers([payload.user as AdminUser, ...users]);
+        setShowCreateModal(false);
+        setSuccess('Account deployed successfully');
         await syncData();
       }
-    } catch (caughtError) {
-      setError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to create user',
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Creation failed');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleStatusChange = async (userId: number, status: string) => {
-    resetMessages();
-
     try {
-      const response = await fetch(`/api/admin/users/${userId}`, {
+      const res = await fetch(`/api/admin/users/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ status }),
       });
-      const payload = await parseJson(response);
-
+      const payload = await parseJson(res);
       if (payload?.user) {
-        setUsers((currentUsers) =>
-          currentUsers.map((user) => (user.id === userId ? payload.user! : user)),
-        );
-        setSuccess('User status updated');
-
-        if (userId === currentUserId) {
-          startTransition(() => {
-            router.refresh();
-          });
-        }
-
+        setUsers(users.map((u) => (u.id === userId ? (payload.user as AdminUser) : u)));
+        setSuccess('Status synchronized');
+        if (userId === currentUserId) startTransition(() => router.refresh());
         await syncData();
       }
-    } catch (caughtError) {
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to update user status',
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Update failed');
     }
   };
 
-  const handleAccessSave = async (
-    userId: number,
-    roleIds: number[],
-    moduleIds: number[],
-  ) => {
-    resetMessages();
-
+  const handleAccessSave = async (userId: number, rIds: number[], mIds: number[]) => {
     try {
-      const response = await fetch(`/api/admin/users/${userId}`, {
+      const res = await fetch(`/api/admin/users/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ roleIds, moduleIds }),
+        body: JSON.stringify({ roleIds: rIds, moduleIds: mIds }),
       });
-      const payload = await parseJson(response);
-
+      const payload = await parseJson(res);
       if (payload?.user) {
-        setUsers((currentUsers) =>
-          currentUsers.map((user) => (user.id === userId ? payload.user! : user)),
-        );
-        setSuccess('Roles and module access updated');
-
-        if (userId === currentUserId) {
-          startTransition(() => {
-            router.refresh();
-          });
-        }
-
+        setUsers(users.map((u) => (u.id === userId ? (payload.user as AdminUser) : u)));
+        setSuccess('Privileges updated');
+        if (userId === currentUserId) startTransition(() => router.refresh());
         await syncData();
       }
-    } catch (caughtError) {
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to update user access',
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed');
     }
   };
 
   const handleDeleteUser = async (userId: number) => {
-    resetMessages();
-
-    if (!globalThis.confirm('Delete this account permanently?')) {
-      return;
-    }
-
+    if (!globalThis.confirm('Permanently revoke this identity?')) return;
     try {
-      const response = await fetch(`/api/admin/users/${userId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-
-      await parseJson(response);
-      const remainingUsers = users.filter((user) => user.id !== userId);
-
-      setUsers(remainingUsers);
-      setSelectedUserId(remainingUsers[0]?.id ?? null);
-      setSuccess('User deleted');
+      const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE', credentials: 'include' });
+      await parseJson(res);
+      setUsers(users.filter((u) => u.id !== userId));
+      setSelectedUserId(null);
+      setSuccess('Identity purged');
       await syncData();
-    } catch (caughtError) {
-      setError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to delete user',
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Purge failed');
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-sm uppercase tracking-[0.25em] text-emerald-600 mb-1">
-              Admin workspace
-            </p>
-            <h1 className="text-2xl font-bold text-gray-900">User lifecycle and module control</h1>
+    <div className="min-h-screen bg-white">
+      {/* Global Admin Navigation */}
+      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-100">
+        <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-200">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-xl font-black text-gray-900 tracking-tight">System Control</h1>
+              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">Administrative Interface</p>
+            </div>
           </div>
-          <div className="flex gap-3">
-            <Link
-              href="/dashboard"
-              className="px-4 py-2 text-gray-700 hover:text-gray-900 font-medium transition-colors"
-            >
-              Dashboard
-            </Link>
-            <button
-              type="button"
+
+          <div className="flex items-center gap-3">
+            <button 
               onClick={() => void syncData()}
-              className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-black transition-colors font-medium disabled:opacity-60"
               disabled={isSyncing}
+              className="px-4 py-2 bg-gray-50 text-gray-500 hover:text-emerald-600 rounded-xl font-bold text-xs transition-all flex items-center gap-2 border border-gray-100"
             >
-              {isSyncing ? 'Refreshing...' : 'Refresh'}
+              <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {isSyncing ? 'Syncing...' : 'Sync Data'}
             </button>
+            <div className="h-6 w-px bg-gray-100 mx-2" />
+            <Link href="/dashboard" className="px-4 py-2 text-gray-400 hover:text-gray-900 font-bold text-xs uppercase tracking-widest transition-all">Portal</Link>
             <LogoutButton />
           </div>
         </div>
-      </nav>
+      </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+      <main className="max-w-[1600px] mx-auto p-6 lg:p-10">
+        {/* Alerts */}
         {(error || success) && (
-          <div
-            className={`rounded-xl border px-4 py-3 text-sm ${
-              error
-                ? 'border-red-200 bg-red-50 text-red-700'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            }`}
-          >
-            {error || success}
+          <div className={`mb-10 p-4 rounded-2xl border flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 ${
+            error ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${error ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+            <p className="text-sm font-bold">{error || success}</p>
+            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-auto p-1 hover:bg-black/5 rounded">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
         )}
 
-        <section className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="bg-white rounded-2xl shadow p-6">
-            <div className="mb-6">
-              <h2 className="text-xl font-bold text-gray-900">Create managed user</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                Assign one or more modules per user. Administrators still see every
-                module automatically.
-              </p>
-            </div>
+        {/* Tab System */}
+        <div className="flex items-center gap-1 bg-gray-100 p-1.5 rounded-[1.25rem] w-fit mb-10">
+          {(['users', 'audit', 'roles', 'overview'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                activeTab === tab ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
 
-            <form onSubmit={handleCreateUser} className="grid gap-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-2 text-sm text-gray-700">
-                  Full name
+        {/* Content Views */}
+        <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+          {activeTab === 'users' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
+                <div className="relative flex-1 max-w-md">
+                  <svg className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
                   <input
-                    value={createForm.name}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3"
-                    required
+                    type="text"
+                    placeholder="Search identity catalog..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-12 pr-6 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
                   />
-                </label>
-                <label className="grid gap-2 text-sm text-gray-700">
-                  Email
-                  <input
-                    type="email"
-                    value={createForm.email}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        email: event.target.value,
-                      }))
-                    }
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3"
-                    required
-                  />
-                </label>
+                </div>
+                <button 
+                  onClick={() => setShowCreateModal(true)}
+                  className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
+                  </svg>
+                  New Deployment
+                </button>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
-                <label className="grid gap-2 text-sm text-gray-700">
-                  Initial password
-                  <input
-                    type="password"
-                    value={createForm.password}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        password: event.target.value,
-                      }))
-                    }
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3"
-                    placeholder="At least 8 chars with letters and numbers"
-                    required
-                  />
-                </label>
-                <label className="grid gap-2 text-sm text-gray-700">
-                  Status
-                  <select
-                    value={createForm.status}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        status: event.target.value,
-                      }))
-                    }
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3"
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {filteredUsers.map((u) => (
+                  <div
+                    key={u.id}
+                    onClick={() => setSelectedUserId(u.id)}
+                    className="group bg-white p-8 rounded-[2.5rem] border border-gray-100 hover:border-emerald-300 hover:shadow-2xl hover:shadow-emerald-500/5 transition-all duration-300 cursor-pointer relative overflow-hidden"
+                  >
+                    <div className="flex justify-between items-start mb-6">
+                      <div className="w-14 h-14 rounded-2xl bg-gray-900 flex items-center justify-center text-white font-black text-xl shadow-lg transition-transform group-hover:scale-105 duration-300">
+                        {u.name.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${
+                        u.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'
+                      }`}>
+                        {u.status}
+                      </div>
+                    </div>
+                    <h3 className="text-lg font-black text-gray-900 group-hover:text-emerald-700 transition-colors truncate">{u.name}</h3>
+                    <p className="text-xs text-gray-400 font-bold mt-1 truncate mb-6">{u.email}</p>
+                    <div className="flex flex-wrap gap-1.5 mb-6">
+                      {u.roles.map(r => (
+                        <span key={r.id} className="text-[8px] font-black uppercase tracking-widest px-2 py-1 bg-gray-50 text-gray-500 rounded-lg border border-gray-100">
+                          {r.name}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="pt-6 border-t border-gray-50 flex items-center justify-between">
+                      <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">{u.modules.length} Modules</span>
+                      <button className="text-[10px] font-black text-emerald-600 uppercase tracking-widest hover:text-emerald-700">Settings</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'audit' && (
+            <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
+              <div className="p-10 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-900 tracking-tight">Global Audit Log</h2>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Platform-wide trace of administrative & authentication events</p>
+                </div>
+                <div className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100 text-[10px] font-black uppercase tracking-widest">Live Activity</div>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {logs.map((log) => (
+                  <div key={log.id} className="p-8 hover:bg-gray-50 transition-all flex items-start gap-8">
+                    <div className="w-12 h-12 rounded-2xl bg-gray-900 flex items-center justify-center shrink-0 shadow-lg shadow-gray-200">
+                      <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04 transition-all" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-2">
+                        <code className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 uppercase">{log.action}</code>
+                        <span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em]">{log.entityType}</span>
+                      </div>
+                      <p className="text-base font-bold text-gray-900 mb-2">
+                        <span className="text-emerald-600">{log.actor?.email ?? 'SYSTEM'}</span> 
+                        <span className="text-gray-400 mx-2 font-medium">processed</span> 
+                        <span className="text-gray-900">{log.target?.email ?? log.entityId ?? 'internal entity'}</span>
+                      </p>
+                      <div className="flex items-center gap-6 text-[10px] text-gray-400 font-black uppercase tracking-widest">
+                        <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> {new Date(log.createdAt).toLocaleString()}</span>
+                        {log.ipAddress && <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" /></svg> {log.ipAddress}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'roles' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {roles.map(r => (
+                <div key={r.id} className="bg-white p-10 rounded-[3rem] border border-gray-100 shadow-sm relative overflow-hidden group">
+                  <div className="relative z-10">
+                    <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em] mb-4 block">{r.permissions.length} Permissions</span>
+                    <h3 className="text-3xl font-black text-gray-900 capitalize mb-2">{r.name}</h3>
+                    <p className="text-sm text-gray-500 font-medium mb-8 leading-relaxed">{r.description}</p>
+                    <div className="space-y-2">
+                      {r.permissions.slice(0, 5).map(p => (
+                        <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                          <code className="text-[10px] font-black text-gray-700">{p.name}</code>
+                          <span className="text-[9px] font-black text-gray-400 uppercase">{p.action}</span>
+                        </div>
+                      ))}
+                      {r.permissions.length > 5 && <p className="text-[10px] font-black text-gray-300 text-center pt-2">+{r.permissions.length - 5} MORE CAPABILITIES</p>}
+                    </div>
+                  </div>
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -mr-16 -mt-16 group-hover:scale-110 transition-transform" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'overview' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="bg-gray-900 p-12 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden">
+                <h3 className="text-2xl font-black mb-10 relative z-10">Security Distribution</h3>
+                <div className="space-y-8 relative z-10">
+                  <div className="flex items-end justify-between border-b border-white/10 pb-6">
+                    <div>
+                      <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-2">Platform Admins</p>
+                      <p className="text-5xl font-black">{users.filter(u => u.roles.some(r => r.name === 'admin')).length}</p>
+                    </div>
+                    <p className="text-[10px] text-white/40 font-bold max-w-[140px] text-right">Maximum system privileges assigned</p>
+                  </div>
+                  <div className="flex items-end justify-between border-b border-white/10 pb-6">
+                    <div>
+                      <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-2">Suspended Entities</p>
+                      <p className="text-5xl font-black">{users.filter(u => u.status === 'suspended').length}</p>
+                    </div>
+                    <p className="text-[10px] text-white/40 font-bold max-w-[140px] text-right">Identities currently restricted from access</p>
+                  </div>
+                </div>
+                <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl" />
+              </div>
+
+              <div className="bg-white p-12 rounded-[3.5rem] border border-gray-100 shadow-sm flex flex-col justify-between">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 mb-8">System Health</h3>
+                  <div className="grid grid-cols-2 gap-6 mb-10">
+                    <div className="p-6 bg-gray-50 rounded-[2rem]">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Database Hub</p>
+                      <p className="text-lg font-black text-emerald-600 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        Online
+                      </p>
+                    </div>
+                    <div className="p-6 bg-gray-50 rounded-[2rem]">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Audit Pipeline</p>
+                      <p className="text-lg font-black text-emerald-600 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        Operational
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <button className="w-full py-5 bg-gray-900 text-white rounded-[2rem] font-black uppercase tracking-[0.25em] text-xs hover:bg-black transition-all">
+                  Generate Comprehensive Audit
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* User Detail Drawer - Spacious full height right panel */}
+      {selectedUser && (
+        <>
+          <div className="fixed inset-0 bg-gray-900/10 backdrop-blur-sm z-40 transition-opacity" onClick={() => setSelectedUserId(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-xl bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-500 ease-out flex flex-col">
+            <div className="p-10 border-b border-gray-50 bg-gray-900 text-white">
+              <div className="flex justify-between items-start mb-10">
+                <div className="w-20 h-20 rounded-[1.5rem] bg-emerald-500 flex items-center justify-center text-white font-black text-3xl shadow-xl">
+                  {selectedUser.name.substring(0, 2).toUpperCase()}
+                </div>
+                <button onClick={() => setSelectedUserId(null)} className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <h2 className="text-4xl font-black tracking-tight mb-2">{selectedUser.name}</h2>
+              <p className="text-white/50 font-bold text-lg mb-8">{selectedUser.email}</p>
+              <div className="flex items-center gap-4">
+                <div className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20">Identity Active</div>
+                <span className="text-[10px] font-black text-white/30 uppercase tracking-widest">ID: {selectedUser.id}</span>
+              </div>
+            </div>
+
+            <div className="p-10 space-y-12 flex-1">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="p-6 bg-gray-50 rounded-[2rem] border border-gray-100">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Account Lifecycle</p>
+                  <p className="text-sm font-bold text-gray-900">Created {new Date(selectedUser.createdAt).toLocaleDateString()}</p>
+                  <p className="text-xs text-gray-400 font-medium mt-1">Session v{selectedUser.sessionVersion}</p>
+                </div>
+                <div className="p-6 bg-gray-50 rounded-[2rem] border border-gray-100">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Access Status</p>
+                  <select 
+                    value={selectedUser.status}
+                    onChange={(e) => void handleStatusChange(selectedUser.id, e.target.value)}
+                    className="w-full bg-white border-gray-200 rounded-xl py-2 px-3 text-sm font-black uppercase tracking-widest text-gray-900 focus:ring-emerald-500"
                   >
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
                     <option value="suspended">Suspended</option>
                   </select>
-                </label>
-              </div>
-
-              <div>
-                <p className="text-sm font-medium text-gray-700 mb-3">Roles</p>
-                <div className="grid sm:grid-cols-3 gap-3">
-                  {roles.map((role) => {
-                    const checked = createForm.roleIds.includes(role.id);
-
-                    return (
-                      <label
-                        key={role.id}
-                        className={`rounded-2xl border p-4 cursor-pointer transition-colors ${
-                          checked
-                            ? 'border-emerald-500 bg-emerald-50'
-                            : 'border-gray-200 bg-white'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              roleIds: toggleId(role.id, current.roleIds),
-                            }))
-                          }
-                          className="sr-only"
-                        />
-                        <p className="font-semibold text-gray-900 capitalize">{role.name}</p>
-                        <p className="text-sm text-gray-600 mt-1">{role.description}</p>
-                      </label>
-                    );
-                  })}
                 </div>
               </div>
 
               <div>
-                <p className="text-sm font-medium text-gray-700 mb-3">Module access</p>
-                <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3 max-h-80 overflow-y-auto pr-1">
-                  {modules.map((module) => {
-                    const checked = createForm.moduleIds.includes(module.id);
-
+                <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-6 border-b border-gray-100 pb-4">Privilege Mapping</h3>
+                <div className="grid gap-3">
+                  {modules.map((m) => {
+                    const hasAcc = selectedUser.modules.some(x => x.id === m.id);
                     return (
-                      <label
-                        key={module.id}
-                        className={`rounded-2xl border p-4 cursor-pointer transition-colors ${
-                          checked
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 bg-white'
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          const next = toggleId(m.id, selectedUser.modules.map(x => x.id));
+                          setUsers(users.map(u => u.id === selectedUser.id ? { ...u, modules: buildModuleAssignments(next, modules) } : u));
+                        }}
+                        className={`w-full flex items-center justify-between p-5 rounded-[1.5rem] border transition-all ${
+                          hasAcc ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100 hover:bg-gray-50'
                         }`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              moduleIds: toggleId(module.id, current.moduleIds),
-                            }))
-                          }
-                          className="sr-only"
-                        />
-                        <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-                          {module.category}
-                        </p>
-                        <p className="font-semibold text-gray-900">{module.name}</p>
-                        <p className="text-sm text-gray-600 mt-1">{module.description}</p>
-                      </label>
+                        <div className="text-left">
+                          <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">{m.category}</p>
+                          <p className="text-sm font-black text-gray-900">{m.name}</p>
+                        </div>
+                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                          hasAcc ? 'bg-emerald-600 border-emerald-600 shadow-lg shadow-emerald-200' : 'border-gray-200'
+                        }`}>
+                          {hasAcc && <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>}
+                        </div>
+                      </button>
                     );
                   })}
                 </div>
               </div>
+            </div>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="mt-2 inline-flex items-center justify-center px-5 py-3 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-60"
+            <div className="p-10 sticky bottom-0 bg-white border-t border-gray-100 flex flex-col gap-4">
+              <button 
+                onClick={() => void handleAccessSave(selectedUser.id, selectedUser.roles.map(r => r.id), selectedUser.modules.map(m => m.id))}
+                className="w-full py-5 bg-emerald-600 text-white rounded-[2rem] font-black uppercase tracking-[0.25em] text-xs hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100"
               >
-                {isSubmitting ? 'Creating...' : 'Create account'}
+                Synchronize Identity
               </button>
+              <button 
+                onClick={() => void handleDeleteUser(selectedUser.id)}
+                disabled={selectedUser.id === currentUserId}
+                className="w-full py-4 text-rose-500 font-black uppercase tracking-[0.2em] text-[10px] hover:bg-rose-50 rounded-2xl transition-all disabled:opacity-20"
+              >
+                Revoke Credentials
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Create User Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl p-12 animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-10 shrink-0">
+              <div>
+                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Identity Deployment</h2>
+                <p className="text-sm text-gray-500 font-medium mt-1">Configure new system access credentials</p>
+              </div>
+              <button onClick={() => setShowCreateModal(false)} className="p-2 bg-gray-50 rounded-xl text-gray-400 hover:text-gray-600">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateUser} className="space-y-8 overflow-y-auto pr-4 custom-scrollbar">
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Full Identity Name</label>
+                  <input
+                    value={createForm.name}
+                    onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                    className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Secure Email Hub</label>
+                  <input
+                    type="email"
+                    value={createForm.email}
+                    onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                    className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">System Password</label>
+                  <input
+                    type="password"
+                    value={createForm.password}
+                    onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                    className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Operational State</label>
+                  <select
+                    value={createForm.status}
+                    onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
+                    className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 mb-4 block">Primary System Roles</label>
+                <div className="grid grid-cols-2 gap-4">
+                  {roles.map((r) => {
+                    const chk = createForm.roleIds.includes(r.id);
+                    return (
+                      <label key={r.id} className={`flex items-center gap-4 p-5 rounded-[1.5rem] border cursor-pointer transition-all ${
+                        chk ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-transparent hover:bg-gray-100'
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={chk}
+                          onChange={() => setCreateForm({ ...createForm, roleIds: toggleId(r.id, createForm.roleIds) })}
+                          className="w-5 h-5 rounded-lg border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <div>
+                          <p className="text-xs font-black text-gray-900 uppercase tracking-widest">{r.name}</p>
+                          <p className="text-[10px] text-gray-500 font-medium line-clamp-1">{r.description}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="pt-6 shrink-0">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-5 bg-gray-900 text-white rounded-[2rem] font-black uppercase tracking-[0.25em] text-xs hover:bg-black transition-all shadow-2xl shadow-gray-200 disabled:opacity-60"
+                >
+                  {isSubmitting ? 'Deploying...' : 'Initiate Deployment'}
+                </button>
+              </div>
             </form>
           </div>
+        </div>
+      )}
 
-          <div className="bg-slate-900 text-white rounded-2xl shadow p-6">
-            <p className="text-sm uppercase tracking-[0.25em] text-emerald-300 mb-3">
-              Audit visibility
-            </p>
-            <h2 className="text-xl font-bold mb-4">Recent admin and auth activity</h2>
-            <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
-              {logs.map((log) => (
-                <div key={log.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <code className="text-sm text-emerald-200">{log.action}</code>
-                    <span className="text-xs text-slate-400">
-                      {new Date(log.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-300 mt-2">
-                    Actor: {log.actor?.email ?? 'system'} | Target:{' '}
-                    {log.target?.email ?? log.entityId ?? 'n/a'}
-                  </p>
-                  {log.ipAddress && (
-                    <p className="text-xs text-slate-500 mt-1">IP: {log.ipAddress}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-8">
-          <div className="bg-white rounded-2xl shadow overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-200">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">Managed users</h2>
-                  <p className="text-sm text-gray-600">{filteredUsers.length} visible users</p>
-                </div>
-                <input
-                  type="text"
-                  placeholder="Search users"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  className="w-full sm:w-64 rounded-xl border border-gray-300 px-4 py-2"
-                />
-              </div>
-            </div>
-
-            <div className="divide-y divide-gray-200 max-h-[42rem] overflow-y-auto">
-              {filteredUsers.map((user) => (
-                <button
-                  key={user.id}
-                  type="button"
-                  onClick={() => setSelectedUserId(user.id)}
-                  className={`w-full text-left px-6 py-4 transition-colors ${
-                    selectedUser?.id === user.id ? 'bg-emerald-50' : 'hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="font-semibold text-gray-900">{user.name}</p>
-                      <p className="text-sm text-gray-600 mt-1 break-all">{user.email}</p>
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {user.roles.map((role) => (
-                          <span
-                            key={role.id}
-                            className="px-2 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-medium"
-                          >
-                            {role.name}
-                          </span>
-                        ))}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-3">
-                        {user.modules.length} assigned module
-                        {user.modules.length === 1 ? '' : 's'}
-                      </p>
-                    </div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold capitalize ${
-                        user.status === 'active'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : user.status === 'inactive'
-                            ? 'bg-gray-100 text-gray-700'
-                            : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      {user.status}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow p-6">
-            {selectedUser ? (
-              <div className="space-y-8">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.25em] text-gray-500 mb-2">
-                      User detail
-                    </p>
-                    <h2 className="text-2xl font-bold text-gray-900">{selectedUser.name}</h2>
-                    <p className="text-gray-600 mt-1">{selectedUser.email}</p>
-                  </div>
-                  {selectedUser.id === currentUserId && (
-                    <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold">
-                      Your account
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-gray-200 p-4">
-                    <p className="text-sm text-gray-500 mb-2">Status</p>
-                    <select
-                      value={selectedUser.status}
-                      onChange={(event) =>
-                        void handleStatusChange(selectedUser.id, event.target.value)
-                      }
-                      className="w-full rounded-xl border border-gray-300 px-4 py-3 capitalize"
-                    >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="suspended">Suspended</option>
-                    </select>
-                  </div>
-                  <div className="rounded-2xl border border-gray-200 p-4">
-                    <p className="text-sm text-gray-500 mb-2">Lifecycle</p>
-                    <p className="text-sm text-gray-700">
-                      Created {new Date(selectedUser.createdAt).toLocaleString()}
-                    </p>
-                    <p className="text-sm text-gray-700 mt-1">
-                      Updated {new Date(selectedUser.updatedAt).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between gap-4 mb-4">
-                    <div>
-                      <h3 className="text-lg font-bold text-gray-900">Role assignment</h3>
-                      <p className="text-sm text-gray-600">
-                        Suspend, deactivate, or limit users to only the modules they need.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3">
-                    {roles.map((role) => {
-                      const checked = selectedUser.roles.some(
-                        (selectedRole) => selectedRole.id === role.id,
-                      );
-
-                      return (
-                        <label
-                          key={role.id}
-                          className={`rounded-2xl border p-4 cursor-pointer ${
-                            checked
-                              ? 'border-emerald-500 bg-emerald-50'
-                              : 'border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                const nextRoleIds = toggleId(
-                                  role.id,
-                                  selectedUser.roles.map((selectedRole) => selectedRole.id),
-                                );
-
-                                setUsers((currentUsers) =>
-                                  currentUsers.map((user) =>
-                                    user.id === selectedUser.id
-                                      ? {
-                                          ...user,
-                                          roles: buildRoleAssignments(nextRoleIds, roles),
-                                        }
-                                      : user,
-                                  ),
-                                );
-                              }}
-                              className="mt-1"
-                            />
-                            <div>
-                              <p className="font-semibold text-gray-900 capitalize">
-                                {role.name}
-                              </p>
-                              <p className="text-sm text-gray-600 mt-1">
-                                {role.description}
-                              </p>
-                            </div>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Module access</h3>
-                  <div className="grid gap-3 max-h-72 overflow-y-auto pr-1">
-                    {modules.map((module) => {
-                      const checked = selectedUser.modules.some(
-                        (selectedModule) => selectedModule.id === module.id,
-                      );
-
-                      return (
-                        <label
-                          key={module.id}
-                          className={`rounded-2xl border p-4 cursor-pointer ${
-                            checked
-                              ? 'border-blue-500 bg-blue-50'
-                              : 'border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                const nextModuleIds = toggleId(
-                                  module.id,
-                                  selectedUser.modules.map(
-                                    (selectedModule) => selectedModule.id,
-                                  ),
-                                );
-
-                                setUsers((currentUsers) =>
-                                  currentUsers.map((user) =>
-                                    user.id === selectedUser.id
-                                      ? {
-                                          ...user,
-                                          modules: buildModuleAssignments(
-                                            nextModuleIds,
-                                            modules,
-                                          ),
-                                        }
-                                      : user,
-                                  ),
-                                );
-                              }}
-                              className="mt-1"
-                            />
-                            <div>
-                              <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-                                {module.category}
-                              </p>
-                              <p className="font-semibold text-gray-900">
-                                {module.name}
-                              </p>
-                              <p className="text-sm text-gray-600 mt-1">
-                                {module.description}
-                              </p>
-                            </div>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleAccessSave(
-                      selectedUser.id,
-                      selectedUser.roles.map((role) => role.id),
-                      selectedUser.modules.map((module) => module.id),
-                    )
-                  }
-                  className="w-full px-4 py-3 bg-emerald-600 text-white rounded-xl font-semibold"
-                >
-                  Save roles and module access
-                </button>
-
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Effective permissions</h3>
-                  <div className="grid gap-2 max-h-56 overflow-y-auto">
-                    {selectedUser.permissions.map((permission) => (
-                      <div
-                        key={permission.id}
-                        className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2"
-                      >
-                        <code className="text-sm text-gray-700">{permission.name}</code>
-                        <span className="text-xs text-gray-500 capitalize">
-                          {permission.action}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteUser(selectedUser.id)}
-                  disabled={selectedUser.id === currentUserId}
-                  className="w-full px-4 py-3 bg-red-600 text-white rounded-xl font-semibold disabled:opacity-60"
-                >
-                  Delete user
-                </button>
-              </div>
-            ) : (
-              <p className="text-gray-600">Select a user to review details.</p>
-            )}
-          </div>
-        </section>
-      </main>
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 20px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #d1d5db; }
+      `}</style>
     </div>
   );
 }

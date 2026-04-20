@@ -33,3 +33,15 @@ body {
   background: rgba(3, 69, 143, 0.2);
   border-radius: 10px;
 }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(3, 69, 143, 0.32);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
