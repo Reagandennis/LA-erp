@@ -87,3 +87,11 @@ export const personalTodoUpdateSchema = z
       message: 'At least one field must be updated',
     },
   );
+
+export const personalTodoBoardSchema = z.object({
+  columns: z
+    .array(z.string().trim().min(1, 'Column name is required').max(40, 'Column name is too long'))
+    .min(1, 'At least one column is required')
+    .max(20, 'Too many columns'),
+  columnColors: z.record(z.string().trim()).optional(),
+});

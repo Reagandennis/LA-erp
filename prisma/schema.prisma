@@ -19,6 +19,7 @@ model User {
   userRoles      UserRole[]
   userModules    UserModule[]
   personalTodos  PersonalTodo[]
+  personalTodoBoard PersonalTodoBoard?
   personalTodoAttachments PersonalTodoAttachment[]
   personalTodoShares PersonalTodoShare[]
   personalTodoNotifications PersonalTodoNotification[]
@@ -45,6 +46,7 @@ model PersonalTodo {
   shares      PersonalTodoShare[]
   notifications PersonalTodoNotification[]
   comments    PersonalTodoComment[]
+  subtasks    Json?
 
   @@index([userId, completed, dueDate])
   @@index([userId, createdAt])
@@ -103,6 +105,18 @@ model PersonalTodoComment {
 
   @@index([todoId, createdAt])
   @@index([userId, createdAt])
+}
+
+model PersonalTodoBoard {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique
+  columns     Json
+  columnColors Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Role {

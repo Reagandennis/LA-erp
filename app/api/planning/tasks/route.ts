@@ -4,6 +4,9 @@ import { prisma } from '@/lib/prisma';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { personalTodoCreateSchema } from '@/lib/validation';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 type TaskRecord = {
   id: number;
   userId: number;

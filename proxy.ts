@@ -18,7 +18,7 @@ export default function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
 
-  if (isAuthPage && session && pathname === '/') {
+  if (isAuthPage && session) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 

@@ -2,10 +2,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
-const STATUS_COLORS = {
-  Backlog: 'bg-gray-50',
-  'In progress': 'bg-orange-50',
-  'In review': 'bg-green-50',
+
+const DEFAULT_KANBAN_COLUMNS = ['Backlog', 'In progress', 'In review'];
+const DEFAULT_COLUMN_COLORS: Record<string, string> = {
+  Backlog: '#E5E7EB',
+  'In progress': '#FDBA74',
+  'In review': '#86EFAC',
 };
 
 type MentionUser = {
@@ -16,6 +18,30 @@ type MentionUser = {
 };
 
 const USER_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500'];
+
+const CALENDAR_WEATHER_ICONS: Array<{ codes: number[]; icon: string }> = [
+  { codes: [0, 1], icon: '☀️' },
+  { codes: [2, 3], icon: '⛅️' },
+  { codes: [45, 48], icon: '🌫️' },
+  { codes: [51, 53, 55, 56, 57], icon: '🌦️' },
+  { codes: [61, 63, 65, 80, 81, 82, 66, 67], icon: '🌧️' },
+  { codes: [71, 73, 75, 77, 85, 86], icon: '❄️' },
+  { codes: [95, 96, 99], icon: '⛈️' },
+];
+
+const resolveCalendarWeatherIcon = (code?: number | null) => {
+  if (code === null || code === undefined) {
+    return null;
+  }
+  for (const entry of CALENDAR_WEATHER_ICONS) {
+    if (entry.codes.includes(code)) {
+      return entry.icon;
+    }
+  }
+  return null;
+};
+
+const formatCalendarDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
 const getInitials = (name: string) => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -49,9 +75,11 @@ type Task = {
   id: string;
   dbId?: number | null;
   title: string;
+  description?: string | null;
   priority: 'High' | 'Medium' | 'Low';
   list: string;
   dueDate: string | null;
+  dueDateIso?: string | null;
   status: string;
   assignees: number;
 };
@@ -110,6 +138,7 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
   try {
     const response = await fetch('/api/planning/tasks', {
       credentials: 'include',
+      cache: 'no-store',
       signal,
     });
     if (!response.ok) {
@@ -127,9 +156,11 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
         id: `PT-${task.id}`,
         dbId: task.id,
         title: task.title,
+        description: task.description,
         priority: priority as Task['priority'],
         list: task.isShared ? 'Shared' : 'Personal',
         dueDate,
+        dueDateIso: task.dueDate,
         status,
         assignees: 0,
       };
@@ -151,6 +182,7 @@ export default function TodoPersonalPage() {
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [commentInput, setCommentInput] = useState<string>('');
+  const [subtaskTitle, setSubtaskTitle] = useState<string>('');
   const loadComments = async (task: Task) => {
     if (!task.dbId) {
       setComments([]);
@@ -211,7 +243,26 @@ export default function TodoPersonalPage() {
   const openTaskDrawer = (task: Task) => {
     setSelectedTask(task);
     setEditedTask({ ...task });
-    updateSubtasks(subtasksByTask[task.id] ?? []);
+    setDescription(task.description ?? '');
+    setSubtaskTitle('');
+    setTaggedUsers([]);
+    setDueTime(task.dueDateIso ? new Date(task.dueDateIso).toTimeString().slice(0, 5) : '');
+    // Load subtasks from DB; fall back to in-memory cache
+    if (task.dbId) {
+      fetch(`/api/planning/tasks/${task.dbId}/subtasks`, { credentials: 'include' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { subtasks?: Subtask[] } | null) => {
+          const rawLoaded = data?.subtasks;
+          const loaded: Subtask[] = Array.isArray(rawLoaded) ? rawLoaded : (subtasksByTask[task.id] ?? []);
+          setSubtasks(loaded);
+          setSubtasksByTask((cur) => ({ ...cur, [task.id]: loaded }));
+        })
+        .catch(() => {
+          updateSubtasks(subtasksByTask[task.id] ?? []);
+        });
+    } else {
+      updateSubtasks(subtasksByTask[task.id] ?? []);
+    }
     if (commentsByTask[task.id]) {
       setComments(commentsByTask[task.id] ?? []);
     } else {
@@ -260,6 +311,57 @@ export default function TodoPersonalPage() {
       // ignore
     }
   };
+  const loadAttachmentsForTask = async (task: Task) => {
+    if (!task.dbId) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/planning/tasks/${task.dbId}/attachments`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json().catch(() => null)) as { attachments?: AttachmentItem[] } | null;
+      const nextAttachments = data?.attachments ?? [];
+      setAttachments(nextAttachments);
+      setAttachmentsByTask((current) => ({
+        ...current,
+        [task.id]: nextAttachments,
+      }));
+    } catch {
+      // ignore
+    }
+  };
+  const handleAddSubtask = () => {
+    if (!subtaskTitle.trim()) {
+      return;
+    }
+    const nextSubtask: Subtask = {
+      id: `${selectedTask?.id ?? 'task'}-st-${createIdRef.current++}`,
+      title: subtaskTitle.trim(),
+      completed: false,
+    };
+    updateSubtasks([nextSubtask, ...subtasks]);
+    setSubtaskTitle('');
+  };
+  const handleAddAttachments = async (files: FileList | null) => {
+    if (!selectedTask?.dbId || !files || files.length === 0) {
+      return;
+    }
+    const formData = new FormData();
+    Array.from(files).forEach((file) => formData.append('files', file));
+    try {
+      await fetch(`/api/planning/tasks/${selectedTask.dbId}/attachments`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      await loadAttachmentsForTask(selectedTask);
+    } catch {
+      // ignore
+    }
+  };
   const toggleTaggedUser = (userId: string) => {
     setTaggedUsers((current) =>
       current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId],
@@ -269,6 +371,28 @@ export default function TodoPersonalPage() {
     setCreateTaggedUsers((current) =>
       current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId],
     );
+  };
+  const shareTaskWithUsers = async (taskId: number, userIds: string[]) => {
+    const normalized = Array.from(
+      new Set(
+        userIds
+          .map(Number)
+          .filter((value) => Number.isInteger(value) && value > 0),
+      ),
+    );
+    if (normalized.length === 0) {
+      return;
+    }
+    try {
+      await fetch(`/api/planning/tasks/${taskId}/share`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userIds: normalized }),
+      });
+    } catch {
+      // ignore
+    }
   };
   const handleNotesChange = (value: string) => {
     setCommentInput(value);
@@ -314,13 +438,13 @@ export default function TodoPersonalPage() {
     setCreateDueTime('');
     setCreateAttachments([]);
     setCreateError('');
+    setCreateTaggedUsers([]);
   };
   const handleCreateDrawerSave = async () => {
     if (!createTask.title.trim()) {
       return;
     }
     setCreateError('');
-    const generatedId = createTask.id.trim() || `NT-${createIdRef.current++}`;
     let createdDbId: number | null = null;
 
     try {
@@ -356,6 +480,8 @@ export default function TodoPersonalPage() {
       return;
     }
 
+    await shareTaskWithUsers(createdDbId, createTaggedUsers);
+
     if (createdDbId && createAttachments.length > 0) {
       try {
         const formData = new FormData();
@@ -370,6 +496,36 @@ export default function TodoPersonalPage() {
       }
     }
 
+    // Persist subtasks to DB
+    if (createSubtasks.length > 0) {
+      try {
+        await fetch(`/api/planning/tasks/${createdDbId}/subtasks`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subtasks: createSubtasks }),
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    // Send notes as a real comment
+    if (createNotes.trim().length > 0) {
+      try {
+        await fetch(`/api/planning/tasks/${createdDbId}/comments`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: createNotes.trim(), userIds: [] }),
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    // Use the canonical ID that fetchTasks will return (PT-{dbId})
+    const canonicalId = `PT-${createdDbId}`;
     fetchTasks()
       .then((nextTasks) => {
         setTasks(nextTasks);
@@ -380,19 +536,7 @@ export default function TodoPersonalPage() {
     if (createSubtasks.length > 0) {
       setSubtasksByTask((current) => ({
         ...current,
-        [generatedId]: createSubtasks,
-      }));
-    }
-    if (createNotes.trim().length > 0) {
-      const seededComment: CommentItem = {
-        id: `${generatedId}-c-${createIdRef.current++}`,
-        author: 'You',
-        time: 'just now',
-        text: createNotes.trim(),
-      };
-      setCommentsByTask((current) => ({
-        ...current,
-        [generatedId]: [seededComment],
+        [canonicalId]: createSubtasks,
       }));
     }
     setShowCreateDrawer(false);
@@ -452,6 +596,15 @@ export default function TodoPersonalPage() {
   const [createMentionQuery, setCreateMentionQuery] = useState<string>('');
   const [showCreateMentions, setShowCreateMentions] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<MentionUser[]>([]);
+  const [kanbanColumns, setKanbanColumns] = useState<string[]>(DEFAULT_KANBAN_COLUMNS);
+  const [newColumnName, setNewColumnName] = useState<string>('');
+  const [newColumnColor, setNewColumnColor] = useState<string>('#60A5FA');
+  const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
+  const [columnColors, setColumnColors] = useState<Record<string, string>>(DEFAULT_COLUMN_COLORS);
+  const [showAddColumn, setShowAddColumn] = useState(false);
+  const kanbanSyncReady = useRef(false);
+  const [calendarMonth] = useState(() => new Date());
+  const [calendarWeather, setCalendarWeather] = useState<Record<string, number>>({});
   useEffect(() => {
     let isActive = true;
     const loadUsers = async () => {
@@ -486,7 +639,119 @@ export default function TodoPersonalPage() {
       isActive = false;
     };
   }, []);
+  useEffect(() => {
+    let isActive = true;
 
+    const loadKanbanBoard = async () => {
+      try {
+        const response = await fetch('/api/planning/todo-personal/board', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json().catch(() => null)) as
+          | { board?: { columns?: string[]; columnColors?: Record<string, string> | null } | null }
+          | null;
+        if (!isActive) {
+          return;
+        }
+        if (data?.board?.columns && data.board.columns.length > 0) {
+          setKanbanColumns(data.board.columns);
+        }
+        if (data?.board?.columnColors) {
+          setColumnColors(data.board.columnColors);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (isActive) {
+          kanbanSyncReady.current = true;
+        }
+      }
+    };
+
+    void loadKanbanBoard();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!kanbanSyncReady.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const persistKanbanBoard = async () => {
+      try {
+        await fetch('/api/planning/todo-personal/board', {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            columns: kanbanColumns,
+            columnColors,
+          }),
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    void persistKanbanBoard();
+
+    return () => {
+      controller.abort();
+    };
+  }, [kanbanColumns, columnColors]);
+
+  useEffect(() => {
+    let isActive = true;
+    const loadCalendarWeather = async () => {
+      const year = calendarMonth.getFullYear();
+      const month = calendarMonth.getMonth();
+      const startDate = formatCalendarDateKey(new Date(year, month, 1));
+      const endDate = formatCalendarDateKey(new Date(year, month + 1, 0));
+      try {
+        const params = new URLSearchParams({
+          latitude: '-1.286389',
+          longitude: '36.817223',
+          daily: 'weather_code',
+          timezone: 'auto',
+          start_date: startDate,
+          end_date: endDate,
+        });
+        const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { daily?: { time: string[]; weather_code: number[] } };
+        if (!isActive || !data.daily) {
+          return;
+        }
+        const next: Record<string, number> = {};
+        data.daily.time.forEach((date, index) => {
+          const code = data.daily?.weather_code[index];
+          if (typeof code === 'number') {
+            next[date] = code;
+          }
+        });
+        setCalendarWeather(next);
+      } catch {
+        // ignore
+      }
+    };
+
+    void loadCalendarWeather();
+    return () => {
+      isActive = false;
+    };
+  }, [calendarMonth]);
   useEffect(() => {
     if (!selectedTask) {
       return;
@@ -507,22 +772,7 @@ export default function TodoPersonalPage() {
       }
 
       try {
-        const response = await fetch(`/api/planning/tasks/${selectedTask.dbId}/attachments`, {
-          credentials: 'include',
-        });
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json().catch(() => null)) as { attachments?: AttachmentItem[] } | null;
-        if (!isActive) {
-          return;
-        }
-        const nextAttachments = data?.attachments ?? [];
-        setAttachments(nextAttachments);
-        setAttachmentsByTask((current) => ({
-          ...current,
-          [selectedTask.id]: nextAttachments,
-        }));
+        await loadAttachmentsForTask(selectedTask);
       } catch {
         // ignore
       }
@@ -566,6 +816,108 @@ export default function TodoPersonalPage() {
       // ignore
     }
   };
+  const handleEditTitleChange = (value: string) => {
+    setEditedTask((current) => (current ? { ...current, title: value } : current));
+  };
+  const handleEditPriorityChange = (value: Task['priority']) => {
+    setEditedTask((current) => (current ? { ...current, priority: value } : current));
+  };
+  const handleEditStatusChange = (value: string) => {
+    setEditedTask((current) => (current ? { ...current, status: value } : current));
+  };
+  const handleEditDescriptionChange = (value: string) => {
+    setDescription(value);
+    setEditedTask((current) => (current ? { ...current, description: value } : current));
+  };
+  const handleEditDueDateChange = (value: string) => {
+    const isoValue = value ? new Date(value).toISOString() : null;
+    const displayValue = value ? new Date(value).toLocaleDateString() : null;
+    setEditedTask((current) =>
+      current
+        ? {
+            ...current,
+            dueDateIso: isoValue,
+            dueDate: displayValue,
+          }
+        : current,
+    );
+  };
+  const handleSaveTaskChanges = async () => {
+    if (!editedTask) {
+      return;
+    }
+
+    const updatedTask = {
+      ...editedTask,
+      description: description,
+    };
+
+    if (editedTask.dbId) {
+      try {
+        // Merge time into due-date ISO string
+        let finalDueDate = updatedTask.dueDateIso ?? null;
+        if (finalDueDate && dueTime) {
+          const base = finalDueDate.slice(0, 10);
+          const merged = new Date(`${base}T${dueTime}:00`);
+          if (!Number.isNaN(merged.getTime())) finalDueDate = merged.toISOString();
+        }
+        await fetch(`/api/planning/tasks/${editedTask.dbId}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: updatedTask.title,
+            description: updatedTask.description ?? null,
+            priority: updatedTask.priority.toLowerCase(),
+            status: updatedTask.status,
+            dueDate: finalDueDate,
+          }),
+        });
+        await shareTaskWithUsers(editedTask.dbId, taggedUsers);
+        // Persist subtasks
+        await fetch(`/api/planning/tasks/${editedTask.dbId}/subtasks`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subtasks }),
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchTasks()
+      .then((nextTasks) => {
+        setTasks(nextTasks);
+      })
+      .catch(() => {
+        // ignore
+      });
+    setSelectedTask(null);
+    setEditedTask(null);
+    setSubtasks([]);
+    setCommentInput('');
+    setDescription('');
+    setDueTime('');
+  };
+  const handleDeleteSelectedTask = () => {
+    if (!selectedTask) return;
+    const taskToDelete = selectedTask;
+    setTasks((ts) => ts.filter((t) => t.id !== taskToDelete.id));
+    setSelectedTask(null);
+    setEditedTask(null);
+    setSubtasks([]);
+    setCommentInput('');
+    setDescription('');
+    setDueTime('');
+    if (taskToDelete.dbId) {
+      fetch(`/api/planning/tasks/${taskToDelete.dbId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      }).catch(() => { /* ignore */ });
+    }
+  };
+
   const handleKanbanDragOver = (event: React.DragEvent<HTMLUListElement>) => {
     event.preventDefault();
   };
@@ -600,6 +952,13 @@ export default function TodoPersonalPage() {
       openTaskDrawer(task);
     }
   };
+
+  const handleGanttTaskOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const taskId = event.currentTarget.dataset.taskId;
+    if (!taskId) return;
+    const task = tasks.find((item) => item.id === taskId);
+    if (task) openTaskDrawer(task);
+  };
   useEffect(() => {
     const controller = new AbortController();
     fetchTasks(controller.signal)
@@ -610,6 +969,20 @@ export default function TodoPersonalPage() {
         // ignore
       });
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchTasks()
+        .then((nextTasks) => {
+          setTasks(nextTasks);
+        })
+        .catch(() => {
+          // ignore
+        });
+    }, 10000);
+
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -640,7 +1013,95 @@ export default function TodoPersonalPage() {
     };
   }, []);
 
-  const statuses = ['Backlog', 'In progress', 'In review'];
+  const statusOptions = Array.from(new Set([...kanbanColumns, ...tasks.map((task) => task.status)]));
+
+  const addKanbanColumn = () => {
+    const next = newColumnName.trim();
+    if (!next) {
+      return;
+    }
+    if (kanbanColumns.includes(next)) {
+      setNewColumnName('');
+      return;
+    }
+    setKanbanColumns((current) => [...current, next]);
+    setColumnColors((current) => ({
+      ...current,
+      [next]: newColumnColor,
+    }));
+    setNewColumnName('');
+    setNewColumnColor('#60A5FA');
+    setShowAddColumn(false);
+  };
+
+  const renameKanbanColumn = async (column: string) => {
+    const next = (renameDrafts[column] ?? column).trim();
+    if (!next || next === column) {
+      return;
+    }
+    if (kanbanColumns.includes(next)) {
+      return;
+    }
+    setKanbanColumns((current) => current.map((item) => (item === column ? next : item)));
+    setColumnColors((current) => {
+      const nextColors = { ...current };
+      if (nextColors[column]) {
+        nextColors[next] = nextColors[column];
+        delete nextColors[column];
+      }
+      return nextColors;
+    });
+    setRenameDrafts((current) => {
+      const nextDrafts = { ...current };
+      delete nextDrafts[column];
+      return nextDrafts;
+    });
+    const impacted = tasks.filter((task) => task.status === column && task.dbId);
+    if (impacted.length > 0) {
+      await Promise.all(
+        impacted.map((task) => updateTaskStatus(task, next)),
+      );
+    }
+  };
+
+  const removeKanbanColumn = async (column: string) => {
+    if (kanbanColumns.length <= 1) {
+      return;
+    }
+    const remaining = kanbanColumns.filter((item) => item !== column);
+    const fallback = remaining[0] ?? 'Backlog';
+    setKanbanColumns(remaining.length > 0 ? remaining : [fallback]);
+    setColumnColors((current) => {
+      const nextColors = { ...current };
+      delete nextColors[column];
+      return nextColors;
+    });
+    setTasks((current) =>
+      current.map((task) =>
+        task.status === column ? { ...task, status: fallback } : task,
+      ),
+    );
+    const impacted = tasks.filter((task) => task.status === column && task.dbId);
+    if (impacted.length > 0) {
+      await Promise.all(
+        impacted.map((task) => updateTaskStatus(task, fallback)),
+      );
+    }
+  };
+
+  const updateRenameDraft = (column: string, value: string) => {
+    setRenameDrafts((current) => ({
+      ...current,
+      [column]: value,
+    }));
+  };
+
+  const updateColumnColor = (column: string, color: string) => {
+    setColumnColors((current) => ({
+      ...current,
+      [column]: color,
+    }));
+  };
 
   const getTasksByStatus = (status: string) => {
     return tasks.filter(task => task.status === status);
@@ -674,97 +1135,238 @@ export default function TodoPersonalPage() {
     { id: 'dashboard', label: 'Dashboard', icon: '▦' },
   ];
 
+  const clearRenameDraft = (col: string) => {
+    setRenameDrafts((d) => {
+      const next = { ...d };
+      delete next[col];
+      return next;
+    });
+  };
+
+  const openNewTaskInColumn = (col: string) => {
+    resetCreateDrawer();
+    setCreateTask((t) => ({ ...t, status: col }));
+    setShowCreateDrawer(true);
+  };
+
+  const getPriorityStyle = (priority: Task['priority']) => {
+    if (priority === 'High') return { bg: 'bg-rose-50', text: 'text-rose-600', dot: '#f43f5e' };
+    if (priority === 'Medium') return { bg: 'bg-amber-50', text: 'text-amber-600', dot: '#f59e0b' };
+    return { bg: 'bg-emerald-50', text: 'text-emerald-600', dot: '#10b981' };
+  };
+
   const renderKanbanView = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {statuses.map((status) => {
-        const statusTasks = getTasksByStatus(status);
-        const statusLabel = status === 'Backlog' ? 'Backlog' : status === 'In progress' ? 'In progress' : 'In review';
-        
-        return (
-          <div key={status} className={`rounded-lg border border-gray-200 overflow-hidden`}>
-            {/* Column Header */}
-            <div className={`p-4 border-b border-gray-200 ${STATUS_COLORS[status as keyof typeof STATUS_COLORS]}`}>
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold text-gray-900">
-                  {statusLabel}{' '}
-                  <span className="inline-block ml-2 px-2.5 py-0.5 text-xs font-semibold text-gray-600 bg-white rounded-full">
+    <div className="flex flex-col gap-6">
+      {/* Board */}
+      <div className="flex gap-4 overflow-x-auto pb-4">
+        {kanbanColumns.map((status) => {
+          const statusTasks = getTasksByStatus(status);
+          const accentColor = columnColors[status] ?? '#6366f1';
+
+          return (
+            <div
+              key={status}
+              className="flex min-w-68 flex-1 flex-col rounded-2xl bg-[#f4f5f7]"
+            >
+              {/* Column Header */}
+              <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className="flex h-3 w-3 shrink-0 rounded-full"
+                    style={{ backgroundColor: accentColor }}
+                  />
+                  {status in renameDrafts ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        autoFocus
+                        value={renameDrafts[status]}
+                        onChange={(e) => updateRenameDraft(status, e.target.value)}
+                        onBlur={() => renameKanbanColumn(status)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { void renameKanbanColumn(status); }
+                          if (e.key === 'Escape') { clearRenameDraft(status); }
+                        }}
+                        className="w-28 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => renameKanbanColumn(status)}
+                        className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-sm font-semibold text-slate-700 hover:text-slate-900"
+                      onClick={() => updateRenameDraft(status, status)}
+                      title="Click to rename"
+                    >
+                      {status}
+                    </button>
+                  )}
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm">
                     {statusTasks.length}
                   </span>
-                </h2>
-                <button className="text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-                  </svg>
-                </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="color"
+                    value={accentColor}
+                    onChange={(e) => updateColumnColor(status, e.target.value)}
+                    className="h-5 w-5 cursor-pointer rounded border-0 bg-transparent p-0"
+                    title="Column colour"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeKanbanColumn(status)}
+                    className="rounded p-0.5 text-slate-400 hover:text-rose-500"
+                    title="Remove column"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Task Cards */}
+              <ul
+                className="flex-1 space-y-2.5 overflow-y-auto px-3 pb-3"
+                style={{ minHeight: '22rem' }}
+                data-status={status}
+                onDragOver={handleKanbanDragOver}
+                onDrop={handleKanbanDrop}
+                aria-label={`${status} tasks`}
+              >
+                {statusTasks.length > 0 ? (
+                  statusTasks.map((task) => {
+                    const pr = getPriorityStyle(task.priority);
+                    return (
+                      <li key={task.id}>
+                        <button
+                          draggable
+                          data-task-id={task.id}
+                          onDragStart={handleKanbanDragStart}
+                          onDragEnd={handleKanbanDragEnd}
+                          onClick={handleKanbanTaskOpen}
+                          type="button"
+                          className={`w-full cursor-grab rounded-xl border border-slate-200/80 bg-white p-4 text-left shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all duration-150 active:cursor-grabbing hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(15,23,42,0.12)] ${
+                            draggedTask?.id === task.id ? 'opacity-50' : ''
+                          }`}
+                        >
+                          {/* Top row: id + 3-dot */}
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="text-[10px] font-medium text-slate-400">{task.id}</span>
+                            <svg className="h-4 w-4 text-slate-300" fill="currentColor" viewBox="0 0 24 24">
+                              <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+                            </svg>
+                          </div>
+
+                          {/* Title */}
+                          <p className="text-[13.5px] font-semibold leading-snug text-slate-900">{task.title}</p>
+
+                          {/* Tags row */}
+                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pr.bg} ${pr.text}`}>
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: pr.dot }} />
+                              {task.priority}
+                            </span>
+                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                              {task.list}
+                            </span>
+                          </div>
+
+                          {/* Footer: due date + assignees */}
+                          <div className="mt-3 flex items-center justify-between">
+                            {task.dueDate ? (
+                              <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                {task.dueDate}
+                              </div>
+                            ) : <span />}
+                            {task.assignees > 0 && renderAssignees(task.assignees)}
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })
+                ) : (
+                  <li className="flex h-24 items-center justify-center rounded-xl border border-dashed border-slate-200 text-[13px] text-slate-400">
+                    No tasks yet
+                  </li>
+                )}
+              </ul>
+
+              {/* Add task inline button */}
+              <button
+                type="button"
+                onClick={() => openNewTaskInColumn(status)}
+                className="mx-3 mb-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium text-slate-500 transition-colors hover:bg-white hover:text-slate-800"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New task
+              </button>
+            </div>
+          );
+        })}
+
+        {/* Add column */}
+        <div className="min-w-68 flex-1">
+          {showAddColumn ? (
+            <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4">
+              <p className="text-xs font-semibold text-slate-600">New column</p>
+              <input
+                id="kanban-inline-column-name"
+                value={newColumnName}
+                onChange={(e) => setNewColumnName(e.target.value)}
+                placeholder="Column name…"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') addKanbanColumn(); }}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <div className="flex items-center gap-2">
+                <label htmlFor="kanban-inline-column-color" className="text-xs font-medium text-slate-500">Colour</label>
+                <input
+                  id="kanban-inline-column-color"
+                  type="color"
+                  value={newColumnColor}
+                  onChange={(e) => setNewColumnColor(e.target.value)}
+                  className="h-8 w-10 cursor-pointer rounded border border-slate-200"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowAddColumn(false); setNewColumnName(''); }}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >Cancel</button>
+                <button
+                  type="button"
+                  onClick={addKanbanColumn}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                >Add column</button>
               </div>
             </div>
-
-            {/* Tasks Container */}
-            <ul
-              className={`p-4 space-y-3 min-h-96 overflow-y-auto ${STATUS_COLORS[status as keyof typeof STATUS_COLORS]}`}
-              data-status={status}
-              onDragOver={handleKanbanDragOver}
-              onDrop={handleKanbanDrop}
-              aria-label={`${statusLabel} tasks`}
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowAddColumn(true)}
+              className="flex h-full min-h-56 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-transparent text-[13px] font-medium text-slate-500 transition-colors hover:border-indigo-400 hover:bg-white hover:text-indigo-600"
             >
-              {statusTasks.length > 0 ? (
-                statusTasks.map((task) => (
-                  <li key={task.id}>
-                    <button
-                      draggable
-                      data-task-id={task.id}
-                      onDragStart={handleKanbanDragStart}
-                      onDragEnd={handleKanbanDragEnd}
-                      onClick={handleKanbanTaskOpen}
-                      type="button"
-                      className={`w-full text-left bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing ${
-                        draggedTask?.id === task.id ? 'opacity-60' : ''
-                      }`}
-                    >
-                    <div className="flex items-start justify-between mb-2">
-                      <span className="text-xs font-semibold text-gray-500">{task.id}</span>
-                    </div>
-                    <h3 className="text-sm font-medium text-gray-900 mb-3">{task.title}</h3>
-                    
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="inline-block px-2 py-1 rounded text-xs font-semibold"
-                          style={{
-                            backgroundColor: task.priority === 'High' ? '#FEE2E2' : task.priority === 'Medium' ? '#FEF3C7' : '#D1FAE5',
-                            color: task.priority === 'High' ? '#991B1B' : task.priority === 'Medium' ? '#92400E' : '#065F46'
-                          }}>
-                          {task.priority}
-                        </span>
-                        <span className="text-gray-500">{task.list}</span>
-                      </div>
-
-                      {task.dueDate && (
-                        <div className="flex items-center gap-1 text-xs text-gray-600">
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          {task.dueDate}
-                        </div>
-                      )}
-
-                      {task.assignees > 0 && (
-                        <div className="pt-2 border-t border-gray-100">
-                          {renderAssignees(task.assignees)}
-                        </div>
-                      )}
-                    </div>
-                    </button>
-                  </li>
-                ))
-              ) : (
-                <li className="flex items-center justify-center h-32 text-gray-400">
-                  <p className="text-sm">No tasks</p>
-                </li>
-              )}
-            </ul>
-          </div>
-        );
-      })}
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add list
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -817,7 +1419,7 @@ export default function TodoPersonalPage() {
         </div>
       </div>
 
-      {/* Task Drawer */}
+      {/* Task Drawer - list view instance */}
       {selectedTask && editedTask && (
         <>
           {/* Overlay - Blur background */}
@@ -849,7 +1451,7 @@ export default function TodoPersonalPage() {
           <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
             {/* Top Action Bar */}
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-              <p className="text-xs text-gray-500">Created on 27 May 2024</p>
+              <p className="text-xs text-gray-500 font-mono">{selectedTask.id}</p>
               <div className="flex items-center gap-3">
                 <button className="p-2 text-gray-400 hover:text-gray-600">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -885,15 +1487,40 @@ export default function TodoPersonalPage() {
               {/* Title and Priority */}
               <div className="mb-6">
                 <div className="flex items-center gap-3 mb-3">
-                  <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" />
-                    </svg>
-                    {editedTask.priority}
-                  </span>
+                  <select
+                    value={editedTask.priority}
+                    onChange={(event) => handleEditPriorityChange(event.target.value as Task['priority'])}
+                    className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold"
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                  <select
+                    value={editedTask.status}
+                    onChange={(event) => handleEditStatusChange(event.target.value)}
+                    className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold"
+                  >
+                    {statusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-3">{editedTask.title}</h1>
-                <p className="text-gray-600">{description || 'Add a detailed description...'}</p>
+                <input
+                  value={editedTask.title}
+                  onChange={(event) => handleEditTitleChange(event.target.value)}
+                  className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-emerald-500"
+                  placeholder="Task title"
+                />
+                <textarea
+                  value={description}
+                  onChange={(event) => handleEditDescriptionChange(event.target.value)}
+                  placeholder="Add a detailed description..."
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                />
               </div>
 
               {/* People Section */}
@@ -944,7 +1571,20 @@ export default function TodoPersonalPage() {
                   </svg>
                   <p className="text-sm font-semibold text-gray-900">Timeline Date</p>
                 </div>
-                <p className="text-gray-600 text-sm">{editedTask.dueDate} {dueTime && `- ${dueTime}`}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="date"
+                    value={editedTask.dueDateIso ? editedTask.dueDateIso.slice(0, 10) : ''}
+                    onChange={(event) => handleEditDueDateChange(event.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <input
+                    type="time"
+                    value={dueTime}
+                    onChange={(event) => setDueTime(event.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
               </div>
 
               {/* Type */}
@@ -995,12 +1635,18 @@ export default function TodoPersonalPage() {
                     ))}
                   </div>
                 )}
-                <button className="w-full mt-3 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 transition-colors flex items-center justify-center gap-2">
+                <label className="w-full mt-3 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 transition-colors flex items-center justify-center gap-2 cursor-pointer">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
                   <span className="text-sm font-medium">Add Attachment</span>
-                </button>
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => handleAddAttachments(event.target.files)}
+                  />
+                </label>
               </div>
 
               {/* Comments */}
@@ -1076,11 +1722,41 @@ export default function TodoPersonalPage() {
 
               {/* Subtasks */}
               <div className="mb-6 pb-6 border-b border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
-                  </svg>
-                  <p className="text-sm font-semibold text-gray-900">Subtask</p>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" />
+                    </svg>
+                    <p className="text-sm font-semibold text-gray-900">Subtasks</p>
+                  </div>
+                  {subtasks.length > 0 && (
+                    <span className="text-xs font-semibold text-emerald-600">
+                      {Math.round((subtasks.filter((s) => s.completed).length / subtasks.length) * 100)}% complete
+                    </span>
+                  )}
+                </div>
+                {subtasks.length > 0 && (
+                  <div className="mb-3 h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all"
+                      style={{ width: `${Math.round((subtasks.filter((s) => s.completed).length / subtasks.length) * 100)}%` }}
+                    />
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mb-3">
+                  <input
+                    value={subtaskTitle}
+                    onChange={(event) => setSubtaskTitle(event.target.value)}
+                    placeholder="Add a subtask"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddSubtask}
+                    className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                  >
+                    Add
+                  </button>
                 </div>
                 <div className="space-y-3">
                   {subtasks.map((subtask) => (
@@ -1097,7 +1773,6 @@ export default function TodoPersonalPage() {
                         <p className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
                           {subtask.title}
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">Evaluate the software&apos;s speed, responsiveness, and resource usage</p>
                       </div>
                       <button
                         onClick={() => removeLegacySubtask(subtask.id)}
@@ -1117,16 +1792,7 @@ export default function TodoPersonalPage() {
             {/* Footer */}
             <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6 space-y-3">
               <button
-                onClick={() => {
-                  const updatedTasks = tasks.map(t => t.id === editedTask.id ? editedTask : t);
-                  setTasks(updatedTasks);
-                  setSelectedTask(null);
-                  setEditedTask(null);
-                  setSubtasks([]);
-                  setCommentInput('');
-                  setDescription('');
-                  setDueTime('');
-                }}
+                onClick={handleSaveTaskChanges}
                 className="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold transition-colors"
               >
                 Save Changes
@@ -1146,15 +1812,7 @@ export default function TodoPersonalPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    setTasks(tasks.filter(t => t.id !== selectedTask.id));
-                    setSelectedTask(null);
-                    setEditedTask(null);
-                    setSubtasks([]);
-                    setCommentInput('');
-                    setDescription('');
-                    setDueTime('');
-                  }}
+                  onClick={handleDeleteSelectedTask}
                   className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
                 >
                   Delete
@@ -1168,9 +1826,31 @@ export default function TodoPersonalPage() {
   );
 
   const renderGanttView = () => {
-    const ganttStartDate = new Date(2026, 4, 1); // May 1, 2026
-    const ganttDays = 45;
-    const today = new Date(2026, 4, 8);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Use ISO dates for reliable parsing
+    const dueDates = tasks
+      .map((task) => {
+        const raw = task.dueDateIso ?? task.dueDate;
+        if (!raw) return null;
+        const d = new Date(raw);
+        d.setHours(0, 0, 0, 0);
+        return Number.isNaN(d.getTime()) ? null : d;
+      })
+      .filter((d): d is Date => d !== null);
+
+    // Timeline starts 2 days before earliest due date (or today), ends 4 days after latest
+    const earliestDue = dueDates.length > 0 ? new Date(Math.min(...dueDates.map((d) => d.getTime()))) : new Date(today);
+    const latestDue  = dueDates.length > 0 ? new Date(Math.max(...dueDates.map((d) => d.getTime()))) : new Date(today);
+
+    const ganttStartDate = new Date(earliestDue);
+    ganttStartDate.setDate(ganttStartDate.getDate() - 3);
+
+    const ganttEndDate = new Date(latestDue);
+    ganttEndDate.setDate(ganttEndDate.getDate() + 5);
+
+    const ganttDays = Math.max(10, Math.ceil((ganttEndDate.getTime() - ganttStartDate.getTime()) / 86_400_000) + 1);
 
     const days = Array.from({ length: ganttDays }, (_, i) => {
       const date = new Date(ganttStartDate);
@@ -1178,131 +1858,179 @@ export default function TodoPersonalPage() {
       return date;
     });
 
+    // Each column is exactly (1 / ganttDays * 100)% wide.
+    // Bar ENDS on the due date column; spans BAR_SPAN_DAYS wide (or fewer if near start).
+    const COL_PCT = 100 / ganttDays;
+    const BAR_SPAN_DAYS = 4;
+
     const getTaskPosition = (task: Task) => {
-      if (!task.dueDate) return { left: '0%', width: '8%' };
-      const [month, day, year] = task.dueDate.split(' ').reverse();
-      const taskDate = new Date(Number.parseInt(year), Number.parseInt(month) - 1, Number.parseInt(day));
-      const startIndex = Math.floor((taskDate.getTime() - ganttStartDate.getTime()) / (24 * 60 * 60 * 1000));
-      const left = (startIndex / ganttDays) * 100;
-      const width = Math.max(8, (10 / ganttDays) * 100);
-      return { left: Math.max(0, left) + '%', width: width + '%' };
+      const raw = task.dueDateIso ?? task.dueDate;
+      if (!raw) return null;
+      const dueDay = new Date(raw);
+      dueDay.setHours(0, 0, 0, 0);
+      if (Number.isNaN(dueDay.getTime())) return null;
+
+      // Index of the due-date column (0-based)
+      const dueIndex = Math.round((dueDay.getTime() - ganttStartDate.getTime()) / 86_400_000);
+      if (dueIndex < 0 || dueIndex >= ganttDays) return null;
+
+      const spanCols = Math.min(BAR_SPAN_DAYS, dueIndex + 1); // can't go before column 0
+      const startCol = dueIndex - spanCols + 1;
+
+      return {
+        left: `${startCol * COL_PCT}%`,
+        width: `${spanCols * COL_PCT}%`,
+        isOverdue: dueDay < today,
+      };
     };
 
-    const GANTT_COLORS: { [key: string]: string } = {
-      'Backend improvements': 'bg-blue-500',
-      'Improvement for SMS events': 'bg-blue-500',
-      'Re-scan all accounts': 'bg-blue-500',
-      'Desktop Development': 'bg-emerald-500',
-      'Mobile Development': 'bg-orange-500',
-      'Monitoring and HealthCheck': 'bg-purple-500',
-      'New Registration Flow Exploration': 'bg-blue-500',
-      'Gather Requirements': 'bg-cyan-500',
-      'Prototyping': 'bg-cyan-500',
-      'Prototype Testing': 'bg-cyan-500',
-      'Marketing Product': 'bg-teal-500',
-      'Project X Planning': 'bg-orange-400',
+    const GANTT_BAR_COLORS: Record<string, string> = {
+      Backlog: '#94a3b8',
+      'In progress': '#6366f1',
+      'In review': '#10b981',
+    };
+    const PRIORITY_BAR_COLORS: Record<string, string> = {
+      High: '#f43f5e',
+      Medium: '#f59e0b',
+      Low: '#38bdf8',
     };
 
-    const getTodayIndex = Math.floor((today.getTime() - ganttStartDate.getTime()) / (24 * 60 * 60 * 1000));
-    const todayPosition = (getTodayIndex / ganttDays) * 100;
+    const todayIndex = Math.round((today.getTime() - ganttStartDate.getTime()) / 86_400_000);
+    const todayPosition = (todayIndex / ganttDays) * 100;
+
+    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const ROW_H = 56;
 
     return (
-      <div className="p-6 bg-gray-50 rounded-lg">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Gantt Chart</h2>
-        <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
-          <div className="flex">
-            {/* Left Sidebar */}
-            <div className="shrink-0 w-96 border-r border-gray-200 bg-white">
-              <div className="sticky left-0 top-0 bg-gray-50 border-b border-gray-200 px-4 py-3 grid grid-cols-3 gap-4 z-10">
-                <p className="text-xs font-semibold text-gray-700 uppercase">Tasks</p>
-                <p className="text-xs font-semibold text-gray-700 uppercase text-center">Progress</p>
-                <p className="text-xs font-semibold text-gray-700 uppercase text-right">Duration</p>
+      <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.2)]">
+        {/* Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Timeline</h3>
+            <p className="text-xs text-slate-500">Task schedule across time.</p>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] text-slate-500">
+            {Object.entries(GANTT_BAR_COLORS).map(([label, color]) => (
+              <span key={label} className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color }} />
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto rounded-2xl border border-slate-100">
+          <div className="flex" style={{ minWidth: `${Math.max(900, 192 + ganttDays * 48)}px` }}>
+
+            {/* Left sidebar */}
+            <div className="w-48 shrink-0 border-r border-slate-100 bg-[#f8fafc]">
+              {/* Header row */}
+              <div className="flex h-12 items-center border-b border-slate-100 px-4">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Task</span>
               </div>
-              {/* Task List */}
-              {tasks.map((task, idx) => (
-                <div key={task.id} className="border-b border-gray-100 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer group">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{task.title}</p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      {/* Progress Circle */}
-                      <div className="relative w-8 h-8">
-                        <svg className="w-8 h-8 transform -rotate-90" viewBox="0 0 32 32">
-                          <circle cx="16" cy="16" r="14" fill="none" stroke="#e5e7eb" strokeWidth="2" />
-                          <circle
-                            cx="16"
-                            cy="16"
-                            r="14"
-                            fill="none"
-                            stroke="#3b82f6"
-                            strokeWidth="2"
-                            strokeDasharray={`${(idx % 3 === 0 ? 80 : idx % 3 === 1 ? 100 : 50) / 100 * 88} 88`}
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-blue-600">
-                          {idx % 3 === 0 ? '80%' : idx % 3 === 1 ? '100%' : '50%'}
-                        </span>
-                      </div>
-                      {/* Duration */}
-                      <div className="text-xs text-gray-600 w-12 text-right font-medium">
-                        {Math.floor(Math.random() * 12) + 3} d
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              {tasks.map((task) => {
+                const barColor = GANTT_BAR_COLORS[task.status] ?? PRIORITY_BAR_COLORS[task.priority] ?? '#94a3b8';
+                return (
+                  <button
+                    key={task.id}
+                    type="button"
+                    data-task-id={task.id}
+                    className="flex w-full items-center gap-2.5 border-b border-slate-100 px-4 transition-colors hover:bg-slate-50 cursor-pointer text-left"
+                    style={{ height: ROW_H }}
+                    onClick={handleGanttTaskOpen}
+                  >
+                    <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: barColor }} />
+                    <p className="truncate text-[13px] font-medium text-slate-800">{task.title}</p>
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Gantt Chart */}
-            <div className="flex-1 relative">
-              {/* Today Indicator */}
-              <div className="absolute top-0 bottom-0 w-1 bg-red-500 z-20" style={{ left: todayPosition + '%' }}></div>
+            {/* Timeline grid */}
+            <div className="relative flex-1">
+              {/* Today line */}
+              {todayPosition >= 0 && todayPosition <= 100 && (
+                <div
+                  className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-indigo-500"
+                  style={{ left: `${todayPosition}%` }}
+                >
+                  <span className="absolute -top-1 left-1 rounded bg-indigo-500 px-1 py-0.5 text-[9px] font-bold text-white leading-none">
+                    Today
+                  </span>
+                </div>
+              )}
 
-              {/* Date Header */}
-              <div className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10 flex divide-x divide-gray-200">
-                {days.map((date) => (
-                  <div
-                    key={date.toISOString()}
-                    className={`flex-1 px-2 py-3 text-center text-xs font-semibold flex flex-col items-center gap-1 ${
-                      date.getTime() === today.getTime()
-                        ? 'bg-red-100'
-                        : 'bg-gray-50'
-                    }`}
-                  >
-                    <div className={date.getTime() === today.getTime() ? 'text-red-700' : 'text-gray-600'}>
-                      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()]}
-                    </div>
-                    <div className={date.getTime() === today.getTime() ? 'text-red-700 font-bold' : 'text-gray-900 font-bold'}>
-                      {date.getDate()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Task Bars */}
-              <div className="divide-y divide-gray-100">
-                {tasks.map((task) => {
-                  const pos = getTaskPosition(task);
-                  const colorClass = GANTT_COLORS[task.title] || 'bg-gray-500';
+              {/* Date header */}
+              <div className="flex h-12 border-b border-slate-100 bg-[#f8fafc]">
+                {days.map((date) => {
+                  const isToday =
+                    date.getFullYear() === today.getFullYear() &&
+                    date.getMonth() === today.getMonth() &&
+                    date.getDate() === today.getDate();
                   return (
-                    <div key={task.id} className="flex bg-white hover:bg-gray-50 transition-colors h-14 items-center relative">
-                      <div className="absolute" style={{ left: pos.left, width: pos.width }}>
-                        <div
-                          className={`h-8 rounded-md mx-1 flex items-center px-3 text-white text-xs font-semibold shadow-sm cursor-pointer hover:shadow-md transition-shadow overflow-hidden ${colorClass}`}
-                          style={{
-                            backgroundImage: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.15), rgba(255,255,255,0.15) 10px, transparent 10px, transparent 20px)',
-                          }}
-                          title={task.title}
-                        >
-                          <span className="truncate">{task.title}</span>
-                        </div>
-                      </div>
+                    <div
+                      key={date.toISOString()}
+                      className={`flex flex-1 flex-col items-center justify-center border-r border-slate-100 last:border-r-0 ${
+                        isToday ? 'bg-indigo-50' : ''
+                      }`}
+                    >
+                      <span className={`text-[9px] font-medium uppercase ${isToday ? 'text-indigo-400' : 'text-slate-400'}`}>
+                        {weekDays[date.getDay()]}
+                      </span>
+                      <span className={`text-[11px] font-bold ${isToday ? 'text-indigo-600' : 'text-slate-700'}`}>
+                        {date.getDate()}
+                      </span>
                     </div>
                   );
                 })}
               </div>
+
+              {/* Rows */}
+              {tasks.map((task) => {
+                return (
+                  <div
+                    key={task.id}
+                    className="relative flex border-b border-slate-100 last:border-b-0"
+                    style={{ height: ROW_H }}
+                  >
+                    {/* Grid lines */}
+                    {days.map((date) => (
+                      <div
+                        key={date.toISOString()}
+                        className="flex-1 border-r border-slate-100/70 last:border-r-0"
+                      />
+                    ))}
+                    {/* Bar */}
+                    {(() => {
+                      const pos = getTaskPosition(task);
+                      if (!pos) return null;
+                      const barColor = GANTT_BAR_COLORS[task.status] ?? PRIORITY_BAR_COLORS[task.priority] ?? '#94a3b8';
+                      const barBg = pos.isOverdue ? '#f43f5e' : barColor;
+                      return (
+                        <div className="absolute inset-y-0 flex items-center" style={{ left: pos.left, width: pos.width }}>
+                          <button
+                            type="button"
+                            data-task-id={task.id}
+                            className="relative mx-1 flex h-8 w-full items-center overflow-hidden rounded-lg px-3 text-[11px] font-semibold text-white shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-all hover:brightness-110"
+                            style={{ backgroundColor: barBg }}
+                            title={task.title}
+                            onClick={handleGanttTaskOpen}
+                          >
+                            <span className="truncate drop-shadow-sm">{task.title}</span>
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })}
+
+              {tasks.length === 0 && (
+                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
+                  No tasks to display on the timeline.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1311,7 +2039,7 @@ export default function TodoPersonalPage() {
   };
 
   const renderCalendarView = () => {
-    const currentMonth = new Date('2026-05-13');
+    const currentMonth = calendarMonth;
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
 
@@ -1330,7 +2058,37 @@ export default function TodoPersonalPage() {
 
     const getTasksForDay = (day: number | null) => {
       if (!day) return [];
-      return tasks.filter(task => task.dueDate?.includes(day.toString().padStart(2, '0')));
+      return tasks.filter((task) => {
+        const rawDate = task.dueDateIso ?? task.dueDate ?? '';
+        if (!rawDate) {
+          return false;
+        }
+        const parsed = new Date(rawDate);
+        if (Number.isNaN(parsed.getTime())) {
+          return false;
+        }
+        return (
+          parsed.getFullYear() === year &&
+          parsed.getMonth() === month &&
+          parsed.getDate() === day
+        );
+      });
+    };
+
+    const getCalendarColor = (task: Task) => {
+      if (task.status === 'In progress') {
+        return 'bg-orange-100 text-orange-800';
+      }
+      if (task.status === 'In review') {
+        return 'bg-emerald-100 text-emerald-800';
+      }
+      if (task.priority === 'High') {
+        return 'bg-rose-100 text-rose-800';
+      }
+      if (task.priority === 'Medium') {
+        return 'bg-amber-100 text-amber-800';
+      }
+      return 'bg-sky-100 text-sky-800';
     };
 
     const monthName = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -1352,13 +2110,20 @@ export default function TodoPersonalPage() {
 
           {/* Calendar Days */}
           <div className="grid grid-cols-7 gap-2">
-            {days.map((day) => {
+            {days.map((day, index) => {
               const dayTasks = getTasksForDay(day);
-              const isToday = day === new Date('2026-05-13').getDate();
+              const today = new Date();
+              const isToday =
+                day !== null &&
+                year === today.getFullYear() &&
+                month === today.getMonth() &&
+                day === today.getDate();
+              const dateKey = day === null ? null : formatCalendarDateKey(new Date(year, month, day));
+              const weatherIcon = dateKey ? resolveCalendarWeatherIcon(calendarWeather[dateKey]) : null;
 
               return (
                 <div
-                  key={day ? `day-${day}` : `empty-${Math.random()}`}
+                  key={day ? `day-${day}` : `empty-${index}`}
                   className={`min-h-24 p-2 border rounded-lg ${
                     day === null
                       ? 'bg-gray-50 border-gray-100'
@@ -1369,17 +2134,23 @@ export default function TodoPersonalPage() {
                 >
                   {day !== null && (
                     <>
-                      <p className={`text-sm font-semibold mb-1 ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
-                        {day}
-                      </p>
+                      <div className="mb-1 flex items-center justify-between">
+                        <p className={`text-sm font-semibold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                          {day}
+                        </p>
+                        {weatherIcon && <span className="text-base" aria-hidden="true">{weatherIcon}</span>}
+                      </div>
                       <div className="space-y-1">
                         {dayTasks.slice(0, 2).map((task) => (
                           <div
                             key={task.id}
-                            className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 truncate"
+                            className={`text-xs px-1.5 py-0.5 rounded truncate ${getCalendarColor(task)}`}
                             title={task.title}
                           >
-                            {task.id}
+                            <div className="font-semibold truncate">{task.title}</div>
+                            {task.dueDate && (
+                              <div className="text-[10px] opacity-80">{task.dueDate}</div>
+                            )}
                           </div>
                         ))}
                         {dayTasks.length > 2 && (
@@ -1411,26 +2182,88 @@ export default function TodoPersonalPage() {
     );
   };
 
-  const renderDashboardView = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <p className="text-gray-600 text-sm mb-2">Total Tasks</p>
-        <p className="text-3xl font-bold text-gray-900">{tasks.length}</p>
+  const renderDashboardView = () => {
+    const total = tasks.length;
+    const backlog = tasks.filter((task) => task.status === 'Backlog').length;
+    const inProgress = tasks.filter((task) => task.status === 'In progress').length;
+    const inReview = tasks.filter((task) => task.status === 'In review').length;
+    const completed = tasks.filter((task) => task.status === 'In review').length;
+    const dueToday = tasks.filter((task) => {
+      if (!task.dueDate) return false;
+      const date = new Date(task.dueDate);
+      const now = new Date();
+      return (
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate()
+      );
+    }).length;
+
+    const renderDonut = (value: number, label: string, color: string) => {
+      const radius = 36;
+      const circumference = 2 * Math.PI * radius;
+      const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+      const offset = circumference - (percentage / 100) * circumference;
+      return (
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 flex items-center gap-4">
+          <svg width="90" height="90" className="shrink-0">
+            <circle
+              cx="45"
+              cy="45"
+              r={radius}
+              fill="none"
+              stroke="#e5e7eb"
+              strokeWidth="8"
+            />
+            <circle
+              cx="45"
+              cy="45"
+              r={radius}
+              fill="none"
+              stroke={color}
+              strokeWidth="8"
+              strokeDasharray={circumference}
+              strokeDashoffset={offset}
+              strokeLinecap="round"
+              transform="rotate(-90 45 45)"
+            />
+            <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" className="fill-gray-900 text-sm font-semibold">
+              {percentage}%
+            </text>
+          </svg>
+          <div>
+            <p className="text-sm text-gray-500">{label}</p>
+            <p className="text-2xl font-bold text-gray-900">{value}</p>
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+          {renderDonut(backlog, 'Backlog', '#9ca3af')}
+          {renderDonut(inProgress, 'In progress', '#f97316')}
+          {renderDonut(inReview, 'In review', '#10b981')}
+          {renderDonut(completed, 'Completed', '#3b82f6')}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <p className="text-sm text-gray-500">Total Tasks</p>
+            <p className="text-3xl font-bold text-gray-900 mt-2">{total}</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <p className="text-sm text-gray-500">Due Today</p>
+            <p className="text-3xl font-bold text-amber-600 mt-2">{dueToday}</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <p className="text-sm text-gray-500">Realtime status</p>
+            <p className="text-sm text-emerald-600 font-semibold mt-3">Live updates every 10s</p>
+          </div>
+        </div>
       </div>
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <p className="text-gray-600 text-sm mb-2">In Progress</p>
-        <p className="text-3xl font-bold text-orange-600">{tasks.filter(t => t.status === 'In progress').length}</p>
-      </div>
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <p className="text-gray-600 text-sm mb-2">In Review</p>
-        <p className="text-3xl font-bold text-green-600">{tasks.filter(t => t.status === 'In review').length}</p>
-      </div>
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <p className="text-gray-600 text-sm mb-2">Backlog</p>
-        <p className="text-3xl font-bold text-gray-600">{tasks.filter(t => t.status === 'Backlog').length}</p>
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -1509,6 +2342,263 @@ export default function TodoPersonalPage() {
         {activeView === 'calendar' && renderCalendarView()}
         {activeView === 'dashboard' && renderDashboardView()}
 
+        {/* ── Shared task drawer (Kanban / Gantt / Calendar views) ── */}
+        {activeView !== 'list' && selectedTask && editedTask && (
+          <>
+            <button
+              type="button"
+              className="fixed inset-0 backdrop-blur-sm z-40 transition-opacity duration-300 cursor-default"
+              onClick={() => {
+                setSelectedTask(null);
+                setEditedTask(null);
+                setSubtasks([]);
+                setCommentInput('');
+                setDescription('');
+                setDueTime('');
+              }}
+              aria-label="Close task drawer"
+            />
+            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
+              {/* Header */}
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+                <p className="text-xs font-mono text-gray-500">{selectedTask.id}</p>
+                <button
+                  type="button"
+                  onClick={() => { setSelectedTask(null); setEditedTask(null); }}
+                  className="p-2 text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-6">
+                {/* Priority + Status + Title + Description */}
+                <div className="mb-6">
+                  <div className="flex items-center gap-3 mb-3">
+                    <select
+                      value={editedTask.priority}
+                      onChange={(e) => handleEditPriorityChange(e.target.value as Task['priority'])}
+                      className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold"
+                    >
+                      <option value="High">High</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Low">Low</option>
+                    </select>
+                    <select
+                      value={editedTask.status}
+                      onChange={(e) => handleEditStatusChange(e.target.value)}
+                      className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold"
+                    >
+                      {statusOptions.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <input
+                    value={editedTask.title}
+                    onChange={(e) => handleEditTitleChange(e.target.value)}
+                    className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-emerald-500"
+                    placeholder="Task title"
+                  />
+                  <textarea
+                    value={description}
+                    onChange={(e) => handleEditDescriptionChange(e.target.value)}
+                    placeholder="Add a detailed description..."
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                  />
+                </div>
+
+                {/* People */}
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <p className="text-sm font-semibold text-gray-900 mb-3">People</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availableUsers.map((user) => {
+                      const isTagged = taggedUsers.includes(user.id);
+                      return (
+                        <button
+                          key={user.id}
+                          type="button"
+                          onClick={() => toggleTaggedUser(user.id)}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${isTagged ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-200'}`}
+                        >
+                          <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white`}>
+                            {user.initials}
+                          </div>
+                          {user.name}
+                          {isTagged && <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" /></svg>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Due date */}
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <p className="text-sm font-semibold text-gray-900 mb-3">Due Date</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="date"
+                      value={editedTask.dueDateIso ? editedTask.dueDateIso.slice(0, 10) : ''}
+                      onChange={(e) => handleEditDueDateChange(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <input
+                      type="time"
+                      value={dueTime}
+                      onChange={(e) => setDueTime(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Attachments */}
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <p className="text-sm font-semibold text-gray-900 mb-3">Attachments ({attachments.length})</p>
+                  {attachments.length > 0 && (
+                    <div className="space-y-2 mb-3">
+                      {attachments.map((att) => (
+                        <div key={att.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                          <div className="w-8 h-8 bg-indigo-500 rounded flex items-center justify-center shrink-0">
+                            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{att.filename}</p>
+                            <p className="text-xs text-gray-500">{formatFileSize(att.size)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <label className="flex items-center justify-center gap-2 w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 cursor-pointer">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    <span className="text-sm">Add Attachment</span>
+                    <input type="file" multiple className="hidden" onChange={(e) => handleAddAttachments(e.target.files)} />
+                  </label>
+                </div>
+
+                {/* Comments */}
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <p className="text-sm font-semibold text-gray-900 mb-3">Comments ({comments.length})</p>
+                  <div className="space-y-4 mb-4">
+                    {comments.length === 0 ? (
+                      <p className="text-sm text-gray-500">No comments yet.</p>
+                    ) : (
+                      comments.map((c) => (
+                        <div key={c.id}>
+                          <div className="flex items-center gap-3 mb-1">
+                            <div className="w-7 h-7 rounded-full bg-gray-300 shrink-0" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{c.author}</p>
+                              <p className="text-xs text-gray-500">{c.time}</p>
+                            </div>
+                          </div>
+                          <p className="text-sm text-gray-600 ml-10">{c.text}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={commentInput}
+                      onChange={(e) => handleNotesChange(e.target.value)}
+                      placeholder="Write a comment..."
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleSendComment(); }}
+                    />
+                    <button type="button" onClick={handleSendComment} className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700" aria-label="Send comment">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12l16-8-4 8 4 8-16-8z" /></svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Subtasks */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold text-gray-900">Subtasks</p>
+                    {subtasks.length > 0 && (
+                      <span className="text-xs font-semibold text-emerald-600">
+                        {Math.round((subtasks.filter((s) => s.completed).length / subtasks.length) * 100)}% complete
+                      </span>
+                    )}
+                  </div>
+                  {subtasks.length > 0 && (
+                    <div className="mb-3 h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-all"
+                        style={{ width: `${Math.round((subtasks.filter((s) => s.completed).length / subtasks.length) * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      value={subtaskTitle}
+                      onChange={(e) => setSubtaskTitle(e.target.value)}
+                      placeholder="Add a subtask"
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddSubtask(); }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button type="button" onClick={handleAddSubtask} className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Add</button>
+                  </div>
+                  <div className="space-y-2">
+                    {subtasks.map((st) => (
+                      <div key={st.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg group hover:bg-gray-100">
+                        <input
+                          type="checkbox"
+                          checked={st.completed}
+                          onChange={() => toggleLegacySubtask(st.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <p className={`flex-1 text-sm ${st.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>{st.title}</p>
+                        <button type="button" onClick={() => removeLegacySubtask(st.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6 space-y-3">
+                <button
+                  type="button"
+                  onClick={handleSaveTaskChanges}
+                  className="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold"
+                >
+                  Save Changes
+                </button>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTask(null);
+                      setEditedTask(null);
+                      setSubtasks([]);
+                      setCommentInput('');
+                      setDescription('');
+                      setDueTime('');
+                    }}
+                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelectedTask}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         {showCreateDrawer && (
           <>
             <button
@@ -1554,9 +2644,11 @@ export default function TodoPersonalPage() {
                       onChange={(e) => setCreateTask((current) => ({ ...current, status: e.target.value }))}
                       className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold"
                     >
-                      <option value="Backlog">Backlog</option>
-                      <option value="In progress">In progress</option>
-                      <option value="In review">In review</option>
+                      {statusOptions.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <input
