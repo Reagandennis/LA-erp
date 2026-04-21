@@ -2,6 +2,77 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+// ─── Dashboard sub-components ────────────────────────────────────────────────
+
+function AnimatedDonut({ value, total, label, color, delay = 0 }: Readonly<{
+  value: number; total: number; label: string; color: string; delay?: number;
+}>) {
+  const radius = 38;
+  const circumference = 2 * Math.PI * radius;
+  const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+  const targetOffset = circumference - (percentage / 100) * circumference;
+  const [offset, setOffset] = useState(circumference);
+  const [displayed, setDisplayed] = useState(0);
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setOffset(targetOffset), delay + 60);
+    let frame: number;
+    const start = performance.now();
+    const duration = 900;
+    const animate = (now: number) => {
+      const progress = Math.min((now - start - delay) / duration, 1);
+      if (progress > 0) setDisplayed(Math.round(progress * percentage));
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => { clearTimeout(t1); cancelAnimationFrame(frame); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, total]);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5 flex items-center gap-5 shadow-sm hover:shadow-md transition-shadow">
+      <div className="relative shrink-0">
+        <svg width="96" height="96">
+          <circle cx="48" cy="48" r={radius} fill="none" stroke="#f3f4f6" strokeWidth="9" />
+          <circle
+            cx="48" cy="48" r={radius} fill="none"
+            stroke={color} strokeWidth="9"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            transform="rotate(-90 48 48)"
+            style={{ transition: `stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1) ${delay}ms` }}
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-gray-800">
+          {displayed}%
+        </span>
+      </div>
+      <div>
+        <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">{label}</p>
+        <p className="text-3xl font-black text-gray-900 mt-0.5">{value}</p>
+        <p className="text-xs text-gray-400 mt-0.5">of {total} tasks</p>
+      </div>
+    </div>
+  );
+}
+
+function AnimatedBar({ pct, color, delay = 0 }: Readonly<{ pct: number; color: string; delay?: number }>) {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(() => setWidth(pct), delay + 80);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pct]);
+  return (
+    <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+      <div
+        className="h-2.5 rounded-full"
+        style={{ width: `${width}%`, backgroundColor: color, transition: `width 0.8s cubic-bezier(0.4,0,0.2,1) ${delay}ms` }}
+      />
+    </div>
+  );
+}
 
 const DEFAULT_KANBAN_COLUMNS = ['Backlog', 'In progress', 'In review'];
 const DEFAULT_COLUMN_COLORS: Record<string, string> = {
@@ -2259,83 +2330,207 @@ export default function TodoPersonalPage() {
 
   const renderDashboardView = () => {
     const total = tasks.length;
-    const backlog = tasks.filter((task) => task.status === 'Backlog').length;
-    const inProgress = tasks.filter((task) => task.status === 'In progress').length;
-    const inReview = tasks.filter((task) => task.status === 'In review').length;
-    const completed = tasks.filter((task) => task.status === 'In review').length;
-    const dueToday = tasks.filter((task) => {
-      if (!task.dueDate) return false;
-      const date = new Date(task.dueDate);
-      const now = new Date();
-      return (
-        date.getFullYear() === now.getFullYear() &&
-        date.getMonth() === now.getMonth() &&
-        date.getDate() === now.getDate()
-      );
-    }).length;
+    const backlog = tasks.filter(t => t.status === 'Backlog').length;
+    const inProgress = tasks.filter(t => t.status === 'In progress').length;
+    const inReview = tasks.filter(t => t.status === 'In review').length;
+    // Use the last kanban column as the "completed" stage
+    const lastCol = kanbanColumns.at(-1) ?? 'In review';
+    const completed = tasks.filter(t => t.status === lastCol).length;
 
-    const renderDonut = (value: number, label: string, color: string) => {
-      const radius = 36;
-      const circumference = 2 * Math.PI * radius;
-      const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
-      const offset = circumference - (percentage / 100) * circumference;
-      return (
-        <div className="bg-white rounded-2xl border border-gray-200 p-5 flex items-center gap-4">
-          <svg width="90" height="90" className="shrink-0">
-            <circle
-              cx="45"
-              cy="45"
-              r={radius}
-              fill="none"
-              stroke="#e5e7eb"
-              strokeWidth="8"
-            />
-            <circle
-              cx="45"
-              cy="45"
-              r={radius}
-              fill="none"
-              stroke={color}
-              strokeWidth="8"
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-              strokeLinecap="round"
-              transform="rotate(-90 45 45)"
-            />
-            <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" className="fill-gray-900 text-sm font-semibold">
-              {percentage}%
-            </text>
-          </svg>
-          <div>
-            <p className="text-sm text-gray-500">{label}</p>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
-          </div>
-        </div>
-      );
-    };
+    const now = new Date();
+    const dueToday = tasks.filter(t => {
+      if (!t.dueDate) return false;
+      const d = new Date(t.dueDate);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    }).length;
+    const overdue = tasks.filter(t => {
+      if (!t.dueDate || t.status === lastCol) return false;
+      return new Date(t.dueDate) < now;
+    }).length;
+    const highPriority = tasks.filter(t => t.priority === 'High').length;
+    const mediumPriority = tasks.filter(t => t.priority === 'Medium').length;
+    const lowPriority = tasks.filter(t => t.priority === 'Low').length;
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    const recentTasks = tasks.slice(-5).reverse();
+
+    const priorityPct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0;
 
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {renderDonut(backlog, 'Backlog', '#9ca3af')}
-          {renderDonut(inProgress, 'In progress', '#f97316')}
-          {renderDonut(inReview, 'In review', '#10b981')}
-          {renderDonut(completed, 'Completed', '#3b82f6')}
+
+        {/* ── Row 1: Animated donut status cards ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+          <AnimatedDonut value={backlog}    total={total} label="Backlog"     color="#9ca3af" delay={0}   />
+          <AnimatedDonut value={inProgress} total={total} label="In Progress" color="#f97316" delay={100} />
+          <AnimatedDonut value={inReview}   total={total} label="In Review"   color="#10b981" delay={200} />
+          <AnimatedDonut value={completed}  total={total} label={lastCol}     color="#3b82f6" delay={300} />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <p className="text-sm text-gray-500">Total Tasks</p>
-            <p className="text-3xl font-bold text-gray-900 mt-2">{total}</p>
+
+        {/* ── Row 2: KPI metric cards ── */}
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-5">
+          {/* Total */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm flex flex-col gap-2">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            </div>
+            <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Total Tasks</p>
+            <p className="text-4xl font-black text-gray-900">{total}</p>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <p className="text-sm text-gray-500">Due Today</p>
-            <p className="text-3xl font-bold text-amber-600 mt-2">{dueToday}</p>
+
+          {/* Completion Rate */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm flex flex-col gap-2">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center">
+              <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Completion</p>
+            <p className="text-4xl font-black text-emerald-600">{completionRate}<span className="text-lg font-bold">%</span></p>
+            <AnimatedBar pct={completionRate} color="#10b981" delay={400} />
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <p className="text-sm text-gray-500">Realtime status</p>
-            <p className="text-sm text-emerald-600 font-semibold mt-3">Live updates every 10s</p>
+
+          {/* Due Today */}
+          <div className={`rounded-2xl border p-5 shadow-sm flex flex-col gap-2 ${dueToday > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-100'}`}>
+            <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
+              <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <p className="text-xs text-amber-600 font-medium uppercase tracking-wider">Due Today</p>
+            <p className="text-4xl font-black text-amber-700">{dueToday}</p>
+            <p className="text-xs text-amber-500">{dueToday === 0 ? 'All clear!' : 'need attention'}</p>
+          </div>
+
+          {/* Overdue */}
+          <div className={`rounded-2xl border p-5 shadow-sm flex flex-col gap-2 ${overdue > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}>
+            <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center">
+              <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <p className="text-xs text-red-500 font-medium uppercase tracking-wider">Overdue</p>
+            <p className={`text-4xl font-black ${overdue > 0 ? 'text-red-600' : 'text-gray-900'}`}>{overdue}</p>
+            <p className="text-xs text-red-400">{overdue === 0 ? 'On track 🎉' : 'past due date'}</p>
+          </div>
+
+          {/* High Priority */}
+          <div className={`rounded-2xl border p-5 shadow-sm flex flex-col gap-2 ${highPriority > 0 ? 'bg-orange-50 border-orange-200' : 'bg-white border-gray-100'}`}>
+            <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center">
+              <span className="text-orange-600 text-base">🔥</span>
+            </div>
+            <p className="text-xs text-orange-500 font-medium uppercase tracking-wider">High Priority</p>
+            <p className="text-4xl font-black text-orange-600">{highPriority}</p>
+            <p className="text-xs text-orange-400">{highPriority === 0 ? 'No urgent tasks' : 'urgent tasks'}</p>
           </div>
         </div>
+
+        {/* ── Row 3: Priority breakdown + Pipeline ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+          {/* Priority Breakdown */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Priority Breakdown</h3>
+              <span className="text-xs text-gray-400">{total} total</span>
+            </div>
+            <div className="space-y-4">
+              {([
+                { label: 'High',   count: highPriority,   color: '#ef4444', bg: 'bg-red-100',    text: 'text-red-700'    },
+                { label: 'Medium', count: mediumPriority,  color: '#f97316', bg: 'bg-orange-100', text: 'text-orange-700' },
+                { label: 'Low',    count: lowPriority,     color: '#3b82f6', bg: 'bg-blue-100',   text: 'text-blue-700'   },
+              ] as const).map((row, i) => (
+                <div key={row.label}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${row.bg} ${row.text}`}>{row.label}</span>
+                    </div>
+                    <span className="text-sm font-bold text-gray-700">{row.count} <span className="text-gray-400 font-normal">({priorityPct(row.count)}%)</span></span>
+                  </div>
+                  <AnimatedBar pct={priorityPct(row.count)} color={row.color} delay={500 + i * 120} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Status Pipeline (segmented bar) */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Status Pipeline</h3>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs text-emerald-600 font-medium">Live</span>
+              </div>
+            </div>
+            {total === 0 ? (
+              <div className="flex items-center justify-center h-28 text-gray-300 text-sm">No tasks yet</div>
+            ) : (
+              <>
+                {/* Segmented bar */}
+                <div className="flex rounded-xl overflow-hidden h-8 gap-px mb-5">
+                  {[
+                    { status: 'Backlog',     count: backlog,     color: '#9ca3af' },
+                    { status: 'In Progress', count: inProgress,  color: '#f97316' },
+                    { status: 'In Review',   count: inReview,    color: '#10b981' },
+                    { status: lastCol,       count: completed,   color: '#3b82f6' },
+                  ].filter(s => s.count > 0).map(s => (
+                    <div
+                      key={s.status}
+                      title={`${s.status}: ${s.count}`}
+                      style={{ width: `${(s.count / total) * 100}%`, backgroundColor: s.color }}
+                      className="transition-all duration-700 flex items-center justify-center"
+                    >
+                      {(s.count / total) > 0.12 && (
+                        <span className="text-white text-xs font-bold">{s.count}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {/* Legend */}
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { status: 'Backlog',     count: backlog,     color: '#9ca3af' },
+                    { status: 'In Progress', count: inProgress,  color: '#f97316' },
+                    { status: 'In Review',   count: inReview,    color: '#10b981' },
+                    { status: lastCol,       count: completed,   color: '#3b82f6' },
+                  ].map(s => (
+                    <div key={s.status} className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
+                      <span className="text-xs text-gray-500 truncate">{s.status}</span>
+                      <span className="ml-auto text-xs font-bold text-gray-800">{s.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Row 4: Recent activity ── */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Recent Tasks</h3>
+            <span className="text-xs text-gray-400">{tasks.length} total</span>
+          </div>
+          {recentTasks.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No tasks yet — create your first!</p>
+          ) : (
+            <div className="space-y-2">
+              {recentTasks.map(task => {
+                const priorityColors: Record<string, string> = { High: 'bg-red-100 text-red-700', Medium: 'bg-amber-100 text-amber-700', Low: 'bg-blue-100 text-blue-700' };
+                const statusColors: Record<string, string> = { Backlog: 'bg-gray-100 text-gray-600', 'In progress': 'bg-orange-100 text-orange-700', 'In review': 'bg-emerald-100 text-emerald-700' };
+                const sc = statusColors[task.status] ?? 'bg-blue-100 text-blue-700';
+                const pc = priorityColors[task.priority] ?? 'bg-gray-100 text-gray-500';
+                return (
+                  <button type="button" key={task.id} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors group" onClick={() => { setSelectedTask(task); setEditedTask(task); }}>
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: columnColors[task.status] ?? '#9ca3af' }} />
+                    <p className="flex-1 text-sm font-medium text-gray-800 truncate group-hover:text-blue-700 transition-colors">{task.title}</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${pc}`}>{task.priority}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${sc}`}>{task.status}</span>
+                    {task.dueDate && (
+                      <span className="text-xs text-gray-400 shrink-0">{new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
       </div>
     );
   };
