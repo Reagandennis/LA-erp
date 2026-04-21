@@ -31,7 +31,7 @@ export default async function RootLayout({
   const sidebarUser = auth
     ? { name: auth.user.name, email: auth.user.email }
     : { name: 'Guest', email: 'guest@la-erp.local' };
-  const shouldShowSidebar = true;
+  const shouldShowSidebar = !!auth;
 
   return (
     <html

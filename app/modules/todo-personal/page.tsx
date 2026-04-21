@@ -19,29 +19,6 @@ type MentionUser = {
 
 const USER_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500'];
 
-const CALENDAR_WEATHER_ICONS: Array<{ codes: number[]; icon: string }> = [
-  { codes: [0, 1], icon: '☀️' },
-  { codes: [2, 3], icon: '⛅️' },
-  { codes: [45, 48], icon: '🌫️' },
-  { codes: [51, 53, 55, 56, 57], icon: '🌦️' },
-  { codes: [61, 63, 65, 80, 81, 82, 66, 67], icon: '🌧️' },
-  { codes: [71, 73, 75, 77, 85, 86], icon: '❄️' },
-  { codes: [95, 96, 99], icon: '⛈️' },
-];
-
-const resolveCalendarWeatherIcon = (code?: number | null) => {
-  if (code === null || code === undefined) {
-    return null;
-  }
-  for (const entry of CALENDAR_WEATHER_ICONS) {
-    if (entry.codes.includes(code)) {
-      return entry.icon;
-    }
-  }
-  return null;
-};
-
-const formatCalendarDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
 const getInitials = (name: string) => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -604,7 +581,6 @@ export default function TodoPersonalPage() {
   const [showAddColumn, setShowAddColumn] = useState(false);
   const kanbanSyncReady = useRef(false);
   const [calendarMonth] = useState(() => new Date());
-  const [calendarWeather, setCalendarWeather] = useState<Record<string, number>>({});
   useEffect(() => {
     let isActive = true;
     const loadUsers = async () => {
@@ -710,48 +686,6 @@ export default function TodoPersonalPage() {
     };
   }, [kanbanColumns, columnColors]);
 
-  useEffect(() => {
-    let isActive = true;
-    const loadCalendarWeather = async () => {
-      const year = calendarMonth.getFullYear();
-      const month = calendarMonth.getMonth();
-      const startDate = formatCalendarDateKey(new Date(year, month, 1));
-      const endDate = formatCalendarDateKey(new Date(year, month + 1, 0));
-      try {
-        const params = new URLSearchParams({
-          latitude: '-1.286389',
-          longitude: '36.817223',
-          daily: 'weather_code',
-          timezone: 'auto',
-          start_date: startDate,
-          end_date: endDate,
-        });
-        const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as { daily?: { time: string[]; weather_code: number[] } };
-        if (!isActive || !data.daily) {
-          return;
-        }
-        const next: Record<string, number> = {};
-        data.daily.time.forEach((date, index) => {
-          const code = data.daily?.weather_code[index];
-          if (typeof code === 'number') {
-            next[date] = code;
-          }
-        });
-        setCalendarWeather(next);
-      } catch {
-        // ignore
-      }
-    };
-
-    void loadCalendarWeather();
-    return () => {
-      isActive = false;
-    };
-  }, [calendarMonth]);
   useEffect(() => {
     if (!selectedTask) {
       return;
@@ -959,6 +893,8 @@ export default function TodoPersonalPage() {
     const task = tasks.find((item) => item.id === taskId);
     if (task) openTaskDrawer(task);
   };
+
+  const handleCalendarTaskOpen = handleGanttTaskOpen;
   useEffect(() => {
     const controller = new AbortController();
     fetchTasks(controller.signal)
@@ -2047,115 +1983,266 @@ export default function TodoPersonalPage() {
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
     const startingDayOfWeek = firstDay.getDay();
+    const todayDate = new Date();
 
-    const days = [];
-    for (let i = 0; i < startingDayOfWeek; i++) {
-      days.push(null);
-    }
-    for (let i = 1; i <= daysInMonth; i++) {
-      days.push(i);
-    }
+    const calDays: (number | null)[] = [];
+    for (let i = 0; i < startingDayOfWeek; i++) calDays.push(null);
+    for (let i = 1; i <= daysInMonth; i++) calDays.push(i);
+    // pad to complete last row
+    while (calDays.length % 7 !== 0) calDays.push(null);
 
     const getTasksForDay = (day: number | null) => {
       if (!day) return [];
       return tasks.filter((task) => {
         const rawDate = task.dueDateIso ?? task.dueDate ?? '';
-        if (!rawDate) {
-          return false;
-        }
+        if (!rawDate) return false;
         const parsed = new Date(rawDate);
-        if (Number.isNaN(parsed.getTime())) {
-          return false;
-        }
-        return (
-          parsed.getFullYear() === year &&
-          parsed.getMonth() === month &&
-          parsed.getDate() === day
-        );
+        if (Number.isNaN(parsed.getTime())) return false;
+        return parsed.getFullYear() === year && parsed.getMonth() === month && parsed.getDate() === day;
       });
     };
 
-    const getCalendarColor = (task: Task) => {
-      if (task.status === 'In progress') {
-        return 'bg-orange-100 text-orange-800';
-      }
-      if (task.status === 'In review') {
-        return 'bg-emerald-100 text-emerald-800';
-      }
-      if (task.priority === 'High') {
-        return 'bg-rose-100 text-rose-800';
-      }
-      if (task.priority === 'Medium') {
-        return 'bg-amber-100 text-amber-800';
-      }
-      return 'bg-sky-100 text-sky-800';
+    const EVENT_COLORS = [
+      { bg: 'bg-violet-100', text: 'text-violet-700', dot: 'bg-violet-500' },
+      { bg: 'bg-rose-100',   text: 'text-rose-700',   dot: 'bg-rose-500'   },
+      { bg: 'bg-sky-100',    text: 'text-sky-700',    dot: 'bg-sky-500'    },
+      { bg: 'bg-amber-100',  text: 'text-amber-700',  dot: 'bg-amber-500'  },
+      { bg: 'bg-emerald-100',text: 'text-emerald-700',dot: 'bg-emerald-500'},
+    ];
+    const getEventColor = (task: Task) => {
+      if (task.priority === 'High')   return EVENT_COLORS[1];
+      if (task.status === 'In progress') return EVENT_COLORS[3];
+      if (task.status === 'In review')   return EVENT_COLORS[4];
+      if (task.priority === 'Medium') return EVENT_COLORS[0];
+      return EVENT_COLORS[2];
     };
 
     const monthName = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weekDaysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weekDaysFull  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    // upcoming tasks (next 7 days from today, sorted by due date)
+    const upcomingTasks = tasks
+      .filter((t) => {
+        const raw = t.dueDateIso ?? t.dueDate;
+        if (!raw) return false;
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return false;
+        const diff = (d.getTime() - todayDate.getTime()) / 86_400_000;
+        return diff >= 0 && diff <= 7;
+      })
+      .sort((a, b) => {
+        const da = new Date(a.dueDateIso ?? a.dueDate ?? '').getTime();
+        const db = new Date(b.dueDateIso ?? b.dueDate ?? '').getTime();
+        return da - db;
+      })
+      .slice(0, 6);
 
     return (
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">{monthName}</h2>
+      <div className="flex gap-6">
+        {/* ── Left panel ── */}
+        <div className="flex w-72 shrink-0 flex-col gap-5">
 
-          {/* Week Days Header */}
-          <div className="grid grid-cols-7 gap-2 mb-4">
-            {weekDays.map((day) => (
-              <div key={day} className="text-center text-sm font-semibold text-gray-600 py-2">
-                {day}
+          {/* Mini month selector card */}
+          <div className="rounded-2xl bg-[#1e1b4b] p-5 text-white shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm font-bold tracking-wide">
+                {new Date(year, month).toLocaleDateString('en-US', { month: 'long' })}
+                <span className="ml-1.5 text-indigo-300">{year}</span>
+              </span>
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] text-indigo-300">
+                  {todayDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+                </span>
+              </div>
+            </div>
+
+            {/* Mini grid */}
+            <div className="grid grid-cols-7 gap-0.5 mb-1">
+              {weekDaysShort.map((d) => (
+                <div key={d} className="text-center text-[9px] font-semibold uppercase tracking-wide text-indigo-300 py-1">{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-0.5">
+              {calDays.map((day, idx) => {
+                const isToday =
+                  day !== null &&
+                  year === todayDate.getFullYear() &&
+                  month === todayDate.getMonth() &&
+                  day === todayDate.getDate();
+                const hasTasks = day !== null && getTasksForDay(day).length > 0;
+                return (
+                  <div
+                    key={day ? `mini-${day}` : `mini-empty-${idx}`}
+                    className={`flex flex-col items-center justify-center rounded-lg py-1 ${
+                      isToday
+                        ? 'bg-indigo-500 font-bold'
+                        : day === null
+                        ? ''
+                        : 'hover:bg-white/10 cursor-default'
+                    }`}
+                  >
+                    {day !== null && (
+                      <>
+                        <span className={`text-[11px] font-medium leading-none ${isToday ? 'text-white' : 'text-indigo-100'}`}>
+                          {day}
+                        </span>
+                        {hasTasks && !isToday && (
+                          <span className="mt-0.5 h-1 w-1 rounded-full bg-indigo-400" />
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Upcoming tasks */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-800">Upcoming</p>
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-600">
+                {upcomingTasks.length}
+              </span>
+            </div>
+            {upcomingTasks.length === 0 ? (
+              <p className="text-xs text-slate-400">No tasks due in the next 7 days.</p>
+            ) : (
+              <div className="space-y-3">
+                {upcomingTasks.map((task) => {
+                  const col = getEventColor(task);
+                  const raw = task.dueDateIso ?? task.dueDate;
+                  const d = raw ? new Date(raw) : null;
+                  const label = d
+                    ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                    : '';
+                  return (
+                    <button
+                      key={task.id}
+                      type="button"
+                      data-task-id={task.id}
+                      onClick={handleCalendarTaskOpen}
+                      className="flex w-full items-start gap-3 rounded-xl p-2.5 text-left transition-colors hover:bg-slate-50"
+                    >
+                      <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${col.dot}`} />
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-semibold text-slate-800">{task.title}</p>
+                        <p className="text-[11px] text-slate-400">{label}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Status legend */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="mb-3 text-sm font-bold text-slate-800">Status</p>
+            <div className="space-y-2">
+              {[
+                { label: 'High priority', dot: 'bg-rose-500' },
+                { label: 'In progress', dot: 'bg-amber-400' },
+                { label: 'In review', dot: 'bg-emerald-500' },
+                { label: 'Backlog', dot: 'bg-sky-400' },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-2.5">
+                  <span className={`h-2.5 w-2.5 rounded-full ${item.dot}`} />
+                  <span className="text-[13px] text-slate-600">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Main calendar grid ── */}
+        <div className="flex min-w-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+
+          {/* Calendar header */}
+          <div className="flex items-center justify-between border-b border-slate-100 bg-[#1e1b4b] px-6 py-4">
+            <h2 className="text-base font-bold text-white">{monthName}</h2>
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-indigo-200">
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-indigo-400" />
+                Today
+              </span>
+              <span className="flex items-center gap-1.5 ml-4">
+                <span className="h-2 w-2 rounded-full bg-rose-400" />
+                Event
+              </span>
+            </div>
+          </div>
+
+          {/* Weekday labels */}
+          <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
+            {weekDaysFull.map((d) => (
+              <div key={d} className="py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                {d.slice(0, 3)}
               </div>
             ))}
           </div>
 
-          {/* Calendar Days */}
-          <div className="grid grid-cols-7 gap-2">
-            {days.map((day, index) => {
-              const dayTasks = getTasksForDay(day);
-              const today = new Date();
+          {/* Day cells */}
+          <div className="grid flex-1 grid-cols-7">
+            {calDays.map((day, idx) => {
               const isToday =
                 day !== null &&
-                year === today.getFullYear() &&
-                month === today.getMonth() &&
-                day === today.getDate();
-              const dateKey = day === null ? null : formatCalendarDateKey(new Date(year, month, day));
-              const weatherIcon = dateKey ? resolveCalendarWeatherIcon(calendarWeather[dateKey]) : null;
+                year === todayDate.getFullYear() &&
+                month === todayDate.getMonth() &&
+                day === todayDate.getDate();
+              const isWeekend = idx % 7 === 0 || idx % 7 === 6;
+              const dayTasks = getTasksForDay(day);
 
               return (
                 <div
-                  key={day ? `day-${day}` : `empty-${index}`}
-                  className={`min-h-24 p-2 border rounded-lg ${
+                  key={day ? `cell-${day}` : `empty-${idx}`}
+                  className={`relative min-h-28 border-b border-r border-slate-100 p-2 last:border-r-0 ${
                     day === null
-                      ? 'bg-gray-50 border-gray-100'
-                      : isToday
-                      ? 'bg-blue-50 border-blue-300'
-                      : 'bg-white border-gray-200 hover:border-gray-300'
-                  }`}
+                      ? 'bg-slate-50/60'
+                      : isWeekend
+                      ? 'bg-slate-50/40'
+                      : 'bg-white'
+                  } ${(idx + 1) % 7 === 0 ? 'border-r-0' : ''}`}
                 >
                   {day !== null && (
                     <>
-                      <div className="mb-1 flex items-center justify-between">
-                        <p className={`text-sm font-semibold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                      {/* Date number */}
+                      <div className="mb-1.5">
+                        <span
+                          className={`flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-bold ${
+                            isToday
+                              ? 'bg-indigo-600 text-white'
+                              : isWeekend
+                              ? 'text-slate-400'
+                              : 'text-slate-700'
+                          }`}
+                        >
                           {day}
-                        </p>
-                        {weatherIcon && <span className="text-base" aria-hidden="true">{weatherIcon}</span>}
+                        </span>
                       </div>
+
+                      {/* Task pills */}
                       <div className="space-y-1">
-                        {dayTasks.slice(0, 2).map((task) => (
-                          <div
-                            key={task.id}
-                            className={`text-xs px-1.5 py-0.5 rounded truncate ${getCalendarColor(task)}`}
-                            title={task.title}
-                          >
-                            <div className="font-semibold truncate">{task.title}</div>
-                            {task.dueDate && (
-                              <div className="text-[10px] opacity-80">{task.dueDate}</div>
-                            )}
-                          </div>
-                        ))}
-                        {dayTasks.length > 2 && (
-                          <p className="text-xs text-gray-500 px-1.5">
-                            +{dayTasks.length - 2} more
+                        {dayTasks.slice(0, 3).map((task) => {
+                          const col = getEventColor(task);
+                          return (
+                            <button
+                              key={task.id}
+                              type="button"
+                              data-task-id={task.id}
+                              onClick={handleCalendarTaskOpen}
+                              className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-opacity hover:opacity-80 ${col.bg} ${col.text}`}
+                              title={task.title}
+                            >
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${col.dot}`} />
+                              <span className="truncate text-[11px] font-semibold leading-4">{task.title}</span>
+                            </button>
+                          );
+                        })}
+                        {dayTasks.length > 3 && (
+                          <p className="px-1.5 text-[10px] font-semibold text-slate-400">
+                            +{dayTasks.length - 3} more
                           </p>
                         )}
                       </div>
@@ -2164,18 +2251,6 @@ export default function TodoPersonalPage() {
                 </div>
               );
             })}
-          </div>
-
-          {/* Legend */}
-          <div className="mt-6 pt-6 border-t border-gray-200 flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-orange-400"></div>
-              <span className="text-sm text-gray-600">Task Scheduled</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-400"></div>
-              <span className="text-sm text-gray-600">Today</span>
-            </div>
           </div>
         </div>
       </div>

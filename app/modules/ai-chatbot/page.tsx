@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 type Message = {
   id: string;
@@ -26,6 +26,8 @@ export default function AIChatbotPage() {
   const [selectedModel, setSelectedModel] = useState<'All' | 'GPT-4' | 'GPT-3.5' | 'Claude' | 'Gemini'>('All');
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [messageInput, setMessageInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [conversations, setConversations] = useState<Conversation[]>([
     {
       id: 'C-001',
@@ -114,6 +116,7 @@ export default function AIChatbotPage() {
     if (updated) setSelectedConversation(updated);
 
     setMessageInput('');
+    setIsTyping(true);
 
     // Simulate AI response
     setTimeout(() => {
@@ -135,16 +138,22 @@ export default function AIChatbotPage() {
         return conv;
       });
 
+      setIsTyping(false);
       setConversations(finalConversations);
       const finalUpdated = finalConversations.find((c) => c.id === selectedConversation.id);
       if (finalUpdated) setSelectedConversation(finalUpdated);
-    }, 1000);
+    }, 1800);
   };
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [selectedConversation?.messages, isTyping]);
 
   // Chat View
   if (selectedConversation) {
     return (
-      <div className="fixed inset-0 bg-white z-50 flex flex-col ml-80">
+      <div className="flex flex-col h-screen bg-white">
         {/* Chat Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white sticky top-0 z-40">
           <div className="flex items-center gap-4">
@@ -197,6 +206,40 @@ export default function AIChatbotPage() {
               </div>
             ))
           )}
+
+          {/* AI Thinking Indicator */}
+          {isTyping && (
+            <div className="flex justify-start items-end gap-3">
+              {/* Circular gradient orb */}
+              <div className="relative shrink-0">
+                <div
+                  className="w-10 h-10 rounded-full animate-spin"
+                  style={{
+                    background: 'conic-gradient(from 0deg, #6366f1, #8b5cf6, #ec4899, #3b82f6, #06b6d4, #6366f1)',
+                    animationDuration: '2s',
+                  }}
+                />
+                <div className="absolute inset-0.75 rounded-full bg-gray-50" />
+                <div
+                  className="absolute inset-0.75 rounded-full animate-pulse"
+                  style={{
+                    background: 'radial-gradient(circle at 40% 40%, rgba(139,92,246,0.3), rgba(99,102,241,0.15))',
+                  }}
+                />
+              </div>
+              {/* Typing bubble */}
+              <div className="bg-white border border-gray-200 rounded-lg rounded-bl-none px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 rounded-full bg-pink-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+                <p className="text-xs text-gray-400 mt-1">AI is thinking…</p>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
@@ -206,7 +249,7 @@ export default function AIChatbotPage() {
               type="text"
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
-              onKeyPress={(e) => {
+              onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   handleSendMessage();
                 }
