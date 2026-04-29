@@ -27,6 +27,90 @@ model User {
   sessions       Session[]
   auditLogs      AuditLog[] @relation("AuditActor")
   auditTargets   AuditLog[] @relation("AuditTarget")
+  // Chat
+  chatConversations ChatConversation[] @relation("ChatCreatedBy")
+  chatMemberships   ChatMember[]
+  chatMessages      ChatMessage[]
+  chatReactions     ChatReaction[]
+}
+
+// ─── Chat Models ────────────────────────────────────────────────────────────
+
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
+model ChatConversation {
+  id          Int              @id @default(autoincrement())
+  type        ConversationType
+  name        String?
+  createdById Int
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  createdBy   User             @relation("ChatCreatedBy", fields: [createdById], references: [id])
+  members     ChatMember[]
+  messages    ChatMessage[]
+
+  @@index([createdAt])
+}
+
+model ChatMember {
+  id             Int              @id @default(autoincrement())
+  conversationId Int
+  userId         Int
+  joinedAt       DateTime         @default(now())
+  lastReadAt     DateTime?
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id             Int              @id @default(autoincrement())
+  conversationId Int
+  senderId       Int
+  body           String
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime         @default(now())
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User             @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  attachments    ChatAttachment[]
+  reactions      ChatReaction[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model ChatAttachment {
+  id        Int         @id @default(autoincrement())
+  messageId Int
+  filename  String
+  mimeType  String
+  size      Int
+  // For platform files: store bytes; for Drive links: leave null, use driveUrl
+  content   Bytes?
+  driveUrl  String?
+  driveFileId String?
+  createdAt DateTime    @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model ChatReaction {
+  id        Int         @id @default(autoincrement())
+  messageId Int
+  userId    Int
+  emoji     String
+  createdAt DateTime    @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
 }
 
 model PersonalTodo {
