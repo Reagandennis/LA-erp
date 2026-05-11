@@ -107,9 +107,14 @@ function serializePermission(
   };
 }
 
-function serializeModule(
-  module: UserWithAccess['userModules'][number]['module'],
-): ModuleSummary {
+function toModuleSummary(module: {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  sortOrder: number;
+}): ModuleSummary {
   return {
     id: module.id,
     slug: module.slug,
@@ -120,17 +125,16 @@ function serializeModule(
   };
 }
 
+function serializeModule(
+  module: UserWithAccess['userModules'][number]['module'],
+): ModuleSummary {
+  return toModuleSummary(module);
+}
+
 function buildModuleSummaryFromList(
   module: Awaited<ReturnType<typeof listAllModules>>[number],
 ): ModuleSummary {
-  return {
-    id: module.id,
-    slug: module.slug,
-    name: module.name,
-    description: module.description,
-    category: module.category,
-    sortOrder: module.sortOrder,
-  };
+  return toModuleSummary(module);
 }
 
 export function buildAccessUser(user: UserWithAccess): AccessUser {
@@ -354,6 +358,11 @@ export async function deleteManagedUser(userId: number) {
     if (!existing) {
       return false;
     }
+
+    await tx.chatConversation.updateMany({
+      where: { createdById: userId },
+      data: { createdById: null } as Prisma.ChatConversationUncheckedUpdateManyInput,
+    });
 
     await tx.user.delete({
       where: { id: userId },
