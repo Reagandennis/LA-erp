@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Script from 'next/script';
+import { useGoogleAuth } from '@/app/ui/GoogleAuthProvider';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,28 +27,11 @@ type StorageQuota = { limit: string; usage: string; usageInDrive: string };
 
 type UploadItem = { id: string; name: string; progress: number; status: 'uploading' | 'done' | 'error' };
 
-// ─── Google Identity Services types (minimal) ──────────────────────────────────
-declare global {
-  interface Window {
-    google: {
-      accounts: {
-        oauth2: {
-          initTokenClient: (config: {
-            client_id: string;
-            scope: string;
-            callback: (resp: { access_token?: string; error?: string }) => void;
-          }) => { requestAccessToken: (opts?: { prompt?: string }) => void };
-        };
-      };
-    };
-  }
-}
+// ─── Google Identity Services types (minimal) removed (using centralized auth) ──
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
-const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
-const SCOPE = 'https://www.googleapis.com/auth/drive';
 const ESCAPED_APOSTROPHE = String.raw`\'`;
 
 function formatSize(bytes?: string): string {
@@ -172,10 +155,11 @@ async function runUpload(
 
 // ─── Sign-in screen ───────────────────────────────────────────────────────────
 
-function SignInScreen({ gsiReady, tokenClient, authError }: Readonly<{
+function SignInScreen({ gsiReady, handleLogin, authError, authLoading }: Readonly<{
   gsiReady: boolean;
-  tokenClient: { requestAccessToken: (o?: { prompt?: string }) => void } | null;
+  handleLogin: () => void;
   authError: string | null;
+  authLoading: boolean;
 }>) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -207,8 +191,8 @@ function SignInScreen({ gsiReady, tokenClient, authError }: Readonly<{
         {authError && <p className="text-red-500 text-sm bg-red-50 px-4 py-2 rounded-lg">{authError}</p>}
         <button
           type="button"
-          disabled={!gsiReady || !tokenClient}
-          onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
+          disabled={!gsiReady || authLoading}
+          onClick={handleLogin}
           className="w-full flex items-center justify-center gap-3 px-6 py-3 bg-white border-2 border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
         >
           <svg viewBox="0 0 24 24" className="w-5 h-5">
@@ -217,7 +201,7 @@ function SignInScreen({ gsiReady, tokenClient, authError }: Readonly<{
             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
           </svg>
-          {gsiReady ? 'Sign in with Google' : 'Loading…'}
+          {authLoading ? 'Signing in…' : (gsiReady ? 'Sign in with Google' : 'Loading…')}
         </button>
         <p className="text-xs text-gray-400">Your files stay in your Google Drive. This app requests access only for this session.</p>
       </div>
@@ -226,10 +210,7 @@ function SignInScreen({ gsiReady, tokenClient, authError }: Readonly<{
 }
 
 export default function GoogleDriveStoragePage() {
-  const [gsiReady, setGsiReady]           = useState(false);
-  const [accessToken, setAccessToken]     = useState<string | null>(null);
-  const [tokenClient, setTokenClient]     = useState<{ requestAccessToken: (o?: { prompt?: string }) => void } | null>(null);
-  const [authError, setAuthError]         = useState<string | null>(null);
+  const { token: accessToken, login: handleGoogleLogin, logout: handleGoogleLogout, loading: authLoading, error: authError, gsiReady } = useGoogleAuth();
 
   const [files, setFiles]                 = useState<DriveFile[]>([]);
   const [loading, setLoading]             = useState(false);
@@ -253,22 +234,7 @@ export default function GoogleDriveStoragePage() {
   const fileInputRef  = useRef<HTMLInputElement>(null);
   const currentFolder = breadcrumb.at(-1)!;
 
-  // ── Init token client once GSI is loaded ──────────────────────────────────
-  useEffect(() => {
-    if (!gsiReady || !CLIENT_ID) return;
-    const tc = (globalThis as typeof globalThis & { google: Window['google'] }).google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPE,
-      callback: (resp) => {
-        if (resp.error) { setAuthError(resp.error); return; }
-        if (resp.access_token) {
-          setAccessToken(resp.access_token);
-          setAuthError(null);
-        }
-      },
-    });
-    setTokenClient(tc);
-  }, [gsiReady]);
+  // ── Init token client removed (using centralized auth) ──────────────────
 
   // ── Fetch files when token or folder changes ───────────────────────────────
   const fetchFiles = useCallback(async (folderId: string, token: string, query = '') => {
@@ -288,11 +254,11 @@ export default function GoogleDriveStoragePage() {
       setFiles(data.files ?? []);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === '401') { setAccessToken(null); tokenClient?.requestAccessToken({ prompt: '' }); }
+      if (msg === '401') { handleGoogleLogout(); handleGoogleLogin(); }
     } finally {
       setLoading(false);
     }
-  }, [sortBy, tokenClient]);
+  }, [sortBy, handleGoogleLogout, handleGoogleLogin]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -367,20 +333,15 @@ export default function GoogleDriveStoragePage() {
     ? Math.min(100, Math.round((Number.parseInt(quota.usageInDrive) / Number.parseInt(quota.limit)) * 100))
     : 0;
 
-  // ── Sign-in screen ─────────────────────────────────────────────────────────
   if (!accessToken) {
     return (
-      <>
-        <Script src="https://accounts.google.com/gsi/client" onLoad={() => setGsiReady(true)} strategy="afterInteractive" />
-        <SignInScreen gsiReady={gsiReady} tokenClient={tokenClient} authError={authError} />
-      </>
+      <SignInScreen gsiReady={gsiReady} handleLogin={handleGoogleLogin} authError={authError} authLoading={authLoading} />
     );
   }
 
   // ── Main Drive UI ──────────────────────────────────────────────────────────
   return (
     <>
-      <Script src="https://accounts.google.com/gsi/client" onLoad={() => setGsiReady(true)} strategy="afterInteractive" />
 
       <div className="min-h-screen bg-gray-50 flex flex-col">
 
@@ -450,7 +411,7 @@ export default function GoogleDriveStoragePage() {
                 onChange={e => e.target.files && void handleUpload(e.target.files)} />
 
               {/* Sign out */}
-              <button onClick={() => { setAccessToken(null); setFiles([]); setQuota(null); }}
+              <button onClick={() => { handleGoogleLogout(); setFiles([]); setQuota(null); }}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-red-500 border border-gray-200 rounded-lg hover:border-red-200 hover:bg-red-50 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
                 Sign out
@@ -564,7 +525,7 @@ export default function GoogleDriveStoragePage() {
                 /* Grid */
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                   {files.map(f => (
-                    <button type="button" key={f.id}
+                    <div key={f.id}
                       onClick={() => f.mimeType === FOLDER_MIME ? openFolder(f) : setSelectedFile(f)}
                       onContextMenu={e => { e.preventDefault(); setSelectedFile(f); }}
                       className={`relative bg-white border rounded-xl p-4 cursor-pointer hover:shadow-md transition-all group w-full text-left ${
@@ -589,7 +550,7 @@ export default function GoogleDriveStoragePage() {
                       ) : (
                         <p className="text-xs font-medium text-gray-800 truncate text-center">{f.name}</p>
                       )}
-                      <p className="text-xs text-gray-400 text-center mt-0.5">{ago(f.modifiedTime)}</p>
+                      <p className="text-xs text-gray-400 text-center mt-0r.5">{ago(f.modifiedTime)}</p>
                       <div className="absolute inset-x-2 bottom-2 flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={e => { e.stopPropagation(); setRenamingId(f.id); setRenameValue(f.name); }}
                           className="p-1 bg-white rounded shadow text-gray-500 hover:text-blue-600" title="Rename">
@@ -606,7 +567,7 @@ export default function GoogleDriveStoragePage() {
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               ) : (

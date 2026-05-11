@@ -27,6 +27,7 @@ model User {
   sessions       Session[]
   auditLogs      AuditLog[] @relation("AuditActor")
   auditTargets   AuditLog[] @relation("AuditTarget")
+  trips          Trip[]
   // Chat
   chatConversations ChatConversation[] @relation("ChatCreatedBy")
   chatMemberships   ChatMember[]
@@ -123,9 +124,11 @@ model PersonalTodo {
   dueDate     DateTime?
   completed   Boolean  @default(false)
   completedAt DateTime?
+  tripId      Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip        Trip?    @relation(fields: [tripId], references: [id], onDelete: SetNull)
   attachments PersonalTodoAttachment[]
   shares      PersonalTodoShare[]
   notifications PersonalTodoNotification[]
@@ -134,6 +137,92 @@ model PersonalTodo {
 
   @@index([userId, completed, dueDate])
   @@index([userId, createdAt])
+  @@index([tripId])
+}
+
+model Trip {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  title         String
+  destination   String?
+  imageUrl      String?
+  startDate     DateTime?
+  endDate       DateTime?
+  status        String   @default("draft")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itineraryItems TripItineraryItem[]
+  proposals     TripProposal[]
+  invoices      TripInvoice[]
+  clientPortals TripClientPortal[]
+  tasks         PersonalTodo[]
+
+  @@index([userId, status, startDate])
+}
+
+model TripItineraryItem {
+  id            Int      @id @default(autoincrement())
+  tripId        Int
+  dayNumber     Int
+  title         String
+  itemType      String   @default("Note")
+  location      String?
+  startLocation String?
+  endLocation   String?
+  startTime     DateTime?
+  endTime       DateTime?
+  notes         String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, dayNumber, sortOrder])
+}
+
+model TripProposal {
+  id          Int      @id @default(autoincrement())
+  tripId      Int
+  title       String
+  status      String   @default("draft")
+  version     Int      @default(1)
+  amountCents Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, status])
+}
+
+model TripInvoice {
+  id            Int      @id @default(autoincrement())
+  tripId        Int
+  invoiceNumber String
+  status        String   @default("draft")
+  amountCents   Int      @default(0)
+  dueDate       DateTime?
+  issuedAt      DateTime?
+  paidAt        DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, status])
+  @@unique([invoiceNumber])
+}
+
+model TripClientPortal {
+  id        Int      @id @default(autoincrement())
+  tripId    Int
+  token     String   @unique
+  isActive  Boolean  @default(true)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, isActive])
 }
 
 model PersonalTodoAttachment {

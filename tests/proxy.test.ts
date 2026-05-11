@@ -25,7 +25,7 @@ describe('proxy auth gating', () => {
     expect(response.headers.get('location')).toBe('http://localhost/auth/login');
   });
 
-  it('redirects authenticated users away from auth pages', () => {
+  it('allows authenticated users to reach auth pages', () => {
     verifySessionToken.mockReturnValue({
       sub: '1',
       sid: 'session_123',
@@ -40,8 +40,7 @@ describe('proxy auth gating', () => {
     });
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('http://localhost/dashboard');
+    expect(response.status).toBe(200);
   });
 
   it('allows authenticated users through protected routes', () => {

@@ -1,0 +1,318 @@
+
+> la-erp@0.1.0 build
+> next build
+
+▲ Next.js 16.2.1 (Turbopack)
+- Environments: .env.local, .env
+
+  Creating an optimized production build ...
+[2m[DEBUG][22m Writing debug info to: [2m[34m`[39m[22m[34m/Users/reaganenochowiti/Desktop/la-erp/tailwindcss-24103.log[39m[2m[34m`[39m[22m
+
+
+[2m[73.92ms][22m [@tailwindcss/postcss] app/globals.css
+[2m[ 0.03ms][22m  [2m ↳ [22mQuick bail check
+[2m[14.56ms][22m  [2m ↳ [22mSetup compiler
+[2m[ 0.16ms][22m    [2m ↳ [22mPostCSS AST -> Tailwind CSS AST
+[2m[14.39ms][22m    [2m ↳ [22mCreate compiler
+[2m[ 0.08ms][22m  [2m ↳ [22mRegister full rebuild paths
+[2m[ 1.80ms][22m  [2m ↳ [22mSetup scanner
+[2m[ 9.06ms][22m  [2m ↳ [22mScan for candidates
+[2m[ 3.44ms][22m  [2m ↳ [22mRegister dependency messages
+[2m[27.35ms][22m  [2m ↳ [22mBuild utilities
+[2m[15.83ms][22m  [2m ↳ [22mOptimization
+[2m[ 0.68ms][22m    [2m ↳ [22mAST -> CSS
+[2m[ 9.38ms][22m    [2m ↳ [22mLightning CSS
+[2m[ 5.76ms][22m    [2m ↳ [22mCSS -> PostCSS AST
+[2m[ 1.60ms][22m  [2m ↳ [22mUpdate PostCSS AST
+
+✓ Compiled successfully in 2.2s
+  Running TypeScript ...
+  Finished TypeScript in 3.2s ...
+  Collecting page data using 13 workers ...
+prisma:tryLoadEnv Environment variables not found at null +6ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client checkPlatformCaching:postinstall undefined +2ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +1ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +9ms
+prisma:tryLoadEnv Environment variables not found at null +10ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client checkPlatformCaching:postinstall undefined +1ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:tryLoadEnv Environment variables not found at null +5ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client checkPlatformCaching:postinstall undefined +2ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +1ms
+prisma:tryLoadEnv Environment variables not found at null +7ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client checkPlatformCaching:postinstall undefined +1ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:tryLoadEnv Environment variables not found at null +10ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client checkPlatformCaching:postinstall undefined +1ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +1ms
+prisma:tryLoadEnv Environment variables not found at null +14ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:tryLoadEnv Environment variables not found at null +3ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client checkPlatformCaching:postinstall undefined +1ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +1ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:tryLoadEnv Environment variables not found at null +3ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client checkPlatformCaching:postinstall undefined +0ms
+prisma:client checkPlatformCaching:ciName undefined +1ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client checkPlatformCaching:postinstall undefined +2ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +1ms
+prisma:tryLoadEnv Environment variables not found at null +11ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client checkPlatformCaching:postinstall undefined +2ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +1ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +8ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +5ms
+prisma:tryLoadEnv Environment variables not found at null +3ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client checkPlatformCaching:postinstall undefined +0ms
+prisma:client checkPlatformCaching:ciName undefined +1ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:tryLoadEnv Environment variables not found at null +8ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +2ms
+prisma:client checkPlatformCaching:postinstall undefined +2ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +5ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +5ms
+prisma:client:libraryEngine internalSetup +1ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +1ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +7ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +10ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +11ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +8ms
+prisma:tryLoadEnv Environment variables not found at null +3ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +8ms
+prisma:client checkPlatformCaching:postinstall undefined +1ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +1ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +10ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client checkPlatformCaching:postinstall undefined +17ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:tryLoadEnv Environment variables not found at null +7ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client checkPlatformCaching:postinstall undefined +1ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +1ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +5ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +11ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +7ms
+prisma:client checkPlatformCaching:postinstall undefined +31ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client checkPlatformCaching:postinstall undefined +36ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client checkPlatformCaching:postinstall undefined +28ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client checkPlatformCaching:postinstall undefined +58ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client checkPlatformCaching:postinstall undefined +25ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +1ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client checkPlatformCaching:postinstall undefined +31ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +2ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +5ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client checkPlatformCaching:postinstall undefined +37ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client checkPlatformCaching:postinstall undefined +35ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +1ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client checkPlatformCaching:postinstall undefined +29ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client checkPlatformCaching:postinstall undefined +29ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +1ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +4ms
+prisma:client checkPlatformCaching:postinstall undefined +23ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +0ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +3ms
+prisma:client checkPlatformCaching:postinstall undefined +28ms
+prisma:client checkPlatformCaching:ciName undefined +0ms
+prisma:tryLoadEnv Environment variables not found at null +0ms
+prisma:tryLoadEnv Environment variables loaded from /Users/reaganenochowiti/Desktop/la-erp/.env +0ms
+prisma:client dirname /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client +1ms
+prisma:client relativePath ../../../prisma +0ms
+prisma:client cwd /Users/reaganenochowiti/Desktop/la-erp/prisma +0ms
+prisma:client clientVersion 6.16.2 +0ms
+prisma:client:libraryEngine internalSetup +0ms
+prisma:client:engines:resolveEnginePath enginePath /Users/reaganenochowiti/Desktop/la-erp/node_modules/.prisma/client/libquery_engine-darwin-arm64.dylib.node +2ms
+⨯ Invalid segment configuration export detected. This can cause unexpected behavior from the configs not being applied. You should see the relevant failures in the logs above. Please fix them to continue.

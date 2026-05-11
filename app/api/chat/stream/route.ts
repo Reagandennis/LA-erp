@@ -2,7 +2,6 @@ import { NextRequest } from 'next/server';
 import { getRequestAuth } from '@/lib/auth';
 import { subscribe, unsubscribe } from '@/lib/chat-bus';
 
-export const dynamic = 'force-dynamic';
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 

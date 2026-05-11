@@ -3,6 +3,7 @@
 import React, {
   useState, useRef, useEffect, useCallback, useTransition,
 } from 'react';
+import { useGoogleAuth } from '@/app/ui/GoogleAuthProvider';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -139,18 +140,18 @@ function DrivePicker({ onSelect, onClose }: Readonly<{
   onSelect: (files: DriveFile[]) => void;
   onClose: () => void;
 }>) {
-  const savedToken = globalThis.window === undefined
-    ? null
-    : localStorage.getItem('gdrive_access_token');
+  const { token: savedToken, login: handleGoogleLogin, loading: authLoading } = useGoogleAuth();
   const [files, setFiles] = useState<DriveFile[]>([]);
-  const [loading, setLoading] = useState(savedToken !== null);
+  const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [error, setError] = useState(
-    savedToken === null ? 'Sign in to Google Drive first (via the Google Drive module).' : '',
-  );
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (savedToken === null) return;
+    if (!savedToken) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     fetch(
       'https://www.googleapis.com/drive/v3/files?pageSize=30&fields=files(id,name,mimeType,size,webViewLink)&orderBy=modifiedTime desc',
       { headers: { Authorization: `Bearer ${savedToken}` } },
@@ -159,11 +160,11 @@ function DrivePicker({ onSelect, onClose }: Readonly<{
       .then((data: { files: DriveFile[]; error?: { message: string } }) => {
         if (data.error) throw new Error(data.error.message);
         setFiles(data.files ?? []);
+        setError('');
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [savedToken]);
 
   const toggle = makeToggler(setSelected);
 
@@ -176,18 +177,33 @@ function DrivePicker({ onSelect, onClose }: Readonly<{
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
       </div>
       <div className="max-h-60 overflow-y-auto custom-scrollbar">
-        {loading && <p className="p-4 text-sm text-gray-500 text-center">Loading…</p>}
-        {error && <p className="p-4 text-sm text-red-500 text-center">{error}</p>}
-        {!loading && !error && files.map((f) => (
-          <label key={f.id} className="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 cursor-pointer">
-            <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)}
-              className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
-            <span className="flex-1 text-sm text-gray-800 truncate">{f.name}</span>
-            <span className="text-[10px] text-gray-400 shrink-0">{fmtSize(Number(f.size ?? 0))}</span>
-          </label>
-        ))}
-        {!loading && !error && files.length === 0 && (
-          <p className="p-4 text-sm text-gray-500 text-center">No files found.</p>
+        {!savedToken ? (
+          <div className="p-6 flex flex-col items-center justify-center gap-3">
+            <p className="text-sm text-gray-500 text-center">Sign in to Google to attach files from your Drive.</p>
+            <button
+              onClick={handleGoogleLogin}
+              disabled={authLoading}
+              className="px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {authLoading ? 'Connecting…' : 'Sign in to Google'}
+            </button>
+          </div>
+        ) : (
+          <>
+            {loading && <p className="p-4 text-sm text-gray-500 text-center">Loading…</p>}
+            {error && <p className="p-4 text-sm text-red-500 text-center">{error}</p>}
+            {!loading && !error && files.map((f) => (
+              <label key={f.id} className="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 cursor-pointer">
+                <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)}
+                  className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
+                <span className="flex-1 text-sm text-gray-800 truncate">{f.name}</span>
+                <span className="text-[10px] text-gray-400 shrink-0">{fmtSize(Number(f.size ?? 0))}</span>
+              </label>
+            ))}
+            {!loading && !error && files.length === 0 && (
+              <p className="p-4 text-sm text-gray-500 text-center">No files found.</p>
+            )}
+          </>
         )}
       </div>
       {selected.size > 0 && (

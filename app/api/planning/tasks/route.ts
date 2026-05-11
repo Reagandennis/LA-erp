@@ -4,8 +4,6 @@ import { prisma } from '@/lib/prisma';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { personalTodoCreateSchema } from '@/lib/validation';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
 type TaskRecord = {
   id: number;
@@ -17,13 +15,17 @@ type TaskRecord = {
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
+  tripId: number | null;
   createdAt: Date;
   updatedAt: Date;
 };
 
 type PersonalTodoCollectionClient = {
   findMany: (args: {
-    where: { userId: number } | { OR: Array<{ userId: number } | { id: { in: number[] } }> };
+    where:
+      | { userId: number }
+      | { OR: Array<{ userId: number } | { id: { in: number[] } }> }
+      | { AND: Array<{ userId: number } | { OR: Array<{ userId: number } | { id: { in: number[] } }> } | { tripId: number }> };
     orderBy: Array<{
       completed?: 'asc' | 'desc';
       dueDate?: 'asc' | 'desc';
@@ -40,6 +42,7 @@ type PersonalTodoCollectionClient = {
       dueDate: Date | null;
       completed: boolean;
       completedAt: Date | null;
+      tripId?: number | null;
     };
   }) => Promise<TaskRecord>;
 };
@@ -66,9 +69,19 @@ function serializeTask(task: TaskRecord) {
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
+    tripId: task.tripId,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };
+}
+
+function parseTripId(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -89,11 +102,19 @@ export async function GET(request: NextRequest) {
     sharedIds = [];
   }
 
-  const whereClause = sharedIds.length
+  const tripId = parseTripId(request.nextUrl.searchParams.get('tripId'));
+
+  const baseWhereClause = sharedIds.length
     ? {
         OR: [{ userId: auth.user.id }, { id: { in: sharedIds } }],
       }
     : { userId: auth.user.id };
+
+  const whereClause = tripId
+    ? {
+        AND: [baseWhereClause, { tripId }],
+      }
+    : baseWhereClause;
 
   const tasks = await personalTodoClient.findMany({
     where: whereClause,
@@ -146,6 +167,7 @@ export async function POST(request: NextRequest) {
       dueDate,
       completed: isCompleted,
       completedAt: isCompleted ? new Date() : null,
+      tripId: validation.data.tripId ?? null,
     },
   });
 

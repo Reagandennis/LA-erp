@@ -17,3 +17,7 @@ export function getDatabaseUrl() {
 export function getJwtSecret() {
   return getEnv('JWT_SECRET');
 }
+
+export function getFlightRadarApiToken() {
+  return getEnv('FR24_API_TOKEN');
+}

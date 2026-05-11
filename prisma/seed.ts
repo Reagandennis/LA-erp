@@ -135,6 +135,26 @@ async function seedBootstrapAdmin() {
       roleId: adminRole.id,
     },
   });
+
+  const modules = await prisma.module.findMany({
+    select: { id: true },
+  });
+
+  for (const moduleItem of modules) {
+    await prisma.userModule.upsert({
+      where: {
+        userId_moduleId: {
+          userId: user.id,
+          moduleId: moduleItem.id,
+        },
+      },
+      update: {},
+      create: {
+        userId: user.id,
+        moduleId: moduleItem.id,
+      },
+    });
+  }
 }
 
 async function main() {

@@ -59,6 +59,12 @@ export const personalTodoCreateSchema = z.object({
   status: personalTodoStatusSchema.default('Backlog'),
   dueDate: z.string().trim().optional().nullable(),
   completed: z.boolean().optional(),
+  tripId: z
+    .preprocess(
+      (value) => (value === '' || value === undefined ? null : value),
+      z.number().int().positive().nullable(),
+    )
+    .optional(),
 });
 
 export const personalTodoUpdateSchema = z
@@ -74,6 +80,12 @@ export const personalTodoUpdateSchema = z
     status: personalTodoStatusSchema.optional(),
     dueDate: z.string().trim().optional().nullable(),
     completed: z.boolean().optional(),
+    tripId: z
+      .preprocess(
+        (value) => (value === '' || value === undefined ? null : value),
+        z.number().int().positive().nullable(),
+      )
+      .optional(),
   })
   .refine(
     (value) =>
@@ -82,7 +94,8 @@ export const personalTodoUpdateSchema = z
       value.priority !== undefined ||
       value.status !== undefined ||
       value.dueDate !== undefined ||
-      value.completed !== undefined,
+      value.completed !== undefined ||
+      value.tripId !== undefined,
     {
       message: 'At least one field must be updated',
     },

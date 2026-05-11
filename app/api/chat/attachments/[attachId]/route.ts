@@ -37,7 +37,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'No content' }, { status: 404 });
   }
 
-  return new NextResponse(attachment.content, {
+  return new NextResponse(attachment.content as any, {
     headers: {
       'Content-Type': attachment.mimeType,
       'Content-Disposition': `attachment; filename="${encodeURIComponent(attachment.filename)}"`,

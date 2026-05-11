@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SESSION_COOKIE_NAME, verifySessionToken } from '@/lib/session-token';
 
 const protectedPrefixes = ['/dashboard', '/admin', '/modules'];
-const authPages = ['/', '/auth/login', '/auth/signup'];
+const authPages = new Set(['/']);
 
 export default function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -12,7 +12,7 @@ export default function proxy(request: NextRequest) {
   const isProtected = protectedPrefixes.some((prefix) =>
     pathname.startsWith(prefix),
   );
-  const isAuthPage = authPages.includes(pathname);
+  const isAuthPage = authPages.has(pathname);
 
   if (isProtected && !session) {
     return NextResponse.redirect(new URL('/auth/login', request.url));

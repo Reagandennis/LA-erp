@@ -1,2 +1,2 @@
 -- DropIndex
-DROP INDEX "public"."PersonalTodo_userId_status_idx";
+DROP INDEX IF EXISTS "public"."PersonalTodo_userId_status_idx";

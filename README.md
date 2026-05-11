@@ -59,6 +59,10 @@ npm run dev
 
 The seed step creates or updates the bootstrap administrator from those values.
 
+For the flight tracker module, also set:
+
+- `FR24_API_TOKEN`
+
 ## Core scripts
 
 ```bash

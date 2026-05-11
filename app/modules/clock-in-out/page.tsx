@@ -1,6 +1,12 @@
-'use client';
 
+'use client';
 import { useEffect, useMemo, useState } from 'react';
+import { ScheduleTab } from './_components/ScheduleTab';
+
+function isAdmin(user: any) {
+  return user?.roles?.some((r: any) => r.name === 'admin');
+}
+  // (moved hooks and effect into component)
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -284,11 +290,26 @@ function calcUsedLeave(leaveRequests: LeaveRequest[], type: LeaveRequest['type']
 }
 
 export default function ClockInOutPage() {
-  const [now, setNow] = useState(() => new Date());
-  const [entries, setEntries] = useState<PunchEntry[]>(() => readLocalStorage<PunchEntry>(STORAGE_KEY));
+  // Auth state for user role
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [scheduleReadOnly, setScheduleReadOnly] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/session')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.user) {
+          setCurrentUser(data.user);
+          setScheduleReadOnly(!isAdmin(data.user));
+        }
+      });
+  }, []);
+  // Use null as sentinel so we know we haven't hydrated yet
+  const [now, setNow] = useState<Date | null>(null);
+  const [entries, setEntries] = useState<PunchEntry[]>([]);
   const [note, setNote] = useState('');
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => readLocalStorage<LeaveRequest>(LEAVE_STORAGE_KEY));
-  const [activeTab, setActiveTab] = useState<'punch' | 'schedule' | 'leave' | 'holidays'>('punch');
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [activeTab, setActiveTab] = useState<'punch' | 'schedule' | 'schedule-view' | 'leave' | 'holidays'>('punch');
   const [leaveForm, setLeaveForm] = useState({
     type: 'Annual' as LeaveRequest['type'],
     startDate: '',
@@ -297,7 +318,13 @@ export default function ClockInOutPage() {
   });
   const [leaveFormOpen, setLeaveFormOpen] = useState(false);
 
+  // Hydrate from localStorage and start the clock only after mount
+  // so the first server-rendered HTML and first client render match.
   useEffect(() => {
+    setNow(new Date());
+    setEntries(readLocalStorage<PunchEntry>(STORAGE_KEY));
+    setLeaveRequests(readLocalStorage<LeaveRequest>(LEAVE_STORAGE_KEY));
+
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -317,9 +344,9 @@ export default function ClockInOutPage() {
     setNote('');
   };
 
-  const todaySummary = useMemo(() => calcTodaySummary(entries, now), [entries, now]);
+  const todaySummary = useMemo(() => now ? calcTodaySummary(entries, now) : { workSec: 0, breakSec: 0, totalPunches: 0 }, [entries, now]);
 
-  const weeklySummary = useMemo(() => calcWeeklySummary(entries, now), [entries, now]);
+  const weeklySummary = useMemo(() => now ? calcWeeklySummary(entries, now) : [], [entries, now]);
 
   const weeklyTotalSec = weeklySummary.reduce((s, d) => s + d.workSec, 0);
 
@@ -341,9 +368,9 @@ export default function ClockInOutPage() {
 
   const usedLeave = (type: LeaveRequest['type']) => calcUsedLeave(leaveRequests, type);
 
-  const todayKey = toDateKey(now);
-  const limitKey = toDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 60));
-  const upcomingHolidays = PUBLIC_HOLIDAYS.filter(h => h.date >= todayKey && h.date <= limitKey);
+  const todayKey = now ? toDateKey(now) : '';
+  const limitKey = now ? toDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 60)) : '';
+  const upcomingHolidays = now ? PUBLIC_HOLIDAYS.filter(h => h.date >= todayKey && h.date <= limitKey) : [];
 
   const upcomingLeave = leaveRequests
     .filter(r => r.endDate >= todayKey && r.status !== 'Rejected')
@@ -355,7 +382,8 @@ export default function ClockInOutPage() {
 
   const tabs = [
     { id: 'punch',    label: 'Time Clock' },
-    { id: 'schedule', label: 'Work Schedule' },
+    { id: 'schedule', label: 'Weekly Schedule' },
+    { id: 'schedule-view', label: 'Schedule' },
     { id: 'leave',    label: 'Leave' },
     { id: 'holidays', label: 'Holidays' },
   ] as const;
@@ -364,7 +392,7 @@ export default function ClockInOutPage() {
     <div className="min-h-screen bg-gray-50 px-4 py-10 sm:px-6">
       <div className="mx-auto max-w-6xl space-y-8">
 
-        <header className="space-y-1">
+        <header className="space-y-1 print:hidden">
           <span className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-600">Attendance</span>
           <h1 className="text-3xl font-semibold text-gray-900">Clock-in / Clock-out</h1>
           <p className="max-w-2xl text-sm text-gray-500">
@@ -373,15 +401,15 @@ export default function ClockInOutPage() {
         </header>
 
         {/* Quick KPI bar */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard label="Hours today"     value={formatDuration(todaySummary.workSec)}  sub="active shift"   accent={status === 'in'} />
-          <StatCard label="Break today"     value={formatDuration(todaySummary.breakSec)} sub="paused time" />
-          <StatCard label="Hours this week" value={formatDuration(weeklyTotalSec)}         sub="last 7 days" />
-          <StatCard label="Status"          value={statusLabel}                            sub={formatTime(now)} accent={status === 'in'} />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 print:hidden">
+          <StatCard label="Hours today"     value={now ? formatDuration(todaySummary.workSec)  : '—'} sub="active shift"   accent={status === 'in'} />
+          <StatCard label="Break today"     value={now ? formatDuration(todaySummary.breakSec) : '—'} sub="paused time" />
+          <StatCard label="Hours this week" value={now ? formatDuration(weeklyTotalSec)         : '—'} sub="last 7 days" />
+          <StatCard label="Status"          value={statusLabel}                            sub={now ? formatTime(now) : '—'} accent={status === 'in'} />
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 rounded-2xl border border-gray-200 bg-white p-1 shadow-sm w-fit flex-wrap">
+        <div className="flex gap-1 rounded-2xl border border-gray-200 bg-white p-1 shadow-sm w-fit flex-wrap print:hidden">
           {tabs.map(tab => (
             <button
               key={tab.id}
@@ -396,7 +424,7 @@ export default function ClockInOutPage() {
           ))}
         </div>
 
-        {activeTab === 'punch' && (
+        {activeTab === 'punch' && now && (
           <PunchTab
             now={now} status={status} statusLabel={statusLabel} statusColor={statusColor}
             todaySummary={todaySummary} weeklySummary={weeklySummary} todayKey={todayKey}
@@ -427,7 +455,7 @@ export default function ClockInOutPage() {
                   <tbody className="divide-y divide-gray-50">
                     {WEEKLY_SCHEDULE.map(row => {
                       const isWorkday = row.start !== '—';
-                      const todayName = now.toLocaleDateString('en-US', { weekday: 'long' });
+                      const todayName = now?.toLocaleDateString('en-US', { weekday: 'long' }) ?? '';
                       const isToday2 = row.day === todayName;
                       return (
                         <tr key={row.day} className={isToday2 ? 'bg-emerald-50' : ''}>
@@ -484,6 +512,11 @@ export default function ClockInOutPage() {
               </div>
             </section>
           </div>
+        )}
+
+        {/* ── TAB: Schedule View ── */}
+        {activeTab === 'schedule-view' && (
+          <ScheduleTab readOnly={scheduleReadOnly} />
         )}
 
         {/* ── TAB: Leave ── */}
@@ -633,7 +666,7 @@ export default function ClockInOutPage() {
                   <p className="text-sm text-gray-500">
                     {new Date(upcomingHolidays[0].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                     {' · '}
-                    {Math.ceil((new Date(upcomingHolidays[0].date + 'T12:00:00').getTime() - now.getTime()) / 86_400_000)} days away
+                    {now ? Math.ceil((new Date(upcomingHolidays[0].date + 'T12:00:00').getTime() - now.getTime()) / 86_400_000) : '?'} days away
                   </p>
                 </div>
               </div>
@@ -662,7 +695,7 @@ export default function ClockInOutPage() {
                       </div>
                       {!isPast && !isToday2 && (
                         <span className="text-xs font-semibold text-gray-400">
-                          {Math.ceil((hDate.getTime() - now.getTime()) / 86_400_000)}d away
+                          {now ? Math.ceil((hDate.getTime() - now.getTime()) / 86_400_000) : '?'}d away
                         </span>
                       )}
                       {isToday2 && <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white">Today!</span>}

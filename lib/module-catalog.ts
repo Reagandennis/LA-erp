@@ -50,6 +50,13 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     sortOrder: 6,
   },
   {
+    slug: 'trip-planning',
+    name: 'Trip Planning',
+    description: 'Design itineraries, proposals, client portals, and travel invoices.',
+    category: 'Operations',
+    sortOrder: 40,
+  },
+  {
     slug: 'personnel',
     name: 'Personnel',
     description: 'Manage team records, workforce details, and assignments.',

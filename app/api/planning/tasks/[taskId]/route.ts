@@ -11,6 +11,7 @@ type TaskUpdateInput = {
   status?: string;
   dueDate?: string | null;
   completed?: boolean;
+  tripId?: number | null;
 };
 
 type TaskRecord = {
@@ -22,6 +23,7 @@ type TaskRecord = {
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
+  tripId: number | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -37,6 +39,7 @@ type PersonalTodoDetailClient = {
       dueDate?: Date | null;
       completed?: boolean;
       completedAt?: Date | null;
+      tripId?: number | null;
     };
   }) => Promise<{ count: number }>;
   findFirst: (args: { where: { id: number; userId: number } }) => Promise<TaskRecord | null>;
@@ -69,6 +72,7 @@ function serializeTask(task: TaskRecord) {
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
+    tripId: task.tripId,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };
@@ -110,6 +114,7 @@ function normalizeUpdateInput(input: TaskUpdateInput) {
           : input.completed
             ? new Date()
             : null,
+      tripId: input.tripId,
     },
   };
 }
