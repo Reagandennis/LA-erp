@@ -156,9 +156,175 @@ model Trip {
   proposals     TripProposal[]
   invoices      TripInvoice[]
   clientPortals TripClientPortal[]
+  intelReports  TripIntelReport[]
   tasks         PersonalTodo[]
 
   @@index([userId, status, startDate])
+}
+
+model TripIntelReport {
+  id               Int                      @id @default(autoincrement())
+  tripId           Int
+  templateId       Int?
+  primaryVenueId   Int?
+  version          Int                      @default(1)
+  title            String
+  status           String                   @default("draft")
+  generationStatus String                   @default("pending")
+  overallRiskLevel String?
+  approvedBy       String?
+  approvedAt       DateTime?
+  generatedAt      DateTime?
+  reviewedAt       DateTime?
+  aiModel          String?
+  aiPromptVersion  String?
+  aiSourceHash     String?
+  aiUsage          Json?
+  sourceSnapshot   Json?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  trip             Trip                     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  template         IntelReportTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  primaryVenue     Venue?                   @relation(fields: [primaryVenueId], references: [id], onDelete: SetNull)
+  sections         TripIntelReportSection[]
+
+  @@unique([tripId, version])
+  @@index([tripId, updatedAt])
+  @@index([templateId])
+  @@index([primaryVenueId])
+}
+
+model IntelReportTemplate {
+  id          Int                          @id @default(autoincrement())
+  slug        String                       @unique
+  name        String
+  description String?
+  version     Int                          @default(1)
+  isDefault   Boolean                      @default(false)
+  config      Json?
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+  reports     TripIntelReport[]
+  sections    IntelReportTemplateSection[]
+
+  @@index([isDefault, updatedAt])
+}
+
+model IntelReportTemplateSection {
+  id             Int                      @id @default(autoincrement())
+  templateId     Int
+  key            String
+  label          String
+  description    String?
+  promptHint     String?
+  sourceType     String                   @default("mixed")
+  isEnabled      Boolean                  @default(true)
+  isRequired     Boolean                  @default(false)
+  sortOrder      Int                      @default(0)
+  config         Json?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  template       IntelReportTemplate      @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  reportSections TripIntelReportSection[]
+
+  @@unique([templateId, key])
+  @@index([templateId, sortOrder])
+}
+
+model TripIntelReportSection {
+  id                Int                        @id @default(autoincrement())
+  reportId          Int
+  templateSectionId Int?
+  key               String
+  label             String
+  status            String                     @default("draft")
+  sourceType        String                     @default("mixed")
+  sortOrder         Int                        @default(0)
+  content           Json?
+  notes             String?
+  aiModel           String?
+  promptVersion     String?
+  sourceHash        String?
+  generatedAt       DateTime?
+  reviewedAt        DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  report            TripIntelReport            @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  templateSection   IntelReportTemplateSection? @relation(fields: [templateSectionId], references: [id], onDelete: SetNull)
+
+  @@unique([reportId, key])
+  @@index([reportId, sortOrder])
+  @@index([templateSectionId])
+}
+
+model Venue {
+  id                         Int               @id @default(autoincrement())
+  name                       String
+  aliases                    Json?
+  categoryType               String
+  description                String?
+  narrative                  String?
+  roomsCount                 Int?
+  costEstimatePerNightCents  Int?
+  hasRestaurant              Boolean?
+  hasCafe                    Boolean?
+  mapImageUrl                String?
+  frontViewPhotoUrl          String?
+  commonAreaPhotoUrls        Json?
+  latitude                   Float?
+  longitude                  Float?
+  googleMapsUrl              String?
+  physicalAddress            String?
+  geofence                   Json?
+  automaticRouteNotes        Json?
+  generalContact             Json?
+  managerContact             Json?
+  securityContact            Json?
+  siteSpecificDetails        Json?
+  parkingDetails             Json?
+  securityDetails            Json?
+  emergencyProcedures        Json?
+  riskAssessment             Json?
+  dataSources                Json?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+  intelReports               TripIntelReport[]
+  hospitalLinks              VenueHospitalLink[]
+
+  @@index([categoryType, name])
+}
+
+model Hospital {
+  id             Int               @id @default(autoincrement())
+  name           String
+  city           String?
+  level          String?
+  latitude       Float?
+  longitude      Float?
+  address        String?
+  phoneNumber    String?
+  email          String?
+  googleMapsUrl  String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  venueLinks     VenueHospitalLink[]
+
+  @@index([city, name])
+}
+
+model VenueHospitalLink {
+  id                   Int       @id @default(autoincrement())
+  venueId              Int
+  hospitalId           Int
+  routeDistanceKm      Float?
+  routeDurationMinutes Int?
+  notes                String?
+  createdAt            DateTime  @default(now())
+  venue                Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  hospital             Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  @@unique([venueId, hospitalId])
+  @@index([hospitalId])
 }
 
 model TripItineraryItem {

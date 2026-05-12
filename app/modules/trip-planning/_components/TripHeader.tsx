@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { 
   Share2, Edit2, MoreHorizontal, Rocket, FileText, 
@@ -82,19 +81,8 @@ export default function TripHeader({ trip }: TripHeaderProps) {
 
   return (
     <div className="relative mb-12">
-      {/* Cover Image */}
-      <div className="relative h-[400px] w-full overflow-hidden rounded-[2.5rem] shadow-2xl">
-        <Image
-          src={trip.imageUrl || 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80'}
-          alt={trip.title}
-          fill
-          className="object-cover brightness-75 transition-transform duration-700 hover:scale-105"
-          unoptimized
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-        
-        {/* Trip Content Overlay */}
-        <div className="absolute bottom-0 left-0 w-full p-8 md:p-12">
+      <div className="w-full rounded-[2.5rem] bg-linear-to-br from-slate-900 via-slate-800 to-slate-700 p-8 shadow-2xl md:p-12">
+        <div className="w-full">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
             <div className="space-y-4">
               <div className="flex items-center gap-3">

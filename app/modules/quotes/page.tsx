@@ -92,10 +92,16 @@ const MOCK_QUOTES: Quote[] = [
 ];
 
 export default function QuotesPage() {
-  const [quotes] = useState<Quote[]>(MOCK_QUOTES);
+  const [quotes, setQuotes] = useState<Quote[]>(MOCK_QUOTES);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<QuoteStatus | 'All'>('All');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+  const [newQuote, setNewQuote] = useState({
+    clientName: '',
+    subject: '',
+    amount: ''
+  });
 
   const filteredQuotes = quotes.filter((q) => {
     const matchesSearch = 
@@ -118,6 +124,49 @@ export default function QuotesPage() {
     }
   };
 
+  const handleCreateQuote = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    const amount = Number(newQuote.amount);
+    if (!newQuote.clientName.trim() || !newQuote.subject.trim() || Number.isNaN(amount) || amount <= 0) {
+      return;
+    }
+
+    const now = new Date();
+    const issueDate = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const expiry = new Date(now);
+    expiry.setDate(expiry.getDate() + 30);
+    const expiryDate = expiry.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+    const draftNumber = quotes.filter((q) => q.id.startsWith('QT-2026-')).length + 1;
+    const quoteId = `QT-2026-${String(draftNumber).padStart(3, '0')}`;
+
+    const createdQuote: Quote = {
+      id: quoteId,
+      clientName: newQuote.clientName.trim(),
+      subject: newQuote.subject.trim(),
+      status: 'Draft',
+      issueDate,
+      expiryDate,
+      subtotal: amount,
+      taxRate: 0.08,
+      totalAmount: Number((amount * 1.08).toFixed(2)),
+      items: [
+        {
+          id: crypto.randomUUID(),
+          description: newQuote.subject.trim(),
+          quantity: 1,
+          unitPrice: amount,
+          total: amount
+        }
+      ]
+    };
+
+    setQuotes((prev) => [createdQuote, ...prev]);
+    setNewQuote({ clientName: '', subject: '', amount: '' });
+    setIsCreateModalOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6 lg:p-10">
       <div className="max-w-7xl mx-auto">
@@ -127,7 +176,10 @@ export default function QuotesPage() {
             <h1 className="text-3xl font-black text-gray-900 tracking-tight">Quotations</h1>
             <p className="text-gray-500 mt-1 font-bold text-xs uppercase tracking-widest">Revenue Pipeline & Proposal Management</p>
           </div>
-          <button className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-3">
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-3"
+          >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
             </svg>
@@ -206,7 +258,7 @@ export default function QuotesPage() {
                       <div className="w-10 h-10 rounded-xl bg-gray-900 flex items-center justify-center text-white text-[10px] font-black shrink-0">QT</div>
                       <div>
                         <p className="text-sm font-black text-gray-900 group-hover:text-emerald-700 transition-colors">{q.id}</p>
-                        <p className="text-[10px] text-gray-400 font-bold uppercase truncate max-w-[200px] mt-0.5">{q.subject}</p>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase truncate max-w-50 mt-0.5">{q.subject}</p>
                       </div>
                     </div>
                   </td>
@@ -339,6 +391,82 @@ export default function QuotesPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </>
+      )}
+
+      {isCreateModalOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40"
+            onClick={() => setIsCreateModalOpen(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={handleCreateQuote}
+              className="w-full max-w-xl bg-white rounded-3xl border border-gray-100 shadow-2xl p-8 space-y-6"
+            >
+              <div>
+                <h2 className="text-2xl font-black text-gray-900 tracking-tight">Generate New Quote</h2>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Create draft quotation</p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 block">Client Name</label>
+                  <input
+                    type="text"
+                    value={newQuote.clientName}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewQuote((prev) => ({ ...prev, clientName: e.target.value }))}
+                    placeholder="Enter client name"
+                    className="w-full px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-semibold"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 block">Subject</label>
+                  <input
+                    type="text"
+                    value={newQuote.subject}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewQuote((prev) => ({ ...prev, subject: e.target.value }))}
+                    placeholder="What is this quote for?"
+                    className="w-full px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-semibold"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 block">Base Amount (USD)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={newQuote.amount}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewQuote((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="0.00"
+                    className="w-full px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-semibold"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="py-3 border-2 border-gray-200 text-gray-500 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-gray-50 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-3 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition-all"
+                >
+                  Create Quote
+                </button>
+              </div>
+            </form>
           </div>
         </>
       )}

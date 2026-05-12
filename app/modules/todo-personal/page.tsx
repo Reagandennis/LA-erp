@@ -182,6 +182,47 @@ type ApiTask = {
   updatedAt: string;
 };
 
+const DEFAULT_TASK_PRIORITY: Task['priority'] = 'Medium';
+const DEFAULT_TASK_STATUS = 'Backlog';
+
+const normalizeTaskPriority = (value: string | null | undefined): Task['priority'] => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'high') return 'High';
+  if (normalized === 'low') return 'Low';
+  if (normalized === 'medium') return 'Medium';
+  return DEFAULT_TASK_PRIORITY;
+};
+
+const normalizeTaskStatus = (value: string | null | undefined): string => {
+  const trimmed = String(value ?? '').trim();
+  return trimmed.length > 0 ? trimmed : DEFAULT_TASK_STATUS;
+};
+
+const normalizeEditableTask = (task: Task): Task => ({
+  ...task,
+  title: task.title ?? '',
+  description: task.description ?? '',
+  priority: normalizeTaskPriority(task.priority),
+  status: normalizeTaskStatus(task.status),
+  list: task.list ?? 'Personal',
+  dueDate: task.dueDate ?? null,
+  dueDateIso: task.dueDateIso ?? null,
+  assignees: Number.isFinite(task.assignees) ? task.assignees : 0,
+});
+
+const normalizeSubtask = (subtask: Partial<Subtask>, fallbackId: string): Subtask => ({
+  id: typeof subtask.id === 'string' && subtask.id.trim().length > 0 ? subtask.id : fallbackId,
+  title: typeof subtask.title === 'string' ? subtask.title : '',
+  completed: Boolean(subtask.completed),
+});
+
+const normalizeSubtasks = (items: Subtask[] | undefined, taskId: string): Subtask[] => {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.map((item, index) => normalizeSubtask(item, `${taskId}-st-${index}`));
+};
+
 const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
   try {
     const response = await fetch('/api/planning/tasks', {
@@ -196,22 +237,18 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
     const apiTasks = data?.tasks ?? [];
     return apiTasks.map((task) => {
       const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : null;
-      const status = task.status ?? (task.completed ? 'In review' : 'Backlog');
-      const priority = task.priority
-        ? (task.priority[0].toUpperCase() + task.priority.slice(1))
-        : 'Medium';
-      return {
+      return normalizeEditableTask({
         id: `PT-${task.id}`,
         dbId: task.id,
         title: task.title,
         description: task.description,
-        priority: priority as Task['priority'],
+        priority: normalizeTaskPriority(task.priority),
         list: task.isShared ? 'Shared' : 'Personal',
         dueDate,
         dueDateIso: task.dueDate,
-        status,
+        status: normalizeTaskStatus(task.status ?? (task.completed ? 'In review' : DEFAULT_TASK_STATUS)),
         assignees: 0,
-      };
+      });
     });
   } catch {
     return [];
@@ -280,43 +317,48 @@ export default function TodoPersonalPage() {
     updateSubtasks(subtasks.filter((subtask) => subtask.id !== subtaskId));
   };
   const updateSubtasks = (next: Subtask[]) => {
-    setSubtasks(next);
+    const normalized = normalizeSubtasks(next, selectedTask?.id ?? 'task');
+    setSubtasks(normalized);
     if (selectedTask) {
       setSubtasksByTask((current) => ({
         ...current,
-        [selectedTask.id]: next,
+        [selectedTask.id]: normalized,
       }));
     }
   };
   const openTaskDrawer = (task: Task) => {
-    setSelectedTask(task);
-    setEditedTask({ ...task });
-    setDescription(task.description ?? '');
+    const normalizedTask = normalizeEditableTask(task);
+    setSelectedTask(normalizedTask);
+    setEditedTask(normalizedTask);
+    setDescription(normalizedTask.description ?? '');
     setSubtaskTitle('');
     setTaggedUsers([]);
-    setDueTime(task.dueDateIso ? new Date(task.dueDateIso).toTimeString().slice(0, 5) : '');
+    setDueTime(normalizedTask.dueDateIso ? new Date(normalizedTask.dueDateIso).toTimeString().slice(0, 5) : '');
     // Load subtasks from DB; fall back to in-memory cache
-    if (task.dbId) {
-      fetch(`/api/planning/tasks/${task.dbId}/subtasks`, { credentials: 'include' })
+    if (normalizedTask.dbId) {
+      fetch(`/api/planning/tasks/${normalizedTask.dbId}/subtasks`, { credentials: 'include' })
         .then((res) => (res.ok ? res.json() : null))
         .then((data: { subtasks?: Subtask[] } | null) => {
           const rawLoaded = data?.subtasks;
-          const loaded: Subtask[] = Array.isArray(rawLoaded) ? rawLoaded : (subtasksByTask[task.id] ?? []);
+          const loaded = normalizeSubtasks(
+            Array.isArray(rawLoaded) ? rawLoaded : (subtasksByTask[normalizedTask.id] ?? []),
+            normalizedTask.id,
+          );
           setSubtasks(loaded);
-          setSubtasksByTask((cur) => ({ ...cur, [task.id]: loaded }));
+          setSubtasksByTask((cur) => ({ ...cur, [normalizedTask.id]: loaded }));
         })
         .catch(() => {
-          updateSubtasks(subtasksByTask[task.id] ?? []);
+          updateSubtasks(normalizeSubtasks(subtasksByTask[normalizedTask.id] ?? [], normalizedTask.id));
         });
     } else {
-      updateSubtasks(subtasksByTask[task.id] ?? []);
+      updateSubtasks(normalizeSubtasks(subtasksByTask[normalizedTask.id] ?? [], normalizedTask.id));
     }
-    if (commentsByTask[task.id]) {
-      setComments(commentsByTask[task.id] ?? []);
+    if (commentsByTask[normalizedTask.id]) {
+      setComments(commentsByTask[normalizedTask.id] ?? []);
     } else {
-      void loadComments(task);
+      void loadComments(normalizedTask);
     }
-    setAttachments(attachmentsByTask[task.id] ?? []);
+    setAttachments(attachmentsByTask[normalizedTask.id] ?? []);
     setCommentInput('');
   };
   const handleSendComment = async () => {
@@ -1381,9 +1423,9 @@ export default function TodoPersonalPage() {
     <>
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="divide-y divide-gray-200">
-          {tasks.map((task) => (
+          {tasks.map((task, index) => (
             <button
-              key={task.id}
+              key={`${task.id || 'task'}-${task.dbId ?? index}`}
               type="button"
               draggable
               onDragStart={() => setDraggedTask(task)}
@@ -1665,8 +1707,8 @@ export default function TodoPersonalPage() {
                   {comments.length === 0 ? (
                     <p className="text-sm text-gray-500">No comments yet.</p>
                   ) : (
-                    comments.map((comment) => (
-                      <div key={comment.id}>
+                    comments.map((comment, index) => (
+                      <div key={`${comment.id || 'comment'}-${index}`}>
                         <div className="flex items-center gap-3 mb-2">
                           <div className="w-8 h-8 rounded-full bg-gray-300 shrink-0"></div>
                           <div>
@@ -1766,11 +1808,11 @@ export default function TodoPersonalPage() {
                   </button>
                 </div>
                 <div className="space-y-3">
-                  {subtasks.map((subtask) => (
-                    <div key={subtask.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
+                  {subtasks.map((subtask, index) => (
+                    <div key={`${subtask.id || 'subtask'}-${index}`} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
                       <input
                         type="checkbox"
-                        checked={subtask.completed}
+                        checked={Boolean(subtask.completed)}
                         onChange={() => {
                           toggleLegacySubtask(subtask.id);
                         }}
@@ -2516,7 +2558,7 @@ export default function TodoPersonalPage() {
                 const sc = statusColors[task.status] ?? 'bg-blue-100 text-blue-700';
                 const pc = priorityColors[task.priority] ?? 'bg-gray-100 text-gray-500';
                 return (
-                  <button type="button" key={task.id} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors group" onClick={() => { setSelectedTask(task); setEditedTask(task); }}>
+                  <button type="button" key={task.id} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors group" onClick={() => { openTaskDrawer(task); }}>
                     <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: columnColors[task.status] ?? '#9ca3af' }} />
                     <p className="flex-1 text-sm font-medium text-gray-800 truncate group-hover:text-blue-700 transition-colors">{task.title}</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${pc}`}>{task.priority}</span>
@@ -2818,7 +2860,7 @@ export default function TodoPersonalPage() {
                       <div key={st.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg group hover:bg-gray-100">
                         <input
                           type="checkbox"
-                          checked={st.completed}
+                          checked={Boolean(st.completed)}
                           onChange={() => toggleLegacySubtask(st.id)}
                           className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                         />
@@ -3073,7 +3115,7 @@ export default function TodoPersonalPage() {
                       <div key={subtask.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                         <input
                           type="checkbox"
-                          checked={subtask.completed}
+                          checked={Boolean(subtask.completed)}
                           onChange={() => toggleCreateSubtask(subtask.id)}
                           className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                         />

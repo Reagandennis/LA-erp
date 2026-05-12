@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { ensureTripIntelReportForTrip } from '@/lib/intel-report';
 import { prisma } from '@/lib/prisma';
 import { requireRequestAuth } from '@/lib/request-auth';
 
@@ -93,7 +94,23 @@ export async function POST(request: NextRequest) {
       } as any,
     });
 
-    return NextResponse.json({ trip: serializeTrip(trip) }, { status: 201 });
+    const intelReport = await ensureTripIntelReportForTrip({
+      tripId: trip.id,
+      actorUserId: auth.user.id,
+      request,
+    });
+
+    return NextResponse.json(
+      {
+        trip: serializeTrip(trip),
+        intelReport: {
+          id: intelReport.id,
+          status: intelReport.status,
+          generationStatus: intelReport.generationStatus,
+        },
+      },
+      { status: 201 },
+    );
   } catch (err: any) {
     console.error('GLOBAL TRIP CREATE ERROR:', err);
 

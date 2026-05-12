@@ -76,12 +76,58 @@ export const DEFAULT_PERMISSIONS = [
     resource: 'content',
     action: 'delete',
   },
+  {
+    name: 'ai:execute',
+    description: 'Execute AI initiated platform actions',
+    resource: 'ai',
+    action: 'execute',
+  },
+  {
+    name: 'summary:read',
+    description: 'Read platform summaries from AI',
+    resource: 'summary',
+    action: 'read',
+  },
+  {
+    name: 'task:create',
+    description: 'Create personal tasks via AI',
+    resource: 'task',
+    action: 'create',
+  },
+  {
+    name: 'task:delete',
+    description: 'Delete own tasks via AI with confirmation',
+    resource: 'task',
+    action: 'delete',
+  },
+  {
+    name: 'calendar:create',
+    description: 'Create calendar events (trip and Google Calendar) via AI',
+    resource: 'calendar',
+    action: 'create',
+  },
+  {
+    name: 'calendar:delete',
+    description: 'Delete own calendar events via AI with confirmation',
+    resource: 'calendar',
+    action: 'delete',
+  },
 ] as const;
 
 const allPermissionNames = DEFAULT_PERMISSIONS.map((permission) => permission.name);
 
 export const DEFAULT_ROLE_PERMISSION_NAMES: Record<string, string[]> = {
   admin: allPermissionNames,
-  editor: ['content:create', 'content:read', 'content:update'],
-  viewer: ['content:read'],
+  editor: [
+    'content:create',
+    'content:read',
+    'content:update',
+    'ai:execute',
+    'summary:read',
+    'task:create',
+    'task:delete',
+    'calendar:create',
+    'calendar:delete',
+  ],
+  viewer: ['content:read', 'summary:read'],
 };

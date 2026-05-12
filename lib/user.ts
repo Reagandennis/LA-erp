@@ -62,6 +62,10 @@ export function userHasModule(user: AccessUser, moduleSlug: string) {
   return user.modules.some((module) => module.slug === moduleSlug);
 }
 
+export function userHasPermission(user: AccessUser, permissionName: string) {
+  return user.permissions.some((permission) => permission.name === permissionName);
+}
+
 export const userAccessInclude = {
   userRoles: {
     include: {

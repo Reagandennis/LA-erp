@@ -116,6 +116,8 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
   }
 
   const isActive = (path: string) => pathname === path;
+  const isModulePathActive = (path: string) =>
+    pathname === path || pathname.startsWith(`${path}/`);
 
   return (
     <aside 
@@ -182,29 +184,56 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
               <div className="border-t border-primary/10 mx-1 my-3" />
             )}
             {categoryModules.map((module) => {
-              const active = isActive(`/modules/${module.slug}`);
+              const modulePath = `/modules/${module.slug}`;
+              const venueDatabasePath = '/modules/trip-planning/venue-database';
+              const intelReportPath = '/modules/trip-planning/intel-report';
+              const active = isModulePathActive(modulePath);
+              const tripPlanningSubItems = [
+                { href: venueDatabasePath, label: 'Venue Database' },
+                { href: intelReportPath, label: 'Intel Report' },
+              ];
               return (
-                <Link
-                  key={module.id}
-                  href={`/modules/${module.slug}`}
-                  title={isCollapsed ? module.name : ""}
-                  className={`flex items-center gap-3 rounded-lg transition-all text-sm font-bold group ${
-                    isCollapsed ? 'justify-center p-2.5' : 'px-3 py-2.5'
-                  } ${
-                    active 
-                      ? 'bg-primary text-secondary' 
-                      : 'text-primary/70 hover:bg-primary/5 hover:text-primary'
-                  }`}
-                >
-                  <div className="w-6 h-6 flex items-center justify-center shrink-0">
-                    {CATEGORY_ICONS[category] || (
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
-                      </svg>
-                    )}
-                  </div>
-                  {!isCollapsed && <span className="whitespace-nowrap truncate">{module.name}</span>}
-                </Link>
+                <div key={module.id} className="space-y-1">
+                  <Link
+                    href={modulePath}
+                    title={isCollapsed ? module.name : ""}
+                    className={`flex items-center gap-3 rounded-lg transition-all text-sm font-bold group ${
+                      isCollapsed ? 'justify-center p-2.5' : 'px-3 py-2.5'
+                    } ${
+                      active 
+                        ? 'bg-primary text-secondary' 
+                        : 'text-primary/70 hover:bg-primary/5 hover:text-primary'
+                    }`}
+                  >
+                    <div className="w-6 h-6 flex items-center justify-center shrink-0">
+                      {CATEGORY_ICONS[category] || (
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+                        </svg>
+                      )}
+                    </div>
+                    {!isCollapsed && <span className="whitespace-nowrap truncate">{module.name}</span>}
+                  </Link>
+
+                  {module.slug === 'trip-planning' && !isCollapsed && (
+                    <div className="space-y-1">
+                      {tripPlanningSubItems.map((item) => (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={`ml-9 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-all ${
+                            isModulePathActive(item.href)
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-primary/60 hover:bg-primary/5 hover:text-primary'
+                          }`}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                          <span className="truncate">{item.label}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

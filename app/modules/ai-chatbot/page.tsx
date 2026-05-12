@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useGoogleAuth } from '@/app/ui/GoogleAuthProvider';
+import { useRouter } from 'next/navigation';
 
 type Message = {
   id: string;
@@ -20,51 +22,100 @@ type Conversation = {
   messages: Message[];
 };
 
+const QUICK_SUGGESTIONS = [
+  'summarize my tasks',
+  'create task called Submit visa docs due tomorrow',
+  'show calendar summary for trip 3',
+  'create itinerary event for trip 3 day 2 titled Hotel check-in',
+];
+
 export default function AIChatbotPage() {
+  const router = useRouter();
+  const { token: googleAccessToken } = useGoogleAuth();
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedModel, setSelectedModel] = useState<'All' | 'GPT-4' | 'GPT-3.5' | 'Claude' | 'Gemini'>('All');
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [pendingActionToken, setPendingActionToken] = useState<string | null>(null);
+  const [pendingActionLabel, setPendingActionLabel] = useState<string | null>(null);
+  const [pendingActionPreview, setPendingActionPreview] = useState<string | null>(null);
+  const [authUserId, setAuthUserId] = useState<number | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([
-    {
-      id: 'C-001',
-      title: 'Project Architecture Discussion',
-      model: 'GPT-4',
-      messageCount: 4,
-      lastMessage: 'Choose based on your application complexity.',
-      lastUpdated: 'Mar 28',
-      createdDate: 'Mar 15',
-      messages: [
-        { id: 'M-001', sender: 'user', text: 'How should I structure a large React application?', timestamp: '10:30 AM' },
-        { id: 'M-002', sender: 'assistant', text: 'Consider organizing by features or domains. Key principles: Feature-Based Structure, Separation of Concerns, Scalability, and Testing.', timestamp: '10:31 AM' },
-        { id: 'M-003', sender: 'user', text: 'What about state management?', timestamp: '10:32 AM' },
-        { id: 'M-004', sender: 'assistant', text: 'Choose based on your application complexity.', timestamp: '10:33 AM' },
-      ],
-    },
-    {
-      id: 'C-002',
-      title: 'Database Design Best Practices',
-      model: 'Claude',
+
+  useEffect(() => {
+    const verifyAuth = async () => {
+      try {
+        const res = await fetch('/api/ai-chatbot', {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (res.status === 401) {
+          router.push('/auth/login');
+          return;
+        }
+
+        if (res.ok) {
+          const data = (await res.json()) as { userId?: number };
+          setAuthUserId(typeof data.userId === 'number' ? data.userId : null);
+        }
+      } catch {
+        // Ignore network checks here; send path will handle failures.
+      }
+    };
+
+    void verifyAuth();
+  }, [router]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    const storageKey = `la_erp_ai_chats_v1_${authUserId}`;
+
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) {
+        setConversations([]);
+        setSelectedConversation(null);
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as Conversation[];
+      if (Array.isArray(parsed)) {
+        setConversations(parsed);
+        setSelectedConversation(parsed[0] ?? null);
+      }
+    } catch {
+      setConversations([]);
+      setSelectedConversation(null);
+    }
+  }, [authUserId]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    const storageKey = `la_erp_ai_chats_v1_${authUserId}`;
+    localStorage.setItem(storageKey, JSON.stringify(conversations));
+  }, [authUserId, conversations]);
+
+  const createNewConversation = () => {
+    const now = new Date();
+    const newConversation: Conversation = {
+      id: `C-${Date.now()}`,
+      title: `Chat ${conversations.length + 1}`,
+      model: 'Gemini',
       messageCount: 0,
-      lastMessage: 'Normalization is key for data integrity',
-      lastUpdated: 'Mar 27',
-      createdDate: 'Mar 20',
+      lastMessage: 'New conversation',
+      lastUpdated: 'Now',
+      createdDate: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       messages: [],
-    },
-    {
-      id: 'C-003',
-      title: 'API Security Implementation',
-      model: 'GPT-4',
-      messageCount: 0,
-      lastMessage: 'Use JWT tokens with proper expiration',
-      lastUpdated: 'Mar 26',
-      createdDate: 'Mar 18',
-      messages: [],
-    },
-  ]);
+    };
+
+    setConversations((prev) => [newConversation, ...prev]);
+    setSelectedConversation(newConversation);
+    setShowNewChatModal(false);
+  };
 
   const getModelColor = (model: string) => {
     switch (model) {
@@ -88,13 +139,16 @@ export default function AIChatbotPage() {
     return matchesSearch && matchesModel;
   });
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConversation) return;
+
+    const prompt = messageInput.trim();
+    const conversationId = selectedConversation.id;
 
     const newUserMessage: Message = {
       id: `M-${Date.now()}`,
       sender: 'user',
-      text: messageInput,
+      text: prompt,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -104,7 +158,7 @@ export default function AIChatbotPage() {
           ...conv,
           messages: [...conv.messages, newUserMessage],
           messageCount: conv.messageCount + 1,
-          lastMessage: messageInput,
+          lastMessage: prompt,
           lastUpdated: 'Now',
         };
       }
@@ -112,27 +166,70 @@ export default function AIChatbotPage() {
     });
 
     setConversations(updatedConversations);
-    const updated = updatedConversations.find((c) => c.id === selectedConversation.id);
+    const updated = updatedConversations.find((c) => c.id === conversationId);
     if (updated) setSelectedConversation(updated);
 
     setMessageInput('');
     setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      const history = selectedConversation.messages.map((message) => ({
+        role: message.sender,
+        text: message.text,
+      }));
+
+      const res = await fetch('/api/ai-chatbot', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt,
+          history,
+          googleAccessToken,
+        }),
+      });
+
+      let responseText = 'Sorry, I could not generate a response right now.';
+      if (res.ok) {
+        const data = (await res.json()) as {
+          text?: string;
+          pendingActionToken?: string;
+          pendingActionLabel?: string;
+          pendingActionPreview?: string | null;
+        };
+        responseText = (data.text || responseText).trim();
+        setPendingActionToken(data.pendingActionToken ?? null);
+        setPendingActionLabel(data.pendingActionLabel ?? null);
+        setPendingActionPreview(data.pendingActionPreview ?? null);
+      } else {
+        if (res.status === 401) {
+          responseText = 'Your session has expired. Redirecting to login...';
+          setTimeout(() => router.push('/auth/login'), 800);
+        } else {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          if (data.error) {
+            responseText = data.error;
+          }
+        }
+      }
+
       const aiResponse: Message = {
         id: `M-${Date.now() + 1}`,
         sender: 'assistant',
-        text: 'Thanks for your message! This is a simulated response. In production, this would connect to the actual AI model API.',
+        text: responseText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
       const finalConversations = updatedConversations.map((conv) => {
-        if (conv.id === selectedConversation.id) {
+        if (conv.id === conversationId) {
           return {
             ...conv,
             messages: [...conv.messages, aiResponse],
             messageCount: conv.messageCount + 1,
+            lastMessage: aiResponse.text,
+            lastUpdated: 'Now',
           };
         }
         return conv;
@@ -140,9 +237,79 @@ export default function AIChatbotPage() {
 
       setIsTyping(false);
       setConversations(finalConversations);
-      const finalUpdated = finalConversations.find((c) => c.id === selectedConversation.id);
+      const finalUpdated = finalConversations.find((c) => c.id === conversationId);
       if (finalUpdated) setSelectedConversation(finalUpdated);
-    }, 1800);
+    } catch {
+      setIsTyping(false);
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    if (!pendingActionToken || !selectedConversation) return;
+
+    setIsTyping(true);
+    try {
+      const res = await fetch('/api/ai-chatbot', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          confirmToken: pendingActionToken,
+          googleAccessToken,
+        }),
+      });
+
+      let responseText = 'Action failed.';
+      if (res.ok) {
+        const data = (await res.json()) as { text?: string };
+        responseText = data.text ?? responseText;
+      } else {
+        if (res.status === 401) {
+          responseText = 'Your session has expired. Redirecting to login...';
+          setTimeout(() => router.push('/auth/login'), 800);
+        } else {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          responseText = data.error ?? responseText;
+        }
+      }
+
+      const aiResponse: Message = {
+        id: `M-${Date.now() + 2}`,
+        sender: 'assistant',
+        text: responseText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      const nextConversations = conversations.map((conv) => {
+        if (conv.id !== selectedConversation.id) return conv;
+        return {
+          ...conv,
+          messages: [...conv.messages, aiResponse],
+          messageCount: conv.messageCount + 1,
+          lastMessage: aiResponse.text,
+          lastUpdated: 'Now',
+        };
+      });
+
+      setConversations(nextConversations);
+      const nextSelected = nextConversations.find((conv) => conv.id === selectedConversation.id);
+      if (nextSelected) {
+        setSelectedConversation(nextSelected);
+      }
+    } finally {
+      setPendingActionToken(null);
+      setPendingActionLabel(null);
+      setPendingActionPreview(null);
+      setIsTyping(false);
+    }
+  };
+
+  const handleCancelAction = () => {
+    setPendingActionToken(null);
+    setPendingActionLabel(null);
+    setPendingActionPreview(null);
   };
 
   // Auto-scroll to bottom
@@ -244,6 +411,42 @@ export default function AIChatbotPage() {
 
         {/* Input Area */}
         <div className="border-t border-gray-200 bg-white p-4">
+          <div className="mb-3 flex flex-wrap gap-2">
+            {QUICK_SUGGESTIONS.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => setMessageInput(suggestion)}
+                className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+          {pendingActionToken && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-semibold text-amber-900">
+                Confirm destructive action: {pendingActionLabel}
+              </p>
+              {pendingActionPreview && (
+                <p className="mt-1 text-xs text-amber-800">{pendingActionPreview}</p>
+              )}
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={handleConfirmAction}
+                  className="rounded-md bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={handleCancelAction}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex gap-3">
             <input
               type="text"
@@ -386,19 +589,7 @@ export default function AIChatbotPage() {
               </button>
               <button
                 onClick={() => {
-                  const newConversation: Conversation = {
-                    id: `C-${String(conversations.length + 1).padStart(3, '0')}`,
-                    title: `Chat ${conversations.length + 1}`,
-                    model: 'GPT-4',
-                    messageCount: 0,
-                    lastMessage: 'New conversation',
-                    lastUpdated: 'Now',
-                    createdDate: 'Today',
-                    messages: [],
-                  };
-                  setConversations([newConversation, ...conversations]);
-                  setShowNewChatModal(false);
-                  setSelectedConversation(newConversation);
+                  createNewConversation();
                 }}
                 className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors"
               >
