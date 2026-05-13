@@ -45,6 +45,9 @@ export async function POST(
       quantity: item.quantity,
       unitPrice: item.unitPrice ?? null,
       sourceQuoteItemId: item.sourceQuoteItemId ?? null,
+      scheduledAt: item.scheduledAt ?? null,
+      durationMinutes: item.durationMinutes ?? null,
+      reminderMinutesBefore: item.reminderMinutesBefore ?? null,
     })),
   });
 

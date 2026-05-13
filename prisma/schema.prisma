@@ -36,6 +36,7 @@ model User {
   organizationUpdates OrganizationSettings[] @relation("OrganizationUpdatedBy")
   createdTrips       Trip[]          @relation("TripCreatedBy")
   ownedTrips         Trip[]          @relation("TripOwner")
+  tripItineraryItemNotifications TripItineraryItemNotification[]
 }
 
 model PersonalTodo {
@@ -418,19 +419,41 @@ model Trip {
 }
 
 model TripItineraryItem {
-  id                Int       @id @default(autoincrement())
-  tripId            Int
-  position          Int
-  description       String
-  quantity          Decimal   @db.Decimal(12, 2)
-  unitPrice         Decimal?  @db.Decimal(14, 2)
-  completedAt       DateTime?
-  sourceQuoteItemId Int?
-  trip              Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  sourceQuoteItem   QuoteItem? @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
+  id                    Int       @id @default(autoincrement())
+  tripId                Int
+  position              Int
+  description           String
+  quantity              Decimal   @db.Decimal(12, 2)
+  unitPrice             Decimal?  @db.Decimal(14, 2)
+  completedAt           DateTime?
+  sourceQuoteItemId     Int?
+  scheduledAt           DateTime?
+  durationMinutes       Int?
+  reminderMinutesBefore Int?
+  reminderAt            DateTime?
+  reminderSentAt        DateTime?
+  trip                  Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  sourceQuoteItem       QuoteItem? @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
+  notifications         TripItineraryItemNotification[]
 
   @@index([tripId, position])
+  @@index([tripId, scheduledAt])
+  @@index([reminderAt, reminderSentAt])
   @@index([sourceQuoteItemId])
+}
+
+model TripItineraryItemNotification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  itemId    Int
+  type      String
+  message   String
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+  item      TripItineraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model TripSequence {

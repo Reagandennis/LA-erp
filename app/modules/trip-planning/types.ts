@@ -10,7 +10,20 @@ export interface TripItineraryItemSummary {
   unitPrice: number | null;
   completedAt: string | null;
   sourceQuoteItemId: number | null;
+  scheduledAt: string | null;
+  durationMinutes: number | null;
+  reminderMinutesBefore: number | null;
+  reminderAt: string | null;
 }
+
+export const REMINDER_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: 'No reminder' },
+  { value: 5, label: '5 min before' },
+  { value: 15, label: '15 min before' },
+  { value: 30, label: '30 min before' },
+  { value: 60, label: '1 hour before' },
+  { value: 1440, label: '1 day before' },
+];
 
 export interface TripSummary {
   id: number;
