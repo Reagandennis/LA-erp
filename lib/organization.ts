@@ -57,9 +57,9 @@ type OrganizationCollectionClient = {
   }) => Promise<OrganizationRecord>;
 };
 
-const organizationClient = (
-  prisma as unknown as { organizationSettings: OrganizationCollectionClient }
-).organizationSettings;
+function getOrganizationClient(): OrganizationCollectionClient {
+  return (prisma as unknown as { organizationSettings: OrganizationCollectionClient }).organizationSettings;
+}
 
 function toNumber(value: Prisma.Decimal | number): number {
   if (typeof value === 'number') return value;
@@ -88,7 +88,7 @@ function serialize(record: OrganizationRecord): OrganizationSummary {
 }
 
 export async function getOrganizationSettings(): Promise<OrganizationSummary> {
-  const record = await organizationClient.upsert({
+  const record = await getOrganizationClient().upsert({
     where: { id: 1 },
     create: { id: 1 },
     update: {},
@@ -132,7 +132,7 @@ export async function updateOrganizationSettings(
     data.defaultTaxRate = new Prisma.Decimal(input.defaultTaxRate);
   if (input.taxLabel !== undefined) data.taxLabel = input.taxLabel;
 
-  const updated = await organizationClient.upsert({
+  const updated = await getOrganizationClient().upsert({
     where: { id: 1 },
     create: { id: 1, ...data },
     update: data,
@@ -145,7 +145,7 @@ export async function setOrganizationLogo(
   mimeType: string,
   updatedById: number,
 ): Promise<OrganizationSummary> {
-  const updated = await organizationClient.upsert({
+  const updated = await getOrganizationClient().upsert({
     where: { id: 1 },
     create: { id: 1, logo: buffer, logoMimeType: mimeType, updatedById },
     update: { logo: buffer, logoMimeType: mimeType, updatedById },
@@ -154,7 +154,7 @@ export async function setOrganizationLogo(
 }
 
 export async function clearOrganizationLogo(updatedById: number): Promise<OrganizationSummary> {
-  const updated = await organizationClient.upsert({
+  const updated = await getOrganizationClient().upsert({
     where: { id: 1 },
     create: { id: 1, updatedById },
     update: { logo: null, logoMimeType: null, updatedById },
@@ -163,7 +163,7 @@ export async function clearOrganizationLogo(updatedById: number): Promise<Organi
 }
 
 export async function getOrganizationLogo(): Promise<{ buffer: Buffer; mimeType: string } | null> {
-  const record = await organizationClient.findUnique({ where: { id: 1 } });
+  const record = await getOrganizationClient().findUnique({ where: { id: 1 } });
   if (!record || !record.logo || !record.logoMimeType) return null;
   return { buffer: record.logo, mimeType: record.logoMimeType };
 }

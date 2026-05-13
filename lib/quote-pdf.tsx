@@ -10,6 +10,7 @@ import {
   renderToBuffer,
 } from '@react-pdf/renderer';
 import React from 'react';
+import sharp from 'sharp';
 
 import type { OrganizationSummary } from './organization';
 import type { QuoteDetail } from './quotes';
@@ -18,9 +19,9 @@ const styles = StyleSheet.create({
   page: { padding: 40, fontSize: 10, color: '#111827', fontFamily: 'Helvetica' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   headerLeft: { maxWidth: 240 },
-  logo: { maxHeight: 60, marginBottom: 8 },
-  companyName: { fontSize: 16, fontWeight: 700, color: '#111827' },
-  companyMeta: { marginTop: 4, color: '#6B7280', lineHeight: 1.4 },
+  logo: { maxHeight: 60, maxWidth: 180, marginBottom: 6, objectFit: 'contain' },
+  companyName: { fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 4 },
+  companyMetaLine: { color: '#6B7280', fontSize: 9, marginTop: 1 },
   headerRight: { textAlign: 'right', minWidth: 200 },
   badge: { fontSize: 9, color: '#059669', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
   reference: { fontSize: 18, fontWeight: 700, color: '#111827' },
@@ -31,7 +32,7 @@ const styles = StyleSheet.create({
   blocksRow: { flexDirection: 'row', gap: 16, marginTop: 24 },
   block: { flex: 1, padding: 12, borderRadius: 6, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#F3F4F6' },
   blockTitle: { fontSize: 8, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
-  blockBody: { color: '#1F2937', lineHeight: 1.4 },
+  blockLine: { color: '#1F2937', fontSize: 10, marginTop: 1 },
   subject: { marginTop: 24, fontSize: 14, fontWeight: 700, color: '#111827' },
   itemsTable: { marginTop: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   itemsHeader: {
@@ -53,7 +54,7 @@ const styles = StyleSheet.create({
   colDiscount: { flex: 1.2, paddingHorizontal: 6, textAlign: 'right' },
   colTotal: { flex: 1.4, paddingHorizontal: 6, textAlign: 'right', fontWeight: 700 },
   headerText: { fontSize: 8, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1 },
-  cellText: { color: '#111827', lineHeight: 1.3 },
+  cellText: { color: '#111827' },
   totalsBox: {
     marginTop: 16,
     alignSelf: 'flex-end',
@@ -73,8 +74,8 @@ const styles = StyleSheet.create({
   termsBox: { marginTop: 12, padding: 12, backgroundColor: '#F9FAFB', borderRadius: 6 },
   notesTitle: { fontSize: 8, color: '#92400E', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
   termsTitle: { fontSize: 8, color: '#374151', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
-  notesBody: { color: '#78350F', lineHeight: 1.4 },
-  termsBody: { color: '#1F2937', lineHeight: 1.4 },
+  notesBody: { color: '#78350F' },
+  termsBody: { color: '#1F2937' },
   footer: { position: 'absolute', left: 40, right: 40, bottom: 24, textAlign: 'center', color: '#9CA3AF', fontSize: 8 },
 });
 
@@ -105,9 +106,12 @@ function joinNonEmpty(parts: Array<string | null | undefined>, separator = ', ')
   return parts.filter((part) => part && part.trim().length > 0).join(separator);
 }
 
-function buildCompanyAddress(org: OrganizationSummary): string {
-  const line2 = joinNonEmpty([org.city, org.region, org.postalCode], ' ');
-  return joinNonEmpty([org.addressLine1, org.addressLine2, line2, org.country], '\n');
+/** Returns each non-empty address line as its own string */
+function buildCompanyAddressLines(org: OrganizationSummary): string[] {
+  const cityLine = joinNonEmpty([org.city, org.region, org.postalCode], ' ');
+  return [org.addressLine1, org.addressLine2, cityLine, org.country].filter(
+    (l): l is string => Boolean(l && l.trim()),
+  );
 }
 
 interface QuotePdfProps {
@@ -126,24 +130,46 @@ interface QuotePdfProps {
 function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuotePdfProps) {
   const currency = quote.currency;
   const taxLabel = organization.taxLabel || 'Tax';
+  const addressLines = buildCompanyAddressLines(organization);
+
+  const billToLines = [
+    customer.company,
+    customer.name,
+    customer.email,
+    customer.billingAddress,
+  ].filter((l): l is string => Boolean(l));
+
+  const shipToLines = [customer.address ?? customer.billingAddress].filter(
+    (l): l is string => Boolean(l),
+  );
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
+        {/* ── Header ── */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             {logoDataUri ? (
-              // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image, not a DOM image
+              // eslint-disable-next-line jsx-a11y/alt-text
               <Image src={logoDataUri} style={styles.logo} />
             ) : null}
-            {organization.companyName ? <Text style={styles.companyName}>{organization.companyName}</Text> : null}
-            <Text style={styles.companyMeta}>
-              {buildCompanyAddress(organization)}
-              {organization.email ? `\n${organization.email}` : ''}
-              {organization.phone ? `\n${organization.phone}` : ''}
-              {organization.website ? `\n${organization.website}` : ''}
-            </Text>
+            {organization.companyName ? (
+              <Text style={styles.companyName}>{organization.companyName}</Text>
+            ) : null}
+            {addressLines.map((line, i) => (
+              <Text key={i} style={styles.companyMetaLine}>{line}</Text>
+            ))}
+            {organization.email ? (
+              <Text style={styles.companyMetaLine}>{organization.email}</Text>
+            ) : null}
+            {organization.phone ? (
+              <Text style={styles.companyMetaLine}>{organization.phone}</Text>
+            ) : null}
+            {organization.website ? (
+              <Text style={styles.companyMetaLine}>{organization.website}</Text>
+            ) : null}
           </View>
+
           <View style={styles.headerRight}>
             <Text style={styles.badge}>Quotation</Text>
             <Text style={styles.reference}>{quote.reference}</Text>
@@ -170,24 +196,28 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
           </View>
         </View>
 
+        {/* ── Bill/Ship to ── */}
         <View style={styles.blocksRow}>
           <View style={styles.block}>
             <Text style={styles.blockTitle}>Bill to</Text>
-            <Text style={styles.blockBody}>
-              {customer.company ? `${customer.company}\n` : ''}
-              {customer.name}
-              {customer.email ? `\n${customer.email}` : ''}
-              {customer.billingAddress ? `\n${customer.billingAddress}` : ''}
-            </Text>
+            {billToLines.map((line, i) => (
+              <Text key={i} style={styles.blockLine}>{line}</Text>
+            ))}
+            {billToLines.length === 0 ? <Text style={styles.blockLine}>—</Text> : null}
           </View>
           <View style={styles.block}>
             <Text style={styles.blockTitle}>Ship to</Text>
-            <Text style={styles.blockBody}>{customer.address || customer.billingAddress || '—'}</Text>
+            {shipToLines.map((line, i) => (
+              <Text key={i} style={styles.blockLine}>{line}</Text>
+            ))}
+            {shipToLines.length === 0 ? <Text style={styles.blockLine}>—</Text> : null}
           </View>
         </View>
 
+        {/* ── Subject ── */}
         <Text style={styles.subject}>{quote.subject}</Text>
 
+        {/* ── Items table ── */}
         <View style={styles.itemsTable}>
           <View style={styles.itemsHeader}>
             <Text style={[styles.colDescription, styles.headerText]}>Description</Text>
@@ -214,6 +244,7 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
           ))}
         </View>
 
+        {/* ── Totals ── */}
         <View style={styles.totalsBox}>
           <View style={styles.totalsRow}>
             <Text style={styles.totalsLabel}>Subtotal</Text>
@@ -228,7 +259,7 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
           {quote.discountType !== 'none' && quote.discountAmount > 0 ? (
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>
-                Discount {quote.discountType === 'percentage' ? `(${quote.discountValue}%)` : ''}
+                Discount{quote.discountType === 'percentage' ? ` (${quote.discountValue}%)` : ''}
               </Text>
               <Text style={styles.totalsValue}>- {formatMoney(quote.discountAmount, currency)}</Text>
             </View>
@@ -240,13 +271,13 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
           </View>
         </View>
 
+        {/* ── Notes / Terms ── */}
         {quote.notes ? (
           <View style={styles.notesBox}>
             <Text style={styles.notesTitle}>Notes</Text>
             <Text style={styles.notesBody}>{quote.notes}</Text>
           </View>
         ) : null}
-
         {quote.terms ? (
           <View style={styles.termsBox}>
             <Text style={styles.termsTitle}>Terms & conditions</Text>
@@ -269,9 +300,16 @@ export async function renderQuotePdf(input: {
   customer: QuotePdfProps['customer'];
 }): Promise<Buffer> {
   let logoDataUri: string | null = null;
-  // SVG isn't supported by @react-pdf — only embed raster types
-  if (input.logo && input.logo.mimeType !== 'image/svg+xml') {
-    logoDataUri = `data:${input.logo.mimeType};base64,${input.logo.buffer.toString('base64')}`;
+
+  if (input.logo) {
+    try {
+      // Convert any format (including SVG) to PNG for react-pdf compatibility
+      const pngBuffer = await sharp(input.logo.buffer).png().toBuffer();
+      logoDataUri = `data:image/png;base64,${pngBuffer.toString('base64')}`;
+    } catch {
+      // If conversion fails, skip the logo rather than crash the whole PDF
+      logoDataUri = null;
+    }
   }
 
   return renderToBuffer(

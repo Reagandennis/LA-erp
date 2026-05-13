@@ -46,9 +46,9 @@ type CustomerCollectionClient = {
   }) => Promise<CustomerRecord>;
 };
 
-const customerClient = (
-  prisma as unknown as { customer: CustomerCollectionClient }
-).customer;
+function getCustomerClient(): CustomerCollectionClient {
+  return (prisma as unknown as { customer: CustomerCollectionClient }).customer;
+}
 
 function serializeCustomer(record: CustomerRecord): CustomerSummary {
   return {
@@ -66,14 +66,14 @@ function serializeCustomer(record: CustomerRecord): CustomerSummary {
 }
 
 export async function listCustomers(): Promise<CustomerSummary[]> {
-  const records = await customerClient.findMany({
+  const records = await getCustomerClient().findMany({
     orderBy: [{ name: 'asc' }, { createdAt: 'desc' }],
   });
   return records.map(serializeCustomer);
 }
 
 export async function getCustomerById(id: number) {
-  const record = await customerClient.findUnique({ where: { id } });
+  const record = await getCustomerClient().findUnique({ where: { id } });
   return record ? serializeCustomer(record) : null;
 }
 
@@ -88,7 +88,7 @@ export interface CreateCustomerInput {
 }
 
 export async function createCustomer(input: CreateCustomerInput) {
-  const created = await customerClient.create({
+  const created = await getCustomerClient().create({
     data: {
       name: input.name,
       email: input.email ?? null,
