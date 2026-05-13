@@ -83,8 +83,12 @@ export async function POST(request: NextRequest) {
     subject: validation.data.subject,
     issueDate: validation.data.issueDate,
     expiryDate: validation.data.expiryDate,
+    currency: validation.data.currency,
     taxRate: validation.data.taxRate,
+    discountType: validation.data.discountType,
+    discountValue: validation.data.discountValue,
     notes: validation.data.notes ?? null,
+    terms: validation.data.terms ?? null,
     items: validation.data.items,
     createdById: auth.user.id,
   });
