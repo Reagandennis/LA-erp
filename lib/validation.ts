@@ -226,11 +226,23 @@ export const templateUpdateSchema = templateCreateSchema.partial();
 
 export const tripStatusSchema = z.enum(['Draft', 'Planned', 'Active', 'Completed', 'Cancelled']);
 
+const REMINDER_MINUTES_OPTIONS = [5, 15, 30, 60, 1440] as const;
+
 const tripItineraryItemDraftSchema = z.object({
   description: z.string().trim().min(1, 'Item description is required').max(280),
   quantity: z.number().finite().gt(0, 'Quantity must be greater than zero').max(1_000_000),
   unitPrice: z.number().finite().gte(0).max(100_000_000).optional().nullable(),
   sourceQuoteItemId: z.number().int().positive().optional().nullable(),
+  scheduledAt: z.string().trim().min(1).optional().nullable(),
+  durationMinutes: z.number().int().gte(0).max(60 * 24 * 30).optional().nullable(),
+  reminderMinutesBefore: z
+    .number()
+    .int()
+    .refine((v) => REMINDER_MINUTES_OPTIONS.includes(v as (typeof REMINDER_MINUTES_OPTIONS)[number]), {
+      message: 'Reminder must be 5, 15, 30, 60, or 1440 minutes before',
+    })
+    .optional()
+    .nullable(),
 });
 
 export const tripCreateSchema = z.object({
@@ -270,13 +282,20 @@ export const tripItineraryItemUpdateSchema = z
     quantity: z.number().finite().gt(0).max(1_000_000).optional(),
     unitPrice: z.number().finite().gte(0).max(100_000_000).optional().nullable(),
     completed: z.boolean().optional(),
+    scheduledAt: z.string().trim().min(1).optional().nullable(),
+    durationMinutes: z.number().int().gte(0).max(60 * 24 * 30).optional().nullable(),
+    reminderMinutesBefore: z
+      .number()
+      .int()
+      .refine(
+        (v) => REMINDER_MINUTES_OPTIONS.includes(v as (typeof REMINDER_MINUTES_OPTIONS)[number]),
+        { message: 'Reminder must be 5, 15, 30, 60, or 1440 minutes before' },
+      )
+      .optional()
+      .nullable(),
   })
   .refine(
-    (value) =>
-      value.description !== undefined ||
-      value.quantity !== undefined ||
-      value.unitPrice !== undefined ||
-      value.completed !== undefined,
+    (value) => Object.keys(value).length > 0,
     'At least one field must be updated',
   );
 
