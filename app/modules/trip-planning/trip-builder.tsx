@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
-import type { OwnerOption, TripDetail, TripStatus } from './types';
+import TripTimeline, { type TripTimelineDraftPatch } from './trip-timeline';
+import type { OwnerOption, TripDetail, TripItineraryItemSummary, TripStatus } from './types';
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'ZAR', 'KES', 'NGN'];
 
@@ -13,24 +14,12 @@ interface CustomerOption {
   email: string | null;
 }
 
-interface ItemDraft {
-  key: string;
-  description: string;
-  quantity: string;
-  unitPrice: string;
-}
-
 interface TripBuilderProps {
   customers: CustomerOption[];
   owners: OwnerOption[];
   currentUser: { id: number; name: string; email: string };
   onClose: () => void;
   onSaved: (trip: TripDetail) => void;
-}
-
-function makeKey(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return Math.random().toString(36).slice(2);
 }
 
 function todayIso(): string {
@@ -43,11 +32,29 @@ function plusDaysIso(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function emptyItem(): ItemDraft {
-  return { key: makeKey(), description: '', quantity: '1', unitPrice: '' };
+const STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active'];
+
+let DRAFT_KEY_COUNTER = 0;
+function nextDraftKey(): number {
+  DRAFT_KEY_COUNTER -= 1;
+  return DRAFT_KEY_COUNTER;
 }
 
-const STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active'];
+function emptyDraftItem(): TripItineraryItemSummary {
+  return {
+    id: nextDraftKey(),
+    position: 0,
+    description: '',
+    quantity: 1,
+    unitPrice: null,
+    completedAt: null,
+    sourceQuoteItemId: null,
+    scheduledAt: null,
+    durationMinutes: null,
+    reminderMinutesBefore: null,
+    reminderAt: null,
+  };
+}
 
 export default function TripBuilder({
   customers,
@@ -65,7 +72,7 @@ export default function TripBuilder({
   const [endDate, setEndDate] = useState(plusDaysIso(7));
   const [currency, setCurrency] = useState('USD');
   const [notes, setNotes] = useState('');
-  const [items, setItems] = useState<ItemDraft[]>([emptyItem()]);
+  const [items, setItems] = useState<TripItineraryItemSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -77,12 +84,52 @@ export default function TripBuilder({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const updateItem = (key: string, patch: Partial<Omit<ItemDraft, 'key'>>) => {
-    setItems((cur) => cur.map((i) => (i.key === key ? { ...i, ...patch } : i)));
+  const addDraftItem: React.ComponentProps<typeof TripTimeline>['onAddItem'] = (input) => {
+    setItems((cur) => [
+      ...cur,
+      {
+        ...emptyDraftItem(),
+        position: cur.length,
+        description: input.description,
+        scheduledAt: input.scheduledAt,
+        durationMinutes: input.durationMinutes,
+        reminderMinutesBefore: input.reminderMinutesBefore,
+        quantity: input.quantity,
+        unitPrice: input.unitPrice,
+      },
+    ]);
   };
 
-  const removeItem = (key: string) => {
-    setItems((cur) => (cur.length === 1 ? cur : cur.filter((i) => i.key !== key)));
+  const updateDraftItem = (itemId: number, patch: TripTimelineDraftPatch) => {
+    setItems((cur) =>
+      cur.map((it) => {
+        if (it.id !== itemId) return it;
+        return {
+          ...it,
+          description: patch.description ?? it.description,
+          scheduledAt:
+            patch.scheduledAt !== undefined ? patch.scheduledAt : it.scheduledAt,
+          durationMinutes:
+            patch.durationMinutes !== undefined ? patch.durationMinutes : it.durationMinutes,
+          reminderMinutesBefore:
+            patch.reminderMinutesBefore !== undefined
+              ? patch.reminderMinutesBefore
+              : it.reminderMinutesBefore,
+          quantity: patch.quantity ?? it.quantity,
+          unitPrice: patch.unitPrice !== undefined ? patch.unitPrice : it.unitPrice,
+          completedAt:
+            patch.completed === undefined
+              ? it.completedAt
+              : patch.completed
+                ? new Date().toISOString()
+                : null,
+        };
+      }),
+    );
+  };
+
+  const removeDraftItem = (itemId: number) => {
+    setItems((cur) => cur.filter((it) => it.id !== itemId));
   };
 
   const handleSave = async () => {
@@ -100,8 +147,11 @@ export default function TripBuilder({
       .filter((i) => i.description.trim().length > 0)
       .map((i) => ({
         description: i.description.trim(),
-        quantity: Number(i.quantity),
-        unitPrice: i.unitPrice ? Number(i.unitPrice) : null,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        scheduledAt: i.scheduledAt,
+        durationMinutes: i.durationMinutes,
+        reminderMinutesBefore: i.reminderMinutesBefore,
       }));
     if (itemsPayload.some((i) => !Number.isFinite(i.quantity) || i.quantity <= 0)) {
       setError('Each item needs a positive quantity');
@@ -274,61 +324,19 @@ export default function TripBuilder({
             </section>
 
             <section>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">
-                  Itinerary items
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setItems((c) => [...c, emptyItem()])}
-                  className="text-xs font-black text-emerald-600 uppercase tracking-widest hover:text-emerald-800"
-                >
-                  + Add item
-                </button>
-              </div>
-              <div className="space-y-2">
-                {items.map((item) => (
-                  <div
-                    key={item.key}
-                    className="grid grid-cols-12 gap-2 items-center p-3 bg-gray-50 rounded-2xl border border-gray-100"
-                  >
-                    <input
-                      type="text"
-                      placeholder="Description"
-                      value={item.description}
-                      onChange={(e) => updateItem(item.key, { description: e.target.value })}
-                      className="col-span-12 md:col-span-7 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Qty"
-                      value={item.quantity}
-                      onChange={(e) => updateItem(item.key, { quantity: e.target.value })}
-                      className="col-span-5 md:col-span-2 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Unit price"
-                      value={item.unitPrice}
-                      onChange={(e) => updateItem(item.key, { unitPrice: e.target.value })}
-                      className="col-span-6 md:col-span-2 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item.key)}
-                      disabled={items.length === 1}
-                      className="col-span-1 p-2 text-gray-300 hover:text-rose-600 rounded-xl disabled:opacity-30"
-                      aria-label="Remove item"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-3">
+                Timeline
+              </h3>
+              <TripTimeline
+                startDate={startDate}
+                endDate={endDate}
+                items={items}
+                currency={currency}
+                onAddItem={addDraftItem}
+                onUpdateItem={updateDraftItem}
+                onDeleteItem={removeDraftItem}
+                onExtendEndDate={(next) => setEndDate(next)}
+              />
             </section>
 
             <Field label="Notes" wide>

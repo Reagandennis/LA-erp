@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-type NotificationSource = 'todo' | 'quote';
+type NotificationSource = 'todo' | 'quote' | 'trip';
 
 type RawTodoNotification = {
   id: number;
@@ -17,6 +17,16 @@ type RawTodoNotification = {
 type RawQuoteNotification = {
   id: number;
   quoteId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+type RawTripNotification = {
+  id: number;
+  itemId: number;
+  tripId: number;
   type: string;
   message: string;
   createdAt: string;
@@ -38,6 +48,7 @@ type NotificationItem = {
 const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   todo: '/api/planning/notifications',
   quote: '/api/quotes/notifications',
+  trip: '/api/planning/trip-notifications',
 };
 
 function compositeKey(item: { source: NotificationSource; id: number }): string {
@@ -51,12 +62,18 @@ function buildToastTitle(source: NotificationSource, type: string): string {
     if (type === 'quote.declined') return 'Quote declined';
     return 'Quote update';
   }
+  if (source === 'trip') {
+    return 'Trip reminder';
+  }
   return 'Shared with you';
 }
 
 function buildHref(item: { source: NotificationSource; entityId: number }): string {
   if (item.source === 'quote') {
     return '/modules/quotes';
+  }
+  if (item.source === 'trip') {
+    return `/modules/trip-planning?focus=${item.entityId}`;
   }
   return '/modules/todo-personal';
 }
@@ -75,9 +92,10 @@ export default function NotificationsBell() {
 
     const loadNotifications = async () => {
       try {
-        const [todoResponse, quoteResponse] = await Promise.all([
+        const [todoResponse, quoteResponse, tripResponse] = await Promise.all([
           fetch(SOURCE_ENDPOINTS.todo, { credentials: 'include' }).catch(() => null),
           fetch(SOURCE_ENDPOINTS.quote, { credentials: 'include' }).catch(() => null),
+          fetch(SOURCE_ENDPOINTS.trip, { credentials: 'include' }).catch(() => null),
         ]);
 
         const merged: NotificationItem[] = [];
@@ -116,6 +134,25 @@ export default function NotificationsBell() {
               readAt: item.readAt,
               href: buildHref({ source: 'quote', entityId: item.quoteId }),
               toastTitle: buildToastTitle('quote', item.type),
+            });
+          }
+        }
+
+        if (tripResponse && tripResponse.ok) {
+          const data = (await tripResponse.json().catch(() => null)) as
+            | { notifications?: RawTripNotification[] }
+            | null;
+          for (const item of data?.notifications ?? []) {
+            merged.push({
+              source: 'trip',
+              id: item.id,
+              entityId: item.tripId,
+              type: item.type,
+              message: item.message,
+              createdAt: item.createdAt,
+              readAt: item.readAt,
+              href: buildHref({ source: 'trip', entityId: item.tripId }),
+              toastTitle: buildToastTitle('trip', item.type),
             });
           }
         }
@@ -257,7 +294,7 @@ export default function NotificationsBell() {
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-gray-900">Notifications</p>
-                <p className="text-xs text-gray-500">Tasks, mentions, and quote approvals</p>
+                <p className="text-xs text-gray-500">Tasks, quotes, and trip reminders</p>
               </div>
               <button
                 type="button"
@@ -293,7 +330,9 @@ export default function NotificationsBell() {
                         ? 'border-gray-200 bg-gray-50'
                         : notification.source === 'quote'
                           ? 'border-blue-200 bg-blue-50'
-                          : 'border-emerald-200 bg-emerald-50'
+                          : notification.source === 'trip'
+                            ? 'border-amber-200 bg-amber-50'
+                            : 'border-emerald-200 bg-emerald-50'
                     }`}
                   >
                     <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">

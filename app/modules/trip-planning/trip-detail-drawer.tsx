@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+import TripTimeline, { type TripTimelineDraftPatch } from './trip-timeline';
 import type { TripDetail, TripStatus } from './types';
 
 interface TripDetailDrawerProps {
@@ -24,29 +25,12 @@ const STATUS_HEADER_STYLES: Record<string, string> = {
 
 const ALL_STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
 
-function formatMoney(value: number | null, currency: string) {
-  if (value == null) return '—';
-  return value.toLocaleString(undefined, {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: 2,
-  });
-}
-
 function formatDate(value: string | null) {
   if (!value) return '—';
   return new Date(value).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  });
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) return '—';
-  return new Date(value).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
   });
 }
 
@@ -62,10 +46,7 @@ export default function TripDetailDrawer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
-  const [showAddItem, setShowAddItem] = useState(false);
-  const [newItemDescription, setNewItemDescription] = useState('');
-  const [newItemQty, setNewItemQty] = useState('1');
-  const [newItemPrice, setNewItemPrice] = useState('');
+  const [pendingItemId, setPendingItemId] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -125,23 +106,31 @@ export default function TripDetailDrawer({
     }
   };
 
-  const toggleItemComplete = async (itemId: number, currentlyCompleted: boolean) => {
+  const handleAddItem = async (input: {
+    description: string;
+    scheduledAt: string | null;
+    durationMinutes: number | null;
+    reminderMinutesBefore: number | null;
+    quantity: number;
+    unitPrice: number | null;
+  }) => {
     if (!trip) return;
-    setPending(`item:${itemId}`);
+    setPending('add-item');
     setError(null);
     try {
-      const r = await fetch(`/api/trips/${trip.id}/items/${itemId}`, {
-        method: 'PATCH',
+      const r = await fetch(`/api/trips/${trip.id}/items`, {
+        method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: !currentlyCompleted }),
+        body: JSON.stringify({ items: [input] }),
       });
       const data = (await r.json().catch(() => null)) as
         | { trip?: TripDetail; error?: string }
         | null;
       if (!r.ok || !data?.trip) {
-        setError(data?.error ?? 'Could not update item');
-        return;
+        const message = data?.error ?? 'Could not add item';
+        setError(message);
+        throw new Error(message);
       }
       setTrip(data.trip);
       onChanged(data.trip);
@@ -150,43 +139,76 @@ export default function TripDetailDrawer({
     }
   };
 
-  const handleAddItem = async () => {
-    if (!trip || !newItemDescription.trim()) return;
-    const qty = Number(newItemQty);
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setError('Quantity must be greater than zero');
-      return;
-    }
-    setPending('add-item');
+  const handleUpdateItem = async (itemId: number, patch: TripTimelineDraftPatch) => {
+    if (!trip) return;
+    setPendingItemId(itemId);
     setError(null);
     try {
-      const r = await fetch(`/api/trips/${trip.id}/items`, {
-        method: 'POST',
+      const r = await fetch(`/api/trips/${trip.id}/items/${itemId}`, {
+        method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: [
-            {
-              description: newItemDescription.trim(),
-              quantity: qty,
-              unitPrice: newItemPrice ? Number(newItemPrice) : null,
-            },
-          ],
-        }),
+        body: JSON.stringify(patch),
       });
       const data = (await r.json().catch(() => null)) as
         | { trip?: TripDetail; error?: string }
         | null;
       if (!r.ok || !data?.trip) {
-        setError(data?.error ?? 'Could not add item');
+        const message = data?.error ?? 'Could not update item';
+        setError(message);
+        throw new Error(message);
+      }
+      setTrip(data.trip);
+      onChanged(data.trip);
+    } finally {
+      setPendingItemId(null);
+    }
+  };
+
+  const handleDeleteItem = async (itemId: number) => {
+    if (!trip) return;
+    if (!confirm('Remove this item from the trip?')) return;
+    setPendingItemId(itemId);
+    setError(null);
+    try {
+      const r = await fetch(`/api/trips/${trip.id}/items/${itemId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = (await r.json().catch(() => null)) as
+        | { trip?: TripDetail; error?: string }
+        | null;
+      if (!r.ok || !data?.trip) {
+        setError(data?.error ?? 'Could not remove item');
         return;
       }
       setTrip(data.trip);
       onChanged(data.trip);
-      setNewItemDescription('');
-      setNewItemQty('1');
-      setNewItemPrice('');
-      setShowAddItem(false);
+    } finally {
+      setPendingItemId(null);
+    }
+  };
+
+  const handleExtendEndDate = async (newEndDate: string) => {
+    if (!trip) return;
+    setPending('end-date');
+    setError(null);
+    try {
+      const r = await fetch(`/api/trips/${trip.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endDate: newEndDate }),
+      });
+      const data = (await r.json().catch(() => null)) as
+        | { trip?: TripDetail; error?: string }
+        | null;
+      if (!r.ok || !data?.trip) {
+        setError(data?.error ?? 'Could not extend trip');
+        return;
+      }
+      setTrip(data.trip);
+      onChanged(data.trip);
     } finally {
       setPending(null);
     }
@@ -228,7 +250,7 @@ export default function TripDetailDrawer({
         className="fixed inset-0 bg-gray-900/10 backdrop-blur-sm z-40"
         onClick={() => (pending ? null : onClose())}
       />
-      <div className="fixed right-0 top-0 h-full w-full sm:max-w-2xl bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+      <div className="fixed right-0 top-0 h-full w-full sm:max-w-3xl bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
         {loading && <div className="p-16 text-center text-sm font-bold text-gray-500">Loading…</div>}
 
         {!loading && error && !trip && (
@@ -326,91 +348,26 @@ export default function TripDetailDrawer({
               <div>
                 <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
                   <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em]">
-                    Itinerary
+                    Timeline
                   </h3>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => setShowAddItem((v) => !v)}
-                      className="text-[10px] font-black text-emerald-600 uppercase tracking-widest hover:text-emerald-800"
-                    >
-                      {showAddItem ? 'Cancel' : '+ Add item'}
-                    </button>
+                  {pending === 'end-date' && (
+                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                      Updating…
+                    </span>
                   )}
                 </div>
-                {showAddItem && (
-                  <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100 mb-3 grid grid-cols-12 gap-2 items-center">
-                    <input
-                      type="text"
-                      placeholder="Description"
-                      value={newItemDescription}
-                      onChange={(e) => setNewItemDescription(e.target.value)}
-                      className="col-span-12 md:col-span-6 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Qty"
-                      value={newItemQty}
-                      onChange={(e) => setNewItemQty(e.target.value)}
-                      className="col-span-5 md:col-span-2 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Unit price"
-                      value={newItemPrice}
-                      onChange={(e) => setNewItemPrice(e.target.value)}
-                      className="col-span-5 md:col-span-2 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <button
-                      type="button"
-                      disabled={pending === 'add-item'}
-                      onClick={handleAddItem}
-                      className="col-span-2 md:col-span-2 px-3 py-2 bg-gray-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black disabled:opacity-50"
-                    >
-                      Add
-                    </button>
-                  </div>
-                )}
-                <div className="space-y-3">
-                  {trip.items.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-6">No itinerary items yet.</p>
-                  ) : (
-                    trip.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 gap-3"
-                      >
-                        <label className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={item.completedAt !== null}
-                            onChange={() => toggleItemComplete(item.id, item.completedAt !== null)}
-                            disabled={!canEdit || pending === `item:${item.id}`}
-                            className="w-5 h-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p
-                              className={`text-sm font-black truncate ${
-                                item.completedAt ? 'line-through text-gray-400' : 'text-gray-900'
-                              }`}
-                            >
-                              {item.description}
-                            </p>
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
-                              QTY {item.quantity}
-                              {item.unitPrice != null && ` • ${formatMoney(item.unitPrice, trip.currency)}`}
-                              {item.completedAt && ` • completed ${formatDateTime(item.completedAt)}`}
-                            </p>
-                          </div>
-                        </label>
-                      </div>
-                    ))
-                  )}
-                </div>
+                <TripTimeline
+                  startDate={trip.startDate}
+                  endDate={trip.endDate}
+                  items={trip.items}
+                  currency={trip.currency}
+                  readOnly={!canEdit}
+                  pendingItemId={pendingItemId}
+                  onAddItem={handleAddItem}
+                  onUpdateItem={handleUpdateItem}
+                  onDeleteItem={handleDeleteItem}
+                  onExtendEndDate={canEdit ? handleExtendEndDate : undefined}
+                />
               </div>
 
               {trip.notes && (
