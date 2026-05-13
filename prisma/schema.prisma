@@ -34,6 +34,8 @@ model User {
   createdProducts    Product[]       @relation("ProductCreatedBy")
   createdQuoteTemplates QuoteTemplate[] @relation("QuoteTemplateCreatedBy")
   organizationUpdates OrganizationSettings[] @relation("OrganizationUpdatedBy")
+  createdTrips       Trip[]          @relation("TripCreatedBy")
+  ownedTrips         Trip[]          @relation("TripOwner")
 }
 
 model PersonalTodo {
@@ -238,6 +240,7 @@ model Customer {
   updatedAt      DateTime @updatedAt
   createdBy      User     @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   quotes         Quote[]
+  trips          Trip[]
 
   @@index([createdById, createdAt])
   @@index([name])
@@ -246,6 +249,7 @@ model Customer {
 model Quote {
   id             Int       @id @default(autoincrement())
   reference      String    @unique
+  trackingCode   String?   @unique
   customerId     Int
   createdById    Int
   approverId     Int?
@@ -274,11 +278,13 @@ model Quote {
   approver       User?     @relation("QuoteApprover", fields: [approverId], references: [id], onDelete: SetNull)
   items          QuoteItem[]
   notifications  QuoteNotification[]
+  trip           Trip?     @relation("QuoteSourceTrip")
 
   @@index([createdById, status])
   @@index([approverId, status])
   @@index([customerId])
   @@index([status, expiryDate])
+  @@index([trackingCode])
 }
 
 model QuoteItem {
@@ -296,6 +302,7 @@ model QuoteItem {
   productId      Int?
   quote          Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  tripItineraryItems TripItineraryItem[] @relation("QuoteItemSourceItinerary")
 
   @@index([quoteId, position])
   @@index([productId])
@@ -377,6 +384,61 @@ model OrganizationSettings {
 }
 
 model QuoteSequence {
+  year       Int @id
+  lastNumber Int @default(0)
+}
+
+model Trip {
+  id            Int       @id @default(autoincrement())
+  reference     String    @unique
+  trackingCode  String    @unique
+  customerId    Int
+  sourceQuoteId Int?      @unique
+  createdById   Int
+  ownerId       Int?
+  title         String
+  description   String?
+  status        String    @default("Draft")
+  startDate     DateTime?
+  endDate       DateTime?
+  currency      String    @default("USD")
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  sourceQuote   Quote?    @relation("QuoteSourceTrip", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
+  createdBy     User      @relation("TripCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  owner         User?     @relation("TripOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  items         TripItineraryItem[]
+
+  @@index([createdById, status])
+  @@index([ownerId, status])
+  @@index([customerId])
+  @@index([trackingCode])
+}
+
+model TripItineraryItem {
+  id                Int       @id @default(autoincrement())
+  tripId            Int
+  position          Int
+  description       String
+  quantity          Decimal   @db.Decimal(12, 2)
+  unitPrice         Decimal?  @db.Decimal(14, 2)
+  completedAt       DateTime?
+  sourceQuoteItemId Int?
+  trip              Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  sourceQuoteItem   QuoteItem? @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
+
+  @@index([tripId, position])
+  @@index([sourceQuoteItemId])
+}
+
+model TripSequence {
+  year       Int @id
+  lastNumber Int @default(0)
+}
+
+model TrackingSequence {
   year       Int @id
   lastNumber Int @default(0)
 }

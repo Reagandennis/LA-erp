@@ -22,6 +22,10 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     product?: unknown;
     quoteTemplate?: unknown;
     organizationSettings?: unknown;
+    trip?: unknown;
+    tripItineraryItem?: unknown;
+    tripSequence?: unknown;
+    trackingSequence?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -31,7 +35,11 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.customer &&
       candidate.product &&
       candidate.quoteTemplate &&
-      candidate.organizationSettings,
+      candidate.organizationSettings &&
+      candidate.trip &&
+      candidate.tripItineraryItem &&
+      candidate.tripSequence &&
+      candidate.trackingSequence,
   );
 }
 

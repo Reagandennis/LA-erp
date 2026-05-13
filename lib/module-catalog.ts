@@ -280,4 +280,11 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     category: 'Tools',
     sortOrder: 39,
   },
+  {
+    slug: 'trip-planning',
+    name: 'Trip Planning',
+    description: 'Run approved quotes as scheduled trips with itineraries.',
+    category: 'Operations',
+    sortOrder: 40,
+  },
 ];

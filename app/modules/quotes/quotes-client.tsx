@@ -117,6 +117,7 @@ export default function QuotesClient({
         {
           id: quote.id,
           reference: quote.reference,
+          trackingCode: quote.trackingCode,
           subject: quote.subject,
           status: quote.status,
           issueDate: quote.issueDate,
@@ -141,6 +142,7 @@ export default function QuotesClient({
           createdBy: quote.createdBy,
           approver: quote.approver,
           itemCount: 'items' in quote ? quote.items.length : quote.itemCount,
+          trip: quote.trip,
         },
         ...without,
       ];
@@ -362,6 +364,11 @@ export default function QuotesClient({
                           <p className="text-[10px] text-gray-400 font-bold uppercase truncate max-w-[200px] mt-0.5">
                             {quote.subject}
                           </p>
+                          {quote.trackingCode && (
+                            <p className="text-[9px] text-emerald-700 font-black uppercase tracking-widest mt-0.5">
+                              {quote.trackingCode}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -392,6 +399,11 @@ export default function QuotesClient({
                       {needsMyApproval && (
                         <p className="text-[9px] mt-1 font-black text-blue-600 uppercase tracking-widest">
                           Awaiting your decision
+                        </p>
+                      )}
+                      {quote.trip && (
+                        <p className="text-[9px] mt-1 font-black text-emerald-700 uppercase tracking-widest">
+                          → {quote.trip.reference}
                         </p>
                       )}
                     </td>
@@ -497,6 +509,7 @@ export default function QuotesClient({
           currentUser={currentUser}
           isAdmin={isAdmin}
           organization={organization}
+          approvers={approvers}
           onClose={() => setSelectedQuoteId(null)}
           onChanged={(quote) => upsertQuote(quote)}
           onDeleted={(id) => {
