@@ -73,7 +73,7 @@ function buildHref(item: { source: NotificationSource; entityId: number }): stri
     return '/modules/quotes';
   }
   if (item.source === 'trip') {
-    return `/modules/trip-planning?focus=${item.entityId}`;
+    return `/modules/trip-planning/${item.entityId}`;
   }
   return '/modules/todo-personal';
 }

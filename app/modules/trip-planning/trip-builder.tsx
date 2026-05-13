@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import TripTimeline, { type TripTimelineDraftPatch } from './trip-timeline';
-import type { OwnerOption, TripDetail, TripItineraryItemSummary, TripStatus } from './types';
+import type { OwnerOption, TripDetail, TripStatus } from './types';
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'ZAR', 'KES', 'NGN'];
 
@@ -34,28 +33,6 @@ function plusDaysIso(days: number): string {
 
 const STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active'];
 
-let DRAFT_KEY_COUNTER = 0;
-function nextDraftKey(): number {
-  DRAFT_KEY_COUNTER -= 1;
-  return DRAFT_KEY_COUNTER;
-}
-
-function emptyDraftItem(): TripItineraryItemSummary {
-  return {
-    id: nextDraftKey(),
-    position: 0,
-    description: '',
-    quantity: 1,
-    unitPrice: null,
-    completedAt: null,
-    sourceQuoteItemId: null,
-    scheduledAt: null,
-    durationMinutes: null,
-    reminderMinutesBefore: null,
-    reminderAt: null,
-  };
-}
-
 export default function TripBuilder({
   customers,
   owners,
@@ -72,7 +49,6 @@ export default function TripBuilder({
   const [endDate, setEndDate] = useState(plusDaysIso(7));
   const [currency, setCurrency] = useState('USD');
   const [notes, setNotes] = useState('');
-  const [items, setItems] = useState<TripItineraryItemSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -84,54 +60,6 @@ export default function TripBuilder({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const addDraftItem: React.ComponentProps<typeof TripTimeline>['onAddItem'] = (input) => {
-    setItems((cur) => [
-      ...cur,
-      {
-        ...emptyDraftItem(),
-        position: cur.length,
-        description: input.description,
-        scheduledAt: input.scheduledAt,
-        durationMinutes: input.durationMinutes,
-        reminderMinutesBefore: input.reminderMinutesBefore,
-        quantity: input.quantity,
-        unitPrice: input.unitPrice,
-      },
-    ]);
-  };
-
-  const updateDraftItem = (itemId: number, patch: TripTimelineDraftPatch) => {
-    setItems((cur) =>
-      cur.map((it) => {
-        if (it.id !== itemId) return it;
-        return {
-          ...it,
-          description: patch.description ?? it.description,
-          scheduledAt:
-            patch.scheduledAt !== undefined ? patch.scheduledAt : it.scheduledAt,
-          durationMinutes:
-            patch.durationMinutes !== undefined ? patch.durationMinutes : it.durationMinutes,
-          reminderMinutesBefore:
-            patch.reminderMinutesBefore !== undefined
-              ? patch.reminderMinutesBefore
-              : it.reminderMinutesBefore,
-          quantity: patch.quantity ?? it.quantity,
-          unitPrice: patch.unitPrice !== undefined ? patch.unitPrice : it.unitPrice,
-          completedAt:
-            patch.completed === undefined
-              ? it.completedAt
-              : patch.completed
-                ? new Date().toISOString()
-                : null,
-        };
-      }),
-    );
-  };
-
-  const removeDraftItem = (itemId: number) => {
-    setItems((cur) => cur.filter((it) => it.id !== itemId));
-  };
-
   const handleSave = async () => {
     setError(null);
     const cId = Number(customerId);
@@ -141,20 +69,6 @@ export default function TripBuilder({
     }
     if (!title.trim()) {
       setError('Title is required');
-      return;
-    }
-    const itemsPayload = items
-      .filter((i) => i.description.trim().length > 0)
-      .map((i) => ({
-        description: i.description.trim(),
-        quantity: i.quantity,
-        unitPrice: i.unitPrice,
-        scheduledAt: i.scheduledAt,
-        durationMinutes: i.durationMinutes,
-        reminderMinutesBefore: i.reminderMinutesBefore,
-      }));
-    if (itemsPayload.some((i) => !Number.isFinite(i.quantity) || i.quantity <= 0)) {
-      setError('Each item needs a positive quantity');
       return;
     }
 
@@ -174,7 +88,7 @@ export default function TripBuilder({
           endDate,
           currency,
           notes: notes.trim() || null,
-          items: itemsPayload,
+          items: [],
         }),
       });
       const data = (await r.json().catch(() => null)) as
@@ -199,7 +113,7 @@ export default function TripBuilder({
         onClick={() => (pending ? null : onClose())}
       />
       <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 pointer-events-none">
-        <div className="bg-white w-full max-w-3xl h-full sm:h-auto sm:max-h-[92vh] overflow-y-auto rounded-none sm:rounded-[2rem] shadow-2xl pointer-events-auto">
+        <div className="bg-white w-full max-w-2xl h-full sm:h-auto sm:max-h-[92vh] overflow-y-auto rounded-none sm:rounded-[2rem] shadow-2xl pointer-events-auto">
           <div className="p-6 sm:p-8 border-b border-gray-100 flex items-start justify-between gap-4 sticky top-0 bg-white z-10">
             <div>
               <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em]">
@@ -208,6 +122,9 @@ export default function TripBuilder({
               <h2 className="mt-1 text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
                 Plan a new trip
               </h2>
+              <p className="text-xs text-gray-500 font-bold mt-2">
+                Set up the basics — you&apos;ll build the day-by-day itinerary on the next page.
+              </p>
             </div>
             <button
               type="button"
@@ -323,22 +240,6 @@ export default function TripBuilder({
               </Field>
             </section>
 
-            <section>
-              <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-3">
-                Timeline
-              </h3>
-              <TripTimeline
-                startDate={startDate}
-                endDate={endDate}
-                items={items}
-                currency={currency}
-                onAddItem={addDraftItem}
-                onUpdateItem={updateDraftItem}
-                onDeleteItem={removeDraftItem}
-                onExtendEndDate={(next) => setEndDate(next)}
-              />
-            </section>
-
             <Field label="Notes" wide>
               <textarea
                 value={notes}
@@ -370,7 +271,7 @@ export default function TripBuilder({
               disabled={pending}
               className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
             >
-              {pending ? 'Saving…' : 'Create trip'}
+              {pending ? 'Saving…' : 'Create & open itinerary'}
             </button>
           </div>
         </div>

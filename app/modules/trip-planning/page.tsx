@@ -30,7 +30,6 @@ export default async function TripPlanningPage() {
   return (
     <TripsClient
       currentUser={{ id: auth.user.id, name: auth.user.name, email: auth.user.email }}
-      isAdmin={isAdmin}
       initialTrips={trips}
       initialCustomers={customers.map((c) => ({
         id: c.id,

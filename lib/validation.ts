@@ -228,12 +228,23 @@ export const tripStatusSchema = z.enum(['Draft', 'Planned', 'Active', 'Completed
 
 const REMINDER_MINUTES_OPTIONS = [5, 15, 30, 60, 1440] as const;
 
+export const tripItemTypeSchema = z.enum([
+  'flight',
+  'car',
+  'hotel',
+  'location',
+  'activity',
+]);
+
 const tripItineraryItemDraftSchema = z.object({
+  itemType: tripItemTypeSchema.optional(),
   description: z.string().trim().min(1, 'Item description is required').max(280),
+  subtitle: z.string().trim().max(1000).optional().nullable(),
   quantity: z.number().finite().gt(0, 'Quantity must be greater than zero').max(1_000_000),
   unitPrice: z.number().finite().gte(0).max(100_000_000).optional().nullable(),
   sourceQuoteItemId: z.number().int().positive().optional().nullable(),
   scheduledAt: z.string().trim().min(1).optional().nullable(),
+  endsAt: z.string().trim().min(1).optional().nullable(),
   durationMinutes: z.number().int().gte(0).max(60 * 24 * 30).optional().nullable(),
   reminderMinutesBefore: z
     .number()
@@ -243,6 +254,8 @@ const tripItineraryItemDraftSchema = z.object({
     })
     .optional()
     .nullable(),
+  imageUrl: z.string().trim().max(2048).optional().nullable(),
+  confirmationCode: z.string().trim().max(100).optional().nullable(),
 });
 
 export const tripCreateSchema = z.object({
@@ -278,11 +291,14 @@ export const tripItineraryItemAddSchema = z.object({
 
 export const tripItineraryItemUpdateSchema = z
   .object({
+    itemType: tripItemTypeSchema.optional(),
     description: z.string().trim().min(1).max(280).optional(),
+    subtitle: z.string().trim().max(1000).optional().nullable(),
     quantity: z.number().finite().gt(0).max(1_000_000).optional(),
     unitPrice: z.number().finite().gte(0).max(100_000_000).optional().nullable(),
     completed: z.boolean().optional(),
     scheduledAt: z.string().trim().min(1).optional().nullable(),
+    endsAt: z.string().trim().min(1).optional().nullable(),
     durationMinutes: z.number().int().gte(0).max(60 * 24 * 30).optional().nullable(),
     reminderMinutesBefore: z
       .number()
@@ -293,6 +309,8 @@ export const tripItineraryItemUpdateSchema = z
       )
       .optional()
       .nullable(),
+    imageUrl: z.string().trim().max(2048).optional().nullable(),
+    confirmationCode: z.string().trim().max(100).optional().nullable(),
   })
   .refine(
     (value) => Object.keys(value).length > 0,
