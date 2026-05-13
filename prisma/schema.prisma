@@ -27,6 +27,10 @@ model User {
   sessions       Session[]
   auditLogs      AuditLog[] @relation("AuditActor")
   auditTargets   AuditLog[] @relation("AuditTarget")
+  createdCustomers   Customer[] @relation("CustomerCreatedBy")
+  createdQuotes      Quote[]    @relation("QuoteCreatedBy")
+  approvableQuotes   Quote[]    @relation("QuoteApprover")
+  quoteNotifications QuoteNotification[]
 }
 
 model PersonalTodo {
@@ -216,6 +220,83 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([action])
+}
+
+model Customer {
+  id          Int      @id @default(autoincrement())
+  name        String
+  email       String?
+  phone       String?
+  company     String?
+  address     String?
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User     @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  quotes      Quote[]
+
+  @@index([createdById, createdAt])
+  @@index([name])
+}
+
+model Quote {
+  id            Int       @id @default(autoincrement())
+  reference     String    @unique
+  customerId    Int
+  createdById   Int
+  approverId    Int?
+  subject       String
+  status        String    @default("Draft")
+  issueDate     DateTime
+  expiryDate    DateTime
+  taxRate       Decimal   @default(0) @db.Decimal(6, 4)
+  subtotal      Decimal   @default(0) @db.Decimal(14, 2)
+  total         Decimal   @default(0) @db.Decimal(14, 2)
+  notes         String?
+  decisionNote  String?
+  submittedAt   DateTime?
+  decidedAt     DateTime?
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy     User      @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approver      User?     @relation("QuoteApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  items         QuoteItem[]
+  notifications QuoteNotification[]
+
+  @@index([createdById, status])
+  @@index([approverId, status])
+  @@index([customerId])
+  @@index([status, expiryDate])
+}
+
+model QuoteItem {
+  id          Int     @id @default(autoincrement())
+  quoteId     Int
+  position    Int
+  description String
+  quantity    Decimal @db.Decimal(12, 2)
+  unitPrice   Decimal @db.Decimal(14, 2)
+  total       Decimal @db.Decimal(14, 2)
+  quote       Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId, position])
+}
+
+model QuoteNotification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  quoteId   Int
+  type      String
+  message   String
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quote     Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([quoteId])
 }
 
 model RateLimitBucket {
