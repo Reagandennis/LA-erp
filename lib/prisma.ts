@@ -17,8 +17,22 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     quote?: unknown;
     quoteItem?: unknown;
     quoteNotification?: unknown;
+    quoteSequence?: unknown;
+    customer?: unknown;
+    product?: unknown;
+    quoteTemplate?: unknown;
+    organizationSettings?: unknown;
   };
-  return Boolean(candidate.quote && candidate.quoteItem && candidate.quoteNotification);
+  return Boolean(
+    candidate.quote &&
+      candidate.quoteItem &&
+      candidate.quoteNotification &&
+      candidate.quoteSequence &&
+      candidate.customer &&
+      candidate.product &&
+      candidate.quoteTemplate &&
+      candidate.organizationSettings,
+  );
 }
 
 const cachedClient = globalThis.prismaGlobal;
