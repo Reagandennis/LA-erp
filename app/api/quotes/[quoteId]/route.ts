@@ -71,12 +71,16 @@ export async function PATCH(
     isAdmin,
     input: {
       customerId: validation.data.customerId,
-      approverId: validation.data.approverId ?? null,
+      approverId: validation.data.approverId,
       subject: validation.data.subject,
       issueDate: validation.data.issueDate,
       expiryDate: validation.data.expiryDate,
+      currency: validation.data.currency,
       taxRate: validation.data.taxRate,
-      notes: validation.data.notes ?? null,
+      discountType: validation.data.discountType,
+      discountValue: validation.data.discountValue,
+      notes: validation.data.notes,
+      terms: validation.data.terms,
       items: validation.data.items,
     },
   });

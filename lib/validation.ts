@@ -109,7 +109,10 @@ export const customerCreateSchema = z.object({
   phone: z.string().trim().max(40).optional().nullable(),
   company: z.string().trim().max(160).optional().nullable(),
   address: z.string().trim().max(400).optional().nullable(),
+  billingAddress: z.string().trim().max(400).optional().nullable(),
 });
+
+export const discountTypeSchema = z.enum(['none', 'percentage', 'fixed']);
 
 const quoteItemSchema = z.object({
   description: z.string().trim().min(1, 'Item description is required').max(280),
@@ -123,6 +126,15 @@ const quoteItemSchema = z.object({
     .finite()
     .gte(0, 'Unit price cannot be negative')
     .max(100_000_000),
+  taxable: z.boolean().optional(),
+  discountType: discountTypeSchema.optional(),
+  discountValue: z
+    .number()
+    .finite()
+    .gte(0, 'Discount cannot be negative')
+    .max(100_000_000)
+    .optional(),
+  productId: z.number().int().positive().optional().nullable(),
 });
 
 const isoDateSchema = z
@@ -131,18 +143,34 @@ const isoDateSchema = z
   .min(1, 'Date is required')
   .refine((value) => !Number.isNaN(new Date(value).getTime()), 'Invalid date');
 
+const currencySchema = z
+  .string()
+  .trim()
+  .length(3, 'Currency must be a 3-letter ISO code')
+  .regex(/^[A-Za-z]{3}$/, 'Currency must be 3 letters')
+  .transform((value) => value.toUpperCase());
+
 export const quoteCreateSchema = z.object({
   customerId: z.number().int().positive('Customer is required'),
   approverId: z.number().int().positive('Approver is required').optional().nullable(),
   subject: z.string().trim().min(1, 'Subject is required').max(200),
   issueDate: isoDateSchema,
   expiryDate: isoDateSchema,
+  currency: currencySchema.default('USD'),
   taxRate: z
     .number({ invalid_type_error: 'Tax rate must be a number' })
     .finite()
     .gte(0, 'Tax rate cannot be negative')
     .lte(1, 'Tax rate must be a decimal between 0 and 1'),
+  discountType: discountTypeSchema.default('none'),
+  discountValue: z
+    .number()
+    .finite()
+    .gte(0, 'Discount cannot be negative')
+    .max(100_000_000)
+    .default(0),
   notes: z.string().trim().max(2000).optional().nullable(),
+  terms: z.string().trim().max(5000).optional().nullable(),
   items: z.array(quoteItemSchema).min(1, 'Add at least one line item').max(100),
 });
 
@@ -153,4 +181,68 @@ export const quoteUpdateSchema = quoteCreateSchema.partial().extend({
 export const quoteDecisionSchema = z.object({
   decision: z.enum(['approved', 'declined']),
   note: z.string().trim().max(1000).optional().nullable(),
+});
+
+export const productCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Product name is required').max(160),
+  description: z.string().trim().max(2000).optional().nullable(),
+  sku: z.string().trim().max(80).optional().nullable(),
+  defaultUnitPrice: z
+    .number()
+    .finite()
+    .gte(0, 'Unit price cannot be negative')
+    .max(100_000_000),
+  currency: currencySchema.default('USD'),
+  taxable: z.boolean().default(true),
+});
+
+export const productUpdateSchema = productCreateSchema.partial().extend({
+  archived: z.boolean().optional(),
+});
+
+const templateItemSchema = z.object({
+  description: z.string().trim().min(1).max(280),
+  quantity: z.number().finite().gt(0).max(1_000_000),
+  unitPrice: z.number().finite().gte(0).max(100_000_000),
+  taxable: z.boolean().optional(),
+  discountType: discountTypeSchema.optional(),
+  discountValue: z.number().finite().gte(0).max(100_000_000).optional(),
+  productId: z.number().int().positive().optional().nullable(),
+});
+
+export const templateCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Template name is required').max(160),
+  description: z.string().trim().max(2000).optional().nullable(),
+  taxRate: z.number().finite().gte(0).lte(1),
+  currency: currencySchema.default('USD'),
+  terms: z.string().trim().max(5000).optional().nullable(),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  discountType: discountTypeSchema.default('none'),
+  discountValue: z.number().finite().gte(0).max(100_000_000).default(0),
+  items: z.array(templateItemSchema).min(1, 'Add at least one line item').max(100),
+});
+
+export const templateUpdateSchema = templateCreateSchema.partial();
+
+export const organizationUpdateSchema = z.object({
+  companyName: z.string().trim().max(160).optional().nullable(),
+  addressLine1: z.string().trim().max(160).optional().nullable(),
+  addressLine2: z.string().trim().max(160).optional().nullable(),
+  city: z.string().trim().max(80).optional().nullable(),
+  region: z.string().trim().max(80).optional().nullable(),
+  postalCode: z.string().trim().max(40).optional().nullable(),
+  country: z.string().trim().max(80).optional().nullable(),
+  email: z
+    .string()
+    .trim()
+    .max(160)
+    .email('Enter a valid email address')
+    .optional()
+    .or(z.literal(''))
+    .transform((value) => (value ? value.toLowerCase() : null)),
+  phone: z.string().trim().max(40).optional().nullable(),
+  website: z.string().trim().max(200).optional().nullable(),
+  defaultCurrency: currencySchema.optional(),
+  defaultTaxRate: z.number().finite().gte(0).lte(1).optional(),
+  taxLabel: z.string().trim().min(1).max(40).optional(),
 });

@@ -31,6 +31,9 @@ model User {
   createdQuotes      Quote[]    @relation("QuoteCreatedBy")
   approvableQuotes   Quote[]    @relation("QuoteApprover")
   quoteNotifications QuoteNotification[]
+  createdProducts    Product[]       @relation("ProductCreatedBy")
+  createdQuoteTemplates QuoteTemplate[] @relation("QuoteTemplateCreatedBy")
+  organizationUpdates OrganizationSettings[] @relation("OrganizationUpdatedBy")
 }
 
 model PersonalTodo {
@@ -223,47 +226,54 @@ model AuditLog {
 }
 
 model Customer {
-  id          Int      @id @default(autoincrement())
-  name        String
-  email       String?
-  phone       String?
-  company     String?
-  address     String?
-  createdById Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  createdBy   User     @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  quotes      Quote[]
+  id             Int      @id @default(autoincrement())
+  name           String
+  email          String?
+  phone          String?
+  company        String?
+  address        String?
+  billingAddress String?
+  createdById    Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      User     @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  quotes         Quote[]
 
   @@index([createdById, createdAt])
   @@index([name])
 }
 
 model Quote {
-  id            Int       @id @default(autoincrement())
-  reference     String    @unique
-  customerId    Int
-  createdById   Int
-  approverId    Int?
-  subject       String
-  status        String    @default("Draft")
-  issueDate     DateTime
-  expiryDate    DateTime
-  taxRate       Decimal   @default(0) @db.Decimal(6, 4)
-  subtotal      Decimal   @default(0) @db.Decimal(14, 2)
-  total         Decimal   @default(0) @db.Decimal(14, 2)
-  notes         String?
-  decisionNote  String?
-  submittedAt   DateTime?
-  decidedAt     DateTime?
-  sentAt        DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy     User      @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  approver      User?     @relation("QuoteApprover", fields: [approverId], references: [id], onDelete: SetNull)
-  items         QuoteItem[]
-  notifications QuoteNotification[]
+  id             Int       @id @default(autoincrement())
+  reference      String    @unique
+  customerId     Int
+  createdById    Int
+  approverId     Int?
+  subject        String
+  status         String    @default("Draft")
+  issueDate      DateTime
+  expiryDate     DateTime
+  currency       String    @default("USD")
+  taxRate        Decimal   @default(0) @db.Decimal(6, 4)
+  discountType   String    @default("none")
+  discountValue  Decimal   @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal   @default(0) @db.Decimal(14, 2)
+  subtotal       Decimal   @default(0) @db.Decimal(14, 2)
+  tax            Decimal   @default(0) @db.Decimal(14, 2)
+  total          Decimal   @default(0) @db.Decimal(14, 2)
+  notes          String?
+  terms          String?
+  decisionNote   String?
+  submittedAt    DateTime?
+  decidedAt      DateTime?
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy      User      @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approver       User?     @relation("QuoteApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  items          QuoteItem[]
+  notifications  QuoteNotification[]
 
   @@index([createdById, status])
   @@index([approverId, status])
@@ -272,16 +282,23 @@ model Quote {
 }
 
 model QuoteItem {
-  id          Int     @id @default(autoincrement())
-  quoteId     Int
-  position    Int
-  description String
-  quantity    Decimal @db.Decimal(12, 2)
-  unitPrice   Decimal @db.Decimal(14, 2)
-  total       Decimal @db.Decimal(14, 2)
-  quote       Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  id             Int     @id @default(autoincrement())
+  quoteId        Int
+  position       Int
+  description    String
+  quantity       Decimal @db.Decimal(12, 2)
+  unitPrice      Decimal @db.Decimal(14, 2)
+  taxable        Boolean @default(true)
+  discountType   String  @default("none")
+  discountValue  Decimal @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal @default(0) @db.Decimal(14, 2)
+  total          Decimal @db.Decimal(14, 2)
+  productId      Int?
+  quote          Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([quoteId, position])
+  @@index([productId])
 }
 
 model QuoteNotification {
@@ -297,6 +314,71 @@ model QuoteNotification {
 
   @@index([userId, createdAt])
   @@index([quoteId])
+}
+
+model Product {
+  id               Int      @id @default(autoincrement())
+  name             String
+  description      String?
+  sku              String?
+  defaultUnitPrice Decimal  @default(0) @db.Decimal(14, 2)
+  currency         String   @default("USD")
+  taxable          Boolean  @default(true)
+  archived         Boolean  @default(false)
+  createdById      Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdBy        User     @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  quoteItems       QuoteItem[]
+
+  @@index([archived, name])
+  @@index([createdById])
+}
+
+model QuoteTemplate {
+  id            Int      @id @default(autoincrement())
+  name          String
+  description   String?
+  taxRate       Decimal  @default(0) @db.Decimal(6, 4)
+  currency      String   @default("USD")
+  terms         String?
+  notes         String?
+  discountType  String   @default("none")
+  discountValue Decimal  @default(0) @db.Decimal(14, 2)
+  items         Json     @default("[]")
+  createdById   Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     User     @relation("QuoteTemplateCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([createdById, name])
+}
+
+model OrganizationSettings {
+  id              Int      @id @default(1)
+  companyName     String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  region          String?
+  postalCode      String?
+  country         String?
+  email           String?
+  phone           String?
+  website         String?
+  defaultCurrency String   @default("USD")
+  defaultTaxRate  Decimal  @default(0) @db.Decimal(6, 4)
+  taxLabel        String   @default("Tax")
+  logo            Bytes?
+  logoMimeType    String?
+  updatedById     Int?
+  updatedAt       DateTime @updatedAt
+  updatedBy       User?    @relation("OrganizationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model QuoteSequence {
+  year       Int @id
+  lastNumber Int @default(0)
 }
 
 model RateLimitBucket {

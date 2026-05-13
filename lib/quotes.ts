@@ -21,10 +21,16 @@ export const QUOTE_STATUSES: QuoteStatus[] = [
   'Expired',
 ];
 
+export type DiscountType = 'none' | 'percentage' | 'fixed';
+
 export interface QuoteItemDraft {
   description: string;
   quantity: number;
   unitPrice: number;
+  taxable?: boolean;
+  discountType?: DiscountType;
+  discountValue?: number;
+  productId?: number | null;
 }
 
 export interface QuoteItemSummary {
@@ -33,7 +39,12 @@ export interface QuoteItemSummary {
   description: string;
   quantity: number;
   unitPrice: number;
+  taxable: boolean;
+  discountType: DiscountType;
+  discountValue: number;
+  discountAmount: number;
   total: number;
+  productId: number | null;
 }
 
 export interface QuoteSummary {
@@ -43,10 +54,16 @@ export interface QuoteSummary {
   status: QuoteStatus;
   issueDate: string;
   expiryDate: string;
+  currency: string;
   taxRate: number;
+  discountType: DiscountType;
+  discountValue: number;
+  discountAmount: number;
   subtotal: number;
+  tax: number;
   total: number;
   notes: string | null;
+  terms: string | null;
   decisionNote: string | null;
   submittedAt: string | null;
   decidedAt: string | null;
@@ -78,26 +95,26 @@ interface QuoteRecord {
   status: string;
   issueDate: Date;
   expiryDate: Date;
+  currency: string;
   taxRate: Prisma.Decimal;
+  discountType: string;
+  discountValue: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
   subtotal: Prisma.Decimal;
+  tax: Prisma.Decimal;
   total: Prisma.Decimal;
   notes: string | null;
+  terms: string | null;
   decisionNote: string | null;
   submittedAt: Date | null;
   decidedAt: Date | null;
   sentAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  customer: {
-    id: number;
-    name: string;
-    company: string | null;
-    email: string | null;
-  };
+  customer: { id: number; name: string; company: string | null; email: string | null };
   createdBy: { id: number; name: string; email: string };
   approver: { id: number; name: string; email: string } | null;
   items: QuoteItemRecord[];
-  _count?: { items: number };
 }
 
 interface QuoteItemRecord {
@@ -106,7 +123,12 @@ interface QuoteItemRecord {
   description: string;
   quantity: Prisma.Decimal;
   unitPrice: Prisma.Decimal;
+  taxable: boolean;
+  discountType: string;
+  discountValue: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
   total: Prisma.Decimal;
+  productId: number | null;
 }
 
 const quoteInclude = {
@@ -136,7 +158,6 @@ type QuoteCollectionClient = {
     include?: typeof quoteInclude;
   }) => Promise<QuoteRecord>;
   delete: (args: { where: { id: number } }) => Promise<QuoteRecord>;
-  count: (args: { where: { reference: { startsWith: string } } }) => Promise<number>;
 };
 
 type QuoteItemCollectionClient = {
@@ -148,7 +169,12 @@ type QuoteItemCollectionClient = {
       description: string;
       quantity: Prisma.Decimal;
       unitPrice: Prisma.Decimal;
+      taxable: boolean;
+      discountType: string;
+      discountValue: Prisma.Decimal;
+      discountAmount: Prisma.Decimal;
       total: Prisma.Decimal;
+      productId: number | null;
     }>;
   }) => Promise<{ count: number }>;
 };
@@ -164,6 +190,14 @@ type QuoteNotificationCollectionClient = {
   }) => Promise<{ count: number }>;
 };
 
+type QuoteSequenceCollectionClient = {
+  upsert: (args: {
+    where: { year: number };
+    create: { year: number; lastNumber: number };
+    update: { lastNumber: { increment: number } };
+  }) => Promise<{ year: number; lastNumber: number }>;
+};
+
 const quoteClient = (
   prisma as unknown as { quote: QuoteCollectionClient }
 ).quote;
@@ -171,11 +205,103 @@ const quoteNotificationClient = (
   prisma as unknown as { quoteNotification: QuoteNotificationCollectionClient }
 ).quoteNotification;
 
+function txClients(tx: unknown) {
+  const handle = tx as unknown as {
+    quote: QuoteCollectionClient;
+    quoteItem: QuoteItemCollectionClient;
+    quoteSequence: QuoteSequenceCollectionClient;
+  };
+  return { quote: handle.quote, quoteItem: handle.quoteItem, quoteSequence: handle.quoteSequence };
+}
+
 function toNumber(value: Prisma.Decimal | number): number {
-  if (typeof value === 'number') {
-    return value;
-  }
+  if (typeof value === 'number') return value;
   return Number(value.toString());
+}
+
+const ZERO = new Prisma.Decimal(0);
+
+function asDecimal(value: number | Prisma.Decimal): Prisma.Decimal {
+  if (value instanceof Prisma.Decimal) return value;
+  return new Prisma.Decimal(value);
+}
+
+function round2(value: Prisma.Decimal): Prisma.Decimal {
+  return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+
+function clampDiscount(amount: Prisma.Decimal, max: Prisma.Decimal): Prisma.Decimal {
+  if (amount.lessThan(ZERO)) return ZERO;
+  if (amount.greaterThan(max)) return max;
+  return amount;
+}
+
+function computeLine(item: QuoteItemDraft) {
+  const quantity = asDecimal(item.quantity);
+  const unitPrice = asDecimal(item.unitPrice);
+  const gross = quantity.mul(unitPrice);
+  const discountType = (item.discountType ?? 'none') as DiscountType;
+  const discountValue = asDecimal(item.discountValue ?? 0);
+  let discountAmount = ZERO;
+  if (discountType === 'percentage') {
+    discountAmount = gross.mul(discountValue).div(100);
+  } else if (discountType === 'fixed') {
+    discountAmount = discountValue;
+  }
+  discountAmount = clampDiscount(round2(discountAmount), round2(gross));
+  const total = round2(gross.sub(discountAmount));
+  return {
+    quantity,
+    unitPrice,
+    taxable: item.taxable ?? true,
+    discountType,
+    discountValue: round2(discountValue),
+    discountAmount,
+    total,
+  };
+}
+
+interface ComputedTotals {
+  items: Array<ReturnType<typeof computeLine> & { description: string; productId: number | null; position: number }>;
+  subtotal: Prisma.Decimal;
+  tax: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  total: Prisma.Decimal;
+}
+
+export function computeQuoteTotals(input: {
+  items: QuoteItemDraft[];
+  taxRate: number;
+  discountType: DiscountType;
+  discountValue: number;
+}): ComputedTotals {
+  const lines = input.items.map((item, index) => ({
+    ...computeLine(item),
+    description: item.description,
+    productId: item.productId ?? null,
+    position: index,
+  }));
+
+  const subtotal = round2(
+    lines.reduce<Prisma.Decimal>((acc, line) => acc.add(line.total), ZERO),
+  );
+  const taxableSubtotal = lines.reduce<Prisma.Decimal>(
+    (acc, line) => (line.taxable ? acc.add(line.total) : acc),
+    ZERO,
+  );
+  const tax = round2(taxableSubtotal.mul(asDecimal(input.taxRate)));
+
+  const preDiscount = round2(subtotal.add(tax));
+  let discountAmount = ZERO;
+  if (input.discountType === 'percentage') {
+    discountAmount = preDiscount.mul(asDecimal(input.discountValue)).div(100);
+  } else if (input.discountType === 'fixed') {
+    discountAmount = asDecimal(input.discountValue);
+  }
+  discountAmount = clampDiscount(round2(discountAmount), preDiscount);
+  const total = round2(preDiscount.sub(discountAmount));
+
+  return { items: lines, subtotal, tax, discountAmount, total };
 }
 
 function serializeItem(item: QuoteItemRecord): QuoteItemSummary {
@@ -185,7 +311,12 @@ function serializeItem(item: QuoteItemRecord): QuoteItemSummary {
     description: item.description,
     quantity: toNumber(item.quantity),
     unitPrice: toNumber(item.unitPrice),
+    taxable: item.taxable,
+    discountType: item.discountType as DiscountType,
+    discountValue: toNumber(item.discountValue),
+    discountAmount: toNumber(item.discountAmount),
     total: toNumber(item.total),
+    productId: item.productId,
   };
 }
 
@@ -197,10 +328,16 @@ function serializeSummary(record: QuoteRecord): QuoteSummary {
     status: record.status as QuoteStatus,
     issueDate: record.issueDate.toISOString(),
     expiryDate: record.expiryDate.toISOString(),
+    currency: record.currency,
     taxRate: toNumber(record.taxRate),
+    discountType: record.discountType as DiscountType,
+    discountValue: toNumber(record.discountValue),
+    discountAmount: toNumber(record.discountAmount),
     subtotal: toNumber(record.subtotal),
+    tax: toNumber(record.tax),
     total: toNumber(record.total),
     notes: record.notes,
+    terms: record.terms,
     decisionNote: record.decisionNote,
     submittedAt: record.submittedAt?.toISOString() ?? null,
     decidedAt: record.decidedAt?.toISOString() ?? null,
@@ -210,55 +347,29 @@ function serializeSummary(record: QuoteRecord): QuoteSummary {
     customer: record.customer,
     createdBy: record.createdBy,
     approver: record.approver,
-    itemCount: record._count?.items ?? record.items?.length ?? 0,
+    itemCount: record.items?.length ?? 0,
   };
 }
 
 function serializeDetail(record: QuoteRecord): QuoteDetail {
-  return {
-    ...serializeSummary(record),
-    items: record.items.map(serializeItem),
-  };
+  return { ...serializeSummary(record), items: record.items.map(serializeItem) };
 }
 
-function computeItemTotals(items: QuoteItemDraft[], taxRate: number) {
-  let subtotal = new Prisma.Decimal(0);
-  const prepared = items.map((item, index) => {
-    const quantity = new Prisma.Decimal(item.quantity);
-    const unitPrice = new Prisma.Decimal(item.unitPrice);
-    const total = quantity.mul(unitPrice);
-    subtotal = subtotal.add(total);
-    return {
-      position: index,
-      description: item.description,
-      quantity,
-      unitPrice,
-      total,
-    };
+async function reserveSequenceReference(
+  txClient: QuoteSequenceCollectionClient,
+  year: number,
+): Promise<string> {
+  const next = await txClient.upsert({
+    where: { year },
+    create: { year, lastNumber: 1 },
+    update: { lastNumber: { increment: 1 } },
   });
-
-  const tax = subtotal.mul(new Prisma.Decimal(taxRate));
-  const total = subtotal.add(tax);
-
-  return { items: prepared, subtotal, total };
-}
-
-export async function nextReference(year = new Date().getUTCFullYear()): Promise<string> {
-  const prefix = `QT-${year}-`;
-  const existing = await quoteClient.count({
-    where: { reference: { startsWith: prefix } },
-  });
-  const sequence = String(existing + 1).padStart(4, '0');
-  return `${prefix}${sequence}`;
+  return `QT-${year}-${String(next.lastNumber).padStart(4, '0')}`;
 }
 
 function buildAccessFilter(userId: number, isAdmin: boolean) {
-  if (isAdmin) {
-    return {};
-  }
-  return {
-    OR: [{ createdById: userId }, { approverId: userId }],
-  };
+  if (isAdmin) return {};
+  return { OR: [{ createdById: userId }, { approverId: userId }] };
 }
 
 export async function listQuotesForUser(params: {
@@ -282,20 +393,10 @@ export async function getQuoteForUser(params: {
     where: { id: params.id },
     include: quoteInclude,
   });
-
-  if (!record) {
-    return null;
-  }
-
+  if (!record) return null;
   const isParticipant =
-    params.isAdmin ||
-    record.createdById === params.userId ||
-    record.approverId === params.userId;
-
-  if (!isParticipant) {
-    return null;
-  }
-
+    params.isAdmin || record.createdById === params.userId || record.approverId === params.userId;
+  if (!isParticipant) return null;
   return serializeDetail(record);
 }
 
@@ -305,25 +406,30 @@ export interface QuoteCreateInput {
   subject: string;
   issueDate: string;
   expiryDate: string;
+  currency: string;
   taxRate: number;
+  discountType: DiscountType;
+  discountValue: number;
   notes: string | null;
+  terms: string | null;
   items: QuoteItemDraft[];
   createdById: number;
 }
 
 export async function createQuote(input: QuoteCreateInput): Promise<QuoteDetail> {
-  const reference = await nextReference();
-  const totals = computeItemTotals(input.items, input.taxRate);
+  const totals = computeQuoteTotals({
+    items: input.items,
+    taxRate: input.taxRate,
+    discountType: input.discountType,
+    discountValue: input.discountValue,
+  });
+  const year = new Date(input.issueDate).getUTCFullYear();
 
   return prisma.$transaction(async (tx) => {
-    const txQuote = (
-      tx as unknown as { quote: QuoteCollectionClient }
-    ).quote;
-    const txItem = (
-      tx as unknown as { quoteItem: QuoteItemCollectionClient }
-    ).quoteItem;
+    const { quote, quoteItem, quoteSequence } = txClients(tx);
+    const reference = await reserveSequenceReference(quoteSequence, year);
 
-    const created = await txQuote.create({
+    const created = await quote.create({
       data: {
         reference,
         customerId: input.customerId,
@@ -333,32 +439,39 @@ export async function createQuote(input: QuoteCreateInput): Promise<QuoteDetail>
         status: 'Draft',
         issueDate: new Date(input.issueDate),
         expiryDate: new Date(input.expiryDate),
-        taxRate: new Prisma.Decimal(input.taxRate),
+        currency: input.currency,
+        taxRate: asDecimal(input.taxRate),
+        discountType: input.discountType,
+        discountValue: asDecimal(input.discountValue),
+        discountAmount: totals.discountAmount,
         subtotal: totals.subtotal,
+        tax: totals.tax,
         total: totals.total,
         notes: input.notes,
+        terms: input.terms,
       },
       include: quoteInclude,
     });
 
     if (totals.items.length > 0) {
-      await txItem.createMany({
+      await quoteItem.createMany({
         data: totals.items.map((item) => ({
           quoteId: created.id,
           position: item.position,
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
+          taxable: item.taxable,
+          discountType: item.discountType,
+          discountValue: item.discountValue,
+          discountAmount: item.discountAmount,
           total: item.total,
+          productId: item.productId,
         })),
       });
     }
 
-    const fresh = await txQuote.findUnique({
-      where: { id: created.id },
-      include: quoteInclude,
-    });
-
+    const fresh = await quote.findUnique({ where: { id: created.id }, include: quoteInclude });
     return serializeDetail(fresh!);
   });
 }
@@ -369,9 +482,25 @@ export interface QuoteUpdateInput {
   subject?: string;
   issueDate?: string;
   expiryDate?: string;
+  currency?: string;
   taxRate?: number;
+  discountType?: DiscountType;
+  discountValue?: number;
   notes?: string | null;
+  terms?: string | null;
   items?: QuoteItemDraft[];
+}
+
+function canEditQuote(record: QuoteRecord, userId: number, isAdmin: boolean): boolean {
+  if (isAdmin) return true;
+  if (record.status === 'Draft' || record.status === 'Declined') {
+    return record.createdById === userId;
+  }
+  // Lock-after-approved override: assigned approver can revise an Approved quote
+  if (record.status === 'Approved') {
+    return record.approverId === userId;
+  }
+  return false;
 }
 
 export async function updateDraftQuote(params: {
@@ -384,83 +513,82 @@ export async function updateDraftQuote(params: {
     where: { id: params.id },
     include: quoteInclude,
   });
-
-  if (!existing) {
-    return { error: 'Quote not found' };
-  }
-
-  if (!params.isAdmin && existing.createdById !== params.userId) {
-    return { error: 'You cannot edit this quote' };
-  }
-
-  if (existing.status !== 'Draft' && existing.status !== 'Declined') {
+  if (!existing) return { error: 'Quote not found' };
+  if (!canEditQuote(existing, params.userId, params.isAdmin)) {
     return { error: `Cannot edit a quote in status "${existing.status}"` };
   }
 
   const taxRate = params.input.taxRate ?? toNumber(existing.taxRate);
+  const discountType = (params.input.discountType ?? existing.discountType) as DiscountType;
+  const discountValue =
+    params.input.discountValue ?? toNumber(existing.discountValue);
   const items =
     params.input.items ??
-    existing.items.map((item) => ({
+    existing.items.map<QuoteItemDraft>((item) => ({
       description: item.description,
       quantity: toNumber(item.quantity),
       unitPrice: toNumber(item.unitPrice),
+      taxable: item.taxable,
+      discountType: item.discountType as DiscountType,
+      discountValue: toNumber(item.discountValue),
+      productId: item.productId,
     }));
-  const totals = computeItemTotals(items, taxRate);
+
+  const totals = computeQuoteTotals({ items, taxRate, discountType, discountValue });
 
   return prisma.$transaction(async (tx) => {
-    const txQuote = (
-      tx as unknown as { quote: QuoteCollectionClient }
-    ).quote;
-    const txItem = (
-      tx as unknown as { quoteItem: QuoteItemCollectionClient }
-    ).quoteItem;
+    const { quote, quoteItem } = txClients(tx);
 
-    await txQuote.update({
+    const wasDeclined = existing.status === 'Declined';
+
+    await quote.update({
       where: { id: params.id },
       data: {
         customerId: params.input.customerId ?? existing.customerId,
         approverId:
-          params.input.approverId === undefined
-            ? existing.approverId
-            : params.input.approverId,
+          params.input.approverId === undefined ? existing.approverId : params.input.approverId,
         subject: params.input.subject ?? existing.subject,
         issueDate:
-          params.input.issueDate !== undefined
-            ? new Date(params.input.issueDate)
-            : existing.issueDate,
+          params.input.issueDate !== undefined ? new Date(params.input.issueDate) : existing.issueDate,
         expiryDate:
-          params.input.expiryDate !== undefined
-            ? new Date(params.input.expiryDate)
-            : existing.expiryDate,
-        taxRate: new Prisma.Decimal(taxRate),
-        notes: params.input.notes === undefined ? existing.notes : params.input.notes,
+          params.input.expiryDate !== undefined ? new Date(params.input.expiryDate) : existing.expiryDate,
+        currency: params.input.currency ?? existing.currency,
+        taxRate: asDecimal(taxRate),
+        discountType,
+        discountValue: asDecimal(discountValue),
+        discountAmount: totals.discountAmount,
         subtotal: totals.subtotal,
+        tax: totals.tax,
         total: totals.total,
-        // editing a Declined quote returns it to Draft
-        status: existing.status === 'Declined' ? 'Draft' : existing.status,
-        decisionNote: existing.status === 'Declined' ? null : existing.decisionNote,
-        decidedAt: existing.status === 'Declined' ? null : existing.decidedAt,
+        notes: params.input.notes === undefined ? existing.notes : params.input.notes,
+        terms: params.input.terms === undefined ? existing.terms : params.input.terms,
+        // Editing a Declined quote returns it to Draft; editing an Approved one keeps Approved
+        status: wasDeclined ? 'Draft' : existing.status,
+        decisionNote: wasDeclined ? null : existing.decisionNote,
+        decidedAt: wasDeclined ? null : existing.decidedAt,
       },
     });
 
     if (params.input.items) {
-      await txItem.deleteMany({ where: { quoteId: params.id } });
-      await txItem.createMany({
+      await quoteItem.deleteMany({ where: { quoteId: params.id } });
+      await quoteItem.createMany({
         data: totals.items.map((item) => ({
           quoteId: params.id,
           position: item.position,
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
+          taxable: item.taxable,
+          discountType: item.discountType,
+          discountValue: item.discountValue,
+          discountAmount: item.discountAmount,
           total: item.total,
+          productId: item.productId,
         })),
       });
     }
 
-    const fresh = await txQuote.findUnique({
-      where: { id: params.id },
-      include: quoteInclude,
-    });
+    const fresh = await quote.findUnique({ where: { id: params.id }, include: quoteInclude });
     return serializeDetail(fresh!);
   });
 }
@@ -474,31 +602,20 @@ export async function submitQuote(params: {
     where: { id: params.id },
     include: quoteInclude,
   });
-
-  if (!existing) {
-    return { error: 'Quote not found' };
-  }
-
+  if (!existing) return { error: 'Quote not found' };
   if (!params.isAdmin && existing.createdById !== params.userId) {
     return { error: 'You cannot submit this quote' };
   }
-
   if (existing.status !== 'Draft' && existing.status !== 'Declined') {
     return { error: `Cannot submit a quote in status "${existing.status}"` };
   }
-
   if (!existing.approverId) {
     return { error: 'Assign an approver before submitting' };
   }
 
   await quoteClient.update({
     where: { id: params.id },
-    data: {
-      status: 'Submitted',
-      submittedAt: new Date(),
-      decisionNote: null,
-      decidedAt: null,
-    },
+    data: { status: 'Submitted', submittedAt: new Date(), decisionNote: null, decidedAt: null },
   });
 
   await quoteNotificationClient.createMany({
@@ -530,29 +647,19 @@ export async function decideQuote(params: {
     where: { id: params.id },
     include: quoteInclude,
   });
-
-  if (!existing) {
-    return { error: 'Quote not found' };
-  }
-
+  if (!existing) return { error: 'Quote not found' };
   if (existing.status !== 'Submitted') {
     return { error: `Cannot decide a quote in status "${existing.status}"` };
   }
-
   const isApprover = existing.approverId === params.userId;
   if (!isApprover && !params.isAdmin) {
     return { error: 'Only the assigned approver can decide this quote' };
   }
 
   const newStatus = params.decision === 'approved' ? 'Approved' : 'Declined';
-
   await quoteClient.update({
     where: { id: params.id },
-    data: {
-      status: newStatus,
-      decisionNote: params.note,
-      decidedAt: new Date(),
-    },
+    data: { status: newStatus, decisionNote: params.note, decidedAt: new Date() },
   });
 
   await quoteNotificationClient.createMany({
@@ -585,15 +692,10 @@ export async function markQuoteSent(params: {
     where: { id: params.id },
     include: quoteInclude,
   });
-
-  if (!existing) {
-    return { error: 'Quote not found' };
-  }
-
+  if (!existing) return { error: 'Quote not found' };
   if (!params.isAdmin && existing.createdById !== params.userId) {
     return { error: 'Only the creator can dispatch this quote' };
   }
-
   if (existing.status !== 'Approved') {
     return { error: 'Only approved quotes can be marked as sent' };
   }
@@ -619,21 +721,58 @@ export async function deleteQuote(params: {
     where: { id: params.id },
     include: quoteInclude,
   });
-
-  if (!existing) {
-    return { error: 'Quote not found' };
-  }
-
+  if (!existing) return { error: 'Quote not found' };
   if (!params.isAdmin && existing.createdById !== params.userId) {
     return { error: 'Only the creator can delete this quote' };
   }
-
   if (existing.status !== 'Draft' && existing.status !== 'Declined') {
     return { error: `Cannot delete a quote in status "${existing.status}"` };
   }
-
   await quoteClient.delete({ where: { id: params.id } });
   return true;
+}
+
+export async function duplicateQuote(params: {
+  id: number;
+  userId: number;
+  isAdmin: boolean;
+}): Promise<QuoteDetail | { error: string }> {
+  const original = await quoteClient.findUnique({
+    where: { id: params.id },
+    include: quoteInclude,
+  });
+  if (!original) return { error: 'Quote not found' };
+  const isParticipant =
+    params.isAdmin ||
+    original.createdById === params.userId ||
+    original.approverId === params.userId;
+  if (!isParticipant) return { error: 'Quote not found' };
+
+  const itemDrafts: QuoteItemDraft[] = original.items.map((item) => ({
+    description: item.description,
+    quantity: toNumber(item.quantity),
+    unitPrice: toNumber(item.unitPrice),
+    taxable: item.taxable,
+    discountType: item.discountType as DiscountType,
+    discountValue: toNumber(item.discountValue),
+    productId: item.productId,
+  }));
+
+  return createQuote({
+    customerId: original.customerId,
+    approverId: original.approverId,
+    subject: `${original.subject} (copy)`,
+    issueDate: new Date().toISOString(),
+    expiryDate: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+    currency: original.currency,
+    taxRate: toNumber(original.taxRate),
+    discountType: original.discountType as DiscountType,
+    discountValue: toNumber(original.discountValue),
+    notes: original.notes,
+    terms: original.terms,
+    items: itemDrafts,
+    createdById: params.userId,
+  });
 }
 
 export interface QuoteNotificationSummary {
@@ -662,7 +801,6 @@ export async function listQuoteNotifications(userId: number): Promise<QuoteNotif
     ORDER BY "createdAt" DESC
     LIMIT 20
   `;
-
   return rows.map((row) => ({
     id: row.id,
     quoteId: row.quoteId,
@@ -674,13 +812,8 @@ export async function listQuoteNotifications(userId: number): Promise<QuoteNotif
 }
 
 export async function markQuoteNotificationsRead(userId: number, ids: number[]): Promise<number> {
-  const normalized = Array.from(
-    new Set(ids.filter((id) => Number.isInteger(id) && id > 0)),
-  );
-  if (normalized.length === 0) {
-    return 0;
-  }
-
+  const normalized = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
+  if (normalized.length === 0) return 0;
   return prisma.$executeRaw`
     UPDATE "QuoteNotification"
     SET "readAt" = NOW()
@@ -689,13 +822,9 @@ export async function markQuoteNotificationsRead(userId: number, ids: number[]):
 }
 
 export async function listApproverCandidates(excludeUserId: number) {
-  const users = await prisma.user.findMany({
-    where: {
-      status: 'active',
-      id: { not: excludeUserId },
-    },
+  return prisma.user.findMany({
+    where: { status: 'active', id: { not: excludeUserId } },
     select: { id: true, name: true, email: true },
     orderBy: { name: 'asc' },
   });
-  return users;
 }

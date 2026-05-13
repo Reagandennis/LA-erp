@@ -9,6 +9,7 @@ export interface CustomerSummary {
   phone: string | null;
   company: string | null;
   address: string | null;
+  billingAddress: string | null;
   createdById: number;
   createdAt: string;
   updatedAt: string;
@@ -21,6 +22,7 @@ type CustomerRecord = {
   phone: string | null;
   company: string | null;
   address: string | null;
+  billingAddress: string | null;
   createdById: number;
   createdAt: Date;
   updatedAt: Date;
@@ -38,6 +40,7 @@ type CustomerCollectionClient = {
       phone: string | null;
       company: string | null;
       address: string | null;
+      billingAddress: string | null;
       createdById: number;
     };
   }) => Promise<CustomerRecord>;
@@ -55,6 +58,7 @@ function serializeCustomer(record: CustomerRecord): CustomerSummary {
     phone: record.phone,
     company: record.company,
     address: record.address,
+    billingAddress: record.billingAddress,
     createdById: record.createdById,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -79,6 +83,7 @@ export interface CreateCustomerInput {
   phone?: string | null;
   company?: string | null;
   address?: string | null;
+  billingAddress?: string | null;
   createdById: number;
 }
 
@@ -90,6 +95,7 @@ export async function createCustomer(input: CreateCustomerInput) {
       phone: input.phone ?? null,
       company: input.company ?? null,
       address: input.address ?? null,
+      billingAddress: input.billingAddress ?? null,
       createdById: input.createdById,
     },
   });
