@@ -1,14 +1,17 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import type { OrganizationBranding, QuoteDetail } from './types';
+import CreateTripFromQuoteModal from './create-trip-from-quote-modal';
+import type { ApproverOption, OrganizationBranding, QuoteDetail } from './types';
 
 interface QuoteDetailDrawerProps {
   quoteId: number;
   currentUser: { id: number; name: string; email: string };
   isAdmin: boolean;
   organization: OrganizationBranding;
+  approvers: ApproverOption[];
   onClose: () => void;
   onChanged: (quote: QuoteDetail) => void;
   onDeleted: (quoteId: number) => void;
@@ -61,6 +64,7 @@ export default function QuoteDetailDrawer({
   currentUser,
   isAdmin,
   organization,
+  approvers,
   onClose,
   onChanged,
   onDeleted,
@@ -73,6 +77,7 @@ export default function QuoteDetailDrawer({
   const [actionPending, setActionPending] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState('');
   const [showDeclineNote, setShowDeclineNote] = useState(false);
+  const [showTripModal, setShowTripModal] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -115,7 +120,7 @@ export default function QuoteDetailDrawer({
     label: string,
     url: string,
     body?: unknown,
-  ): Promise<QuoteDetail | null> => {
+  ): Promise<{ quote: QuoteDetail; prompts?: { createTrip?: boolean } } | null> => {
     setActionPending(label);
     setError(null);
     try {
@@ -126,7 +131,7 @@ export default function QuoteDetailDrawer({
         body: body ? JSON.stringify(body) : undefined,
       });
       const data = (await response.json().catch(() => null)) as
-        | { quote?: QuoteDetail; error?: string }
+        | { quote?: QuoteDetail; prompts?: { createTrip?: boolean }; error?: string }
         | null;
       if (!response.ok || !data?.quote) {
         setError(data?.error ?? 'Action failed');
@@ -134,7 +139,7 @@ export default function QuoteDetailDrawer({
       }
       setQuote(data.quote);
       onChanged(data.quote);
-      return data.quote;
+      return { quote: data.quote, prompts: data.prompts };
     } catch {
       setError('Network error');
       return null;
@@ -145,10 +150,13 @@ export default function QuoteDetailDrawer({
 
   const handleApprove = async () => {
     if (!quote) return;
-    await callAction('approve', `/api/quotes/${quote.id}/decision`, {
+    const result = await callAction('approve', `/api/quotes/${quote.id}/decision`, {
       decision: 'approved',
       note: decisionNote.trim() || null,
     });
+    if (result?.prompts?.createTrip && !result.quote.trip) {
+      setShowTripModal(true);
+    }
   };
 
   const handleDecline = async () => {
@@ -451,6 +459,25 @@ export default function QuoteDetailDrawer({
             </div>
 
             <div className="p-4 sm:p-8 sticky bottom-0 bg-white border-t border-gray-100 flex flex-col gap-3">
+              {quote.trip ? (
+                <Link
+                  href={`/modules/trip-planning?focus=${quote.trip.id}`}
+                  className="w-full py-3 sm:py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-[0.25em] text-xs hover:bg-emerald-700 text-center"
+                >
+                  View trip {quote.trip.reference} · {quote.trip.trackingCode}
+                </Link>
+              ) : (
+                quote.status === 'Approved' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTripModal(true)}
+                    className="w-full py-3 sm:py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-[0.25em] text-xs hover:bg-emerald-700"
+                  >
+                    Create trip from quote
+                  </button>
+                )
+              )}
+
               <a
                 href={`/api/quotes/${quote.id}/pdf`}
                 target="_blank"
@@ -517,6 +544,19 @@ export default function QuoteDetailDrawer({
           </>
         )}
       </div>
+      {showTripModal && quote && (
+        <CreateTripFromQuoteModal
+          quote={quote}
+          owners={approvers}
+          currentUser={currentUser}
+          onClose={() => setShowTripModal(false)}
+          onCreated={({ quote: refreshedQuote }) => {
+            setQuote(refreshedQuote);
+            onChanged(refreshedQuote);
+            setShowTripModal(false);
+          }}
+        />
+      )}
     </>
   );
 }
