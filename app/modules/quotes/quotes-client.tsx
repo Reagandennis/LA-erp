@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
 import QuoteBuilder from './quote-builder';
@@ -7,9 +8,12 @@ import QuoteDetailDrawer from './quote-detail-drawer';
 import type {
   ApproverOption,
   CustomerOption,
+  OrganizationBranding,
+  ProductOption,
   QuoteDetail,
   QuoteSummary,
   StatusFilter,
+  TemplateOption,
 } from './types';
 
 interface QuotesClientProps {
@@ -18,6 +22,9 @@ interface QuotesClientProps {
   initialQuotes: QuoteSummary[];
   initialCustomers: CustomerOption[];
   initialApprovers: ApproverOption[];
+  initialProducts: ProductOption[];
+  initialTemplates: TemplateOption[];
+  organization: OrganizationBranding;
 }
 
 const STATUS_FILTERS: StatusFilter[] = [
@@ -46,10 +53,10 @@ function formatDate(value: string) {
   });
 }
 
-function formatMoney(value: number) {
+function formatMoney(value: number, currency: string) {
   return value.toLocaleString(undefined, {
     style: 'currency',
-    currency: 'USD',
+    currency,
     maximumFractionDigits: 2,
   });
 }
@@ -60,14 +67,19 @@ export default function QuotesClient({
   initialQuotes,
   initialCustomers,
   initialApprovers,
+  initialProducts,
+  initialTemplates,
+  organization,
 }: QuotesClientProps) {
   const [quotes, setQuotes] = useState<QuoteSummary[]>(initialQuotes);
   const [customers, setCustomers] = useState<CustomerOption[]>(initialCustomers);
   const [approvers] = useState<ApproverOption[]>(initialApprovers);
+  const [products] = useState<ProductOption[]>(initialProducts);
+  const [templates, setTemplates] = useState<TemplateOption[]>(initialTemplates);
   const [selectedQuoteId, setSelectedQuoteId] = useState<number | null>(null);
   const [builderState, setBuilderState] = useState<
     | { open: false }
-    | { open: true; mode: 'create' }
+    | { open: true; mode: 'create'; prefillTemplate?: TemplateOption }
     | { open: true; mode: 'edit'; quote: QuoteDetail }
   >({ open: false });
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,13 +100,15 @@ export default function QuotesClient({
   }, [quotes, searchQuery, activeFilter]);
 
   const totals = useMemo(() => {
+    const display = organization.defaultCurrency || 'USD';
     return {
       totalValue: quotes.reduce((acc, q) => acc + q.total, 0),
       pending: quotes.filter((q) => q.status === 'Submitted').length,
       approved: quotes.filter((q) => q.status === 'Approved' || q.status === 'Sent').length,
       drafts: quotes.filter((q) => q.status === 'Draft' || q.status === 'Declined').length,
+      currency: display,
     };
-  }, [quotes]);
+  }, [quotes, organization.defaultCurrency]);
 
   const upsertQuote = (quote: QuoteSummary | QuoteDetail) => {
     setQuotes((current) => {
@@ -107,10 +121,16 @@ export default function QuotesClient({
           status: quote.status,
           issueDate: quote.issueDate,
           expiryDate: quote.expiryDate,
+          currency: quote.currency,
           taxRate: quote.taxRate,
+          discountType: quote.discountType,
+          discountValue: quote.discountValue,
+          discountAmount: quote.discountAmount,
           subtotal: quote.subtotal,
+          tax: quote.tax,
           total: quote.total,
           notes: quote.notes,
+          terms: quote.terms,
           decisionNote: quote.decisionNote,
           submittedAt: quote.submittedAt,
           decidedAt: quote.decidedAt,
@@ -137,40 +157,70 @@ export default function QuotesClient({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 lg:p-10">
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-10">
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6 mb-6 md:mb-10">
           <div>
-            <h1 className="text-3xl font-black text-gray-900 tracking-tight">Quotations</h1>
-            <p className="text-gray-500 mt-1 font-bold text-xs uppercase tracking-widest">
-              Build proposals, route them through approval, dispatch to clients
+            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+              Quotations
+            </h1>
+            <p className="text-gray-500 mt-1 font-bold text-[10px] sm:text-xs uppercase tracking-widest">
+              Build proposals, route through approval, dispatch to clients
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setBuilderState({ open: true, mode: 'create' })}
-            className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-3"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={3}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            New Quotation
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <div className="flex gap-2 text-[10px] font-black uppercase tracking-widest">
+              <Link
+                href="/modules/quotes/catalog"
+                className="px-4 py-2 border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-100 whitespace-nowrap"
+              >
+                Catalog
+              </Link>
+              <Link
+                href="/modules/quotes/templates"
+                className="px-4 py-2 border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-100 whitespace-nowrap"
+              >
+                Templates
+              </Link>
+              {isAdmin && (
+                <Link
+                  href="/admin/organization"
+                  className="px-4 py-2 border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-100 whitespace-nowrap"
+                >
+                  Branding
+                </Link>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setBuilderState({ open: true, mode: 'create' })}
+              className="w-full sm:w-auto px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-3"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={3}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              New Quotation
+            </button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-          <SummaryCard label="Total Value" value={formatMoney(totals.totalValue)} accent="text-gray-900" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-10">
+          <SummaryCard
+            label="Total Value"
+            value={formatMoney(totals.totalValue, totals.currency)}
+            accent="text-gray-900"
+          />
           <SummaryCard label="Pending Approval" value={`${totals.pending}`} accent="text-blue-600" />
           <SummaryCard label="Approved or Sent" value={`${totals.approved}`} accent="text-emerald-600" />
           <SummaryCard label="Drafts and Declined" value={`${totals.drafts}`} accent="text-gray-400" />
         </div>
 
-        <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm mb-8 flex flex-col lg:flex-row lg:items-center gap-4">
+        <div className="bg-white p-3 sm:p-4 rounded-3xl border border-gray-100 shadow-sm mb-6 flex flex-col lg:flex-row lg:items-center gap-3 md:gap-4">
           <div className="relative flex-1">
             <svg
               className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
@@ -199,7 +249,7 @@ export default function QuotesClient({
                 type="button"
                 key={status}
                 onClick={() => setActiveFilter(status)}
-                className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${
+                className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${
                   activeFilter === status
                     ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100'
                     : 'text-gray-400 hover:bg-gray-100'
@@ -211,7 +261,60 @@ export default function QuotesClient({
           </div>
         </div>
 
-        <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
+        {/* Mobile card list */}
+        <div className="md:hidden space-y-3">
+          {filteredQuotes.map((quote) => {
+            const needsMyApproval =
+              quote.status === 'Submitted' &&
+              (quote.approver?.id === currentUser.id || isAdmin);
+            return (
+              <button
+                key={quote.id}
+                type="button"
+                onClick={() => setSelectedQuoteId(quote.id)}
+                className="w-full text-left bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:border-emerald-200"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+                      {quote.reference}
+                    </p>
+                    <p className="text-sm font-black text-gray-900 mt-1">{quote.subject}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {quote.customer.name}
+                      {quote.customer.company ? ` • ${quote.customer.company}` : ''}
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border whitespace-nowrap ${
+                      STATUS_STYLES[quote.status] ?? STATUS_STYLES.Draft
+                    }`}
+                  >
+                    {quote.status}
+                  </span>
+                </div>
+                <div className="flex items-end justify-between mt-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                      Expires {formatDate(quote.expiryDate)}
+                    </p>
+                    {needsMyApproval && (
+                      <p className="text-[10px] mt-1 font-black text-blue-600 uppercase tracking-widest">
+                        Awaiting your decision
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-base font-black text-gray-900">
+                    {formatMoney(quote.total, quote.currency)}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50/50 border-b border-gray-100">
@@ -271,7 +374,9 @@ export default function QuotesClient({
                       )}
                     </td>
                     <td className="px-8 py-6 text-right">
-                      <p className="text-sm font-black text-gray-900">{formatMoney(quote.total)}</p>
+                      <p className="text-sm font-black text-gray-900">
+                        {formatMoney(quote.total, quote.currency)}
+                      </p>
                       <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">
                         {quote.itemCount} line items
                       </p>
@@ -343,6 +448,15 @@ export default function QuotesClient({
             </div>
           )}
         </div>
+
+        {filteredQuotes.length === 0 && (
+          <div className="md:hidden bg-white rounded-2xl p-10 text-center border border-gray-100">
+            <h3 className="text-lg font-black text-gray-900">No quotations to show</h3>
+            <p className="text-gray-500 mt-2 text-sm">
+              Tap New Quotation to build your first proposal.
+            </p>
+          </div>
+        )}
       </div>
 
       {builderState.open && (
@@ -351,10 +465,20 @@ export default function QuotesClient({
           quote={builderState.mode === 'edit' ? builderState.quote : null}
           customers={customers}
           approvers={approvers}
+          products={products}
+          templates={templates}
+          organization={organization}
           onClose={() => setBuilderState({ open: false })}
           onCustomerCreated={(customer) =>
             setCustomers((current) =>
               [...current.filter((c) => c.id !== customer.id), customer].sort((a, b) =>
+                a.name.localeCompare(b.name),
+              ),
+            )
+          }
+          onTemplateCreated={(template) =>
+            setTemplates((current) =>
+              [...current.filter((t) => t.id !== template.id), template].sort((a, b) =>
                 a.name.localeCompare(b.name),
               ),
             )
@@ -372,11 +496,16 @@ export default function QuotesClient({
           quoteId={selectedQuoteId}
           currentUser={currentUser}
           isAdmin={isAdmin}
+          organization={organization}
           onClose={() => setSelectedQuoteId(null)}
           onChanged={(quote) => upsertQuote(quote)}
           onDeleted={(id) => {
             removeQuote(id);
             setSelectedQuoteId(null);
+          }}
+          onDuplicated={(quote) => {
+            upsertQuote(quote);
+            setSelectedQuoteId(quote.id);
           }}
           onEdit={openBuilderForEdit}
         />
@@ -405,11 +534,11 @@ function SummaryCard({
   accent: string;
 }) {
   return (
-    <div className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm">
-      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+    <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-[2.5rem] border border-gray-100 shadow-sm">
+      <p className="text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
         {label}
       </p>
-      <p className={`text-2xl font-black ${accent}`}>{value}</p>
+      <p className={`text-lg md:text-2xl font-black ${accent}`}>{value}</p>
     </div>
   );
 }
