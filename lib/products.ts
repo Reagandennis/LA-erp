@@ -46,9 +46,9 @@ type ProductCollectionClient = {
   delete: (args: { where: { id: number } }) => Promise<ProductRecord>;
 };
 
-const productClient = (
-  prisma as unknown as { product: ProductCollectionClient }
-).product;
+function getProductClient(): ProductCollectionClient {
+  return (prisma as unknown as { product: ProductCollectionClient }).product;
+}
 
 function toNumber(value: Prisma.Decimal | number): number {
   if (typeof value === 'number') return value;
@@ -72,7 +72,7 @@ function serialize(record: ProductRecord): ProductSummary {
 }
 
 export async function listProducts(options: { includeArchived?: boolean } = {}): Promise<ProductSummary[]> {
-  const records = await productClient.findMany({
+  const records = await getProductClient().findMany({
     where: options.includeArchived ? undefined : { archived: false },
     orderBy: [{ name: 'asc' }],
   });
@@ -80,7 +80,7 @@ export async function listProducts(options: { includeArchived?: boolean } = {}):
 }
 
 export async function getProductById(id: number) {
-  const record = await productClient.findUnique({ where: { id } });
+  const record = await getProductClient().findUnique({ where: { id } });
   return record ? serialize(record) : null;
 }
 
@@ -94,7 +94,7 @@ export interface ProductWriteInput {
 }
 
 export async function createProduct(input: ProductWriteInput & { createdById: number }) {
-  const created = await productClient.create({
+  const created = await getProductClient().create({
     data: {
       name: input.name,
       description: input.description,
@@ -118,10 +118,10 @@ export async function updateProduct(id: number, input: Partial<ProductWriteInput
   if (input.currency !== undefined) data.currency = input.currency;
   if (input.taxable !== undefined) data.taxable = input.taxable;
   if (input.archived !== undefined) data.archived = input.archived;
-  const updated = await productClient.update({ where: { id }, data });
+  const updated = await getProductClient().update({ where: { id }, data });
   return serialize(updated);
 }
 
 export async function deleteProduct(id: number) {
-  await productClient.delete({ where: { id } });
+  await getProductClient().delete({ where: { id } });
 }

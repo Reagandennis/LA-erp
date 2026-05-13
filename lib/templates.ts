@@ -58,9 +58,9 @@ type TemplateCollectionClient = {
   delete: (args: { where: { id: number } }) => Promise<TemplateRecord>;
 };
 
-const templateClient = (
-  prisma as unknown as { quoteTemplate: TemplateCollectionClient }
-).quoteTemplate;
+function getTemplateClient(): TemplateCollectionClient {
+  return (prisma as unknown as { quoteTemplate: TemplateCollectionClient }).quoteTemplate;
+}
 
 function toNumber(value: Prisma.Decimal | number): number {
   if (typeof value === 'number') return value;
@@ -114,12 +114,12 @@ function serialize(record: TemplateRecord): QuoteTemplateSummary {
 }
 
 export async function listTemplates(): Promise<QuoteTemplateSummary[]> {
-  const records = await templateClient.findMany({ orderBy: [{ name: 'asc' }] });
+  const records = await getTemplateClient().findMany({ orderBy: [{ name: 'asc' }] });
   return records.map(serialize);
 }
 
 export async function getTemplate(id: number) {
-  const record = await templateClient.findUnique({ where: { id } });
+  const record = await getTemplateClient().findUnique({ where: { id } });
   return record ? serialize(record) : null;
 }
 
@@ -136,7 +136,7 @@ export interface TemplateWriteInput {
 }
 
 export async function createTemplate(input: TemplateWriteInput & { createdById: number }) {
-  const created = await templateClient.create({
+  const created = await getTemplateClient().create({
     data: {
       name: input.name,
       description: input.description,
@@ -165,10 +165,10 @@ export async function updateTemplate(id: number, input: Partial<TemplateWriteInp
   if (input.discountValue !== undefined)
     data.discountValue = new Prisma.Decimal(input.discountValue);
   if (input.items !== undefined) data.items = input.items as unknown as Prisma.InputJsonValue;
-  const updated = await templateClient.update({ where: { id }, data });
+  const updated = await getTemplateClient().update({ where: { id }, data });
   return serialize(updated);
 }
 
 export async function deleteTemplate(id: number) {
-  await templateClient.delete({ where: { id } });
+  await getTemplateClient().delete({ where: { id } });
 }
