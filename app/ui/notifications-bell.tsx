@@ -1,8 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-type NotificationItem = {
+type NotificationSource = 'todo' | 'quote';
+
+type RawTodoNotification = {
   id: number;
   todoId: number;
   type: string;
@@ -11,12 +14,60 @@ type NotificationItem = {
   readAt: string | null;
 };
 
+type RawQuoteNotification = {
+  id: number;
+  quoteId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+type NotificationItem = {
+  source: NotificationSource;
+  id: number;
+  entityId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+  href: string;
+  toastTitle: string;
+};
+
+const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
+  todo: '/api/planning/notifications',
+  quote: '/api/quotes/notifications',
+};
+
+function compositeKey(item: { source: NotificationSource; id: number }): string {
+  return `${item.source}-${item.id}`;
+}
+
+function buildToastTitle(source: NotificationSource, type: string): string {
+  if (source === 'quote') {
+    if (type === 'quote.submitted') return 'Quote awaiting your approval';
+    if (type === 'quote.approved') return 'Quote approved';
+    if (type === 'quote.declined') return 'Quote declined';
+    return 'Quote update';
+  }
+  return 'Shared with you';
+}
+
+function buildHref(item: { source: NotificationSource; entityId: number }): string {
+  if (item.source === 'quote') {
+    return '/modules/quotes';
+  }
+  return '/modules/todo-personal';
+}
+
 export default function NotificationsBell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
-  const [visibleToastIds, setVisibleToastIds] = useState<number[]>([]);
-  const dismissToast = (notificationId: number) => {
-    setVisibleToastIds((current) => current.filter((id) => id !== notificationId));
+  const [visibleToastKeys, setVisibleToastKeys] = useState<string[]>([]);
+
+  const dismissToast = (key: string) => {
+    setVisibleToastKeys((current) => current.filter((value) => value !== key));
   };
 
   useEffect(() => {
@@ -24,22 +75,61 @@ export default function NotificationsBell() {
 
     const loadNotifications = async () => {
       try {
-        const response = await fetch('/api/planning/notifications', {
-          credentials: 'include',
-        });
-        if (!response.ok) {
-          return;
+        const [todoResponse, quoteResponse] = await Promise.all([
+          fetch(SOURCE_ENDPOINTS.todo, { credentials: 'include' }).catch(() => null),
+          fetch(SOURCE_ENDPOINTS.quote, { credentials: 'include' }).catch(() => null),
+        ]);
+
+        const merged: NotificationItem[] = [];
+
+        if (todoResponse && todoResponse.ok) {
+          const data = (await todoResponse.json().catch(() => null)) as
+            | { notifications?: RawTodoNotification[] }
+            | null;
+          for (const item of data?.notifications ?? []) {
+            merged.push({
+              source: 'todo',
+              id: item.id,
+              entityId: item.todoId,
+              type: item.type,
+              message: item.message,
+              createdAt: item.createdAt,
+              readAt: item.readAt,
+              href: buildHref({ source: 'todo', entityId: item.todoId }),
+              toastTitle: buildToastTitle('todo', item.type),
+            });
+          }
         }
-        const data = (await response.json().catch(() => null)) as
-          | { notifications?: NotificationItem[] }
-          | null;
-        if (!isActive) {
-          return;
+
+        if (quoteResponse && quoteResponse.ok) {
+          const data = (await quoteResponse.json().catch(() => null)) as
+            | { notifications?: RawQuoteNotification[] }
+            | null;
+          for (const item of data?.notifications ?? []) {
+            merged.push({
+              source: 'quote',
+              id: item.id,
+              entityId: item.quoteId,
+              type: item.type,
+              message: item.message,
+              createdAt: item.createdAt,
+              readAt: item.readAt,
+              href: buildHref({ source: 'quote', entityId: item.quoteId }),
+              toastTitle: buildToastTitle('quote', item.type),
+            });
+          }
         }
-        const nextNotifications = data?.notifications ?? [];
-        setNotifications(nextNotifications);
-        const unreadIds = nextNotifications.filter((item) => !item.readAt).map((item) => item.id);
-        setVisibleToastIds((current) => Array.from(new Set([...current, ...unreadIds])));
+
+        merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+        const trimmed = merged.slice(0, 25);
+
+        if (!isActive) return;
+
+        setNotifications(trimmed);
+        const unreadKeys = trimmed.filter((item) => !item.readAt).map(compositeKey);
+        setVisibleToastKeys((current) =>
+          Array.from(new Set([...current, ...unreadKeys])),
+        );
       } catch {
         // ignore
       }
@@ -57,37 +147,36 @@ export default function NotificationsBell() {
   }, []);
 
   useEffect(() => {
-    if (visibleToastIds.length === 0) {
+    if (visibleToastKeys.length === 0) {
       return undefined;
     }
     const timeout = setTimeout(() => {
-      setVisibleToastIds((current) => current.slice(1));
+      setVisibleToastKeys((current) => current.slice(1));
     }, 3000);
     return () => clearTimeout(timeout);
-  }, [visibleToastIds]);
+  }, [visibleToastKeys]);
 
   const unreadCount = notifications.filter((item) => !item.readAt).length;
-  const visibleToasts = notifications.filter((item) => visibleToastIds.includes(item.id));
+  const visibleToasts = notifications.filter((item) =>
+    visibleToastKeys.includes(compositeKey(item)),
+  );
 
-  const markNotificationRead = async (notificationId: number) => {
+  const markNotificationRead = async (item: NotificationItem) => {
     try {
-      const response = await fetch('/api/planning/notifications', {
+      const response = await fetch(SOURCE_ENDPOINTS[item.source], {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: [notificationId] }),
+        body: JSON.stringify({ ids: [item.id] }),
       });
       if (!response.ok) {
         return;
       }
       setNotifications((current) =>
-        current.map((item) =>
-          item.id === notificationId
-            ? {
-                ...item,
-                readAt: new Date().toISOString(),
-              }
-            : item,
+        current.map((entry) =>
+          entry.source === item.source && entry.id === item.id
+            ? { ...entry, readAt: new Date().toISOString() }
+            : entry,
         ),
       );
     } catch {
@@ -123,12 +212,12 @@ export default function NotificationsBell() {
           <div className="space-y-3 px-4">
             {visibleToasts.map((notification) => (
               <div
-                key={notification.id}
+                key={compositeKey(notification)}
                 className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900 shadow-lg"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold">Shared with you</p>
+                    <p className="text-sm font-semibold">{notification.toastTitle}</p>
                     <p className="text-sm text-emerald-900">{notification.message}</p>
                     <p className="text-xs text-emerald-700 mt-1">
                       {new Date(notification.createdAt).toLocaleString()}
@@ -136,12 +225,17 @@ export default function NotificationsBell() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => dismissToast(notification.id)}
+                    onClick={() => dismissToast(compositeKey(notification))}
                     className="p-1 text-emerald-700 hover:text-emerald-900"
                     aria-label="Dismiss notification"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
@@ -163,7 +257,7 @@ export default function NotificationsBell() {
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-gray-900">Notifications</p>
-                <p className="text-xs text-gray-500">Task shares and mentions</p>
+                <p className="text-xs text-gray-500">Tasks, mentions, and quote approvals</p>
               </div>
               <button
                 type="button"
@@ -172,7 +266,12 @@ export default function NotificationsBell() {
                 aria-label="Close notifications"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </div>
@@ -182,21 +281,29 @@ export default function NotificationsBell() {
                 <p className="text-sm text-gray-500">No notifications yet.</p>
               ) : (
                 notifications.map((notification) => (
-                  <button
-                    key={notification.id}
-                    type="button"
-                    onClick={() => markNotificationRead(notification.id)}
-                    className={`w-full text-left rounded-xl border p-3 transition-colors ${
+                  <Link
+                    key={compositeKey(notification)}
+                    href={notification.href}
+                    onClick={() => {
+                      void markNotificationRead(notification);
+                      setIsOpen(false);
+                    }}
+                    className={`block w-full text-left rounded-xl border p-3 transition-colors ${
                       notification.readAt
                         ? 'border-gray-200 bg-gray-50'
-                        : 'border-emerald-200 bg-emerald-50'
+                        : notification.source === 'quote'
+                          ? 'border-blue-200 bg-blue-50'
+                          : 'border-emerald-200 bg-emerald-50'
                     }`}
                   >
-                    <p className="text-sm text-gray-900">{notification.message}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                      {notification.toastTitle}
+                    </p>
+                    <p className="text-sm text-gray-900 mt-1">{notification.message}</p>
                     <p className="text-xs text-gray-500 mt-1">
                       {new Date(notification.createdAt).toLocaleString()}
                     </p>
-                  </button>
+                  </Link>
                 ))
               )}
             </div>
