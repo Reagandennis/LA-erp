@@ -8,6 +8,8 @@ export type QuoteStatus =
 
 export type StatusFilter = 'All' | QuoteStatus;
 
+export type DiscountType = 'none' | 'percentage' | 'fixed';
+
 export interface CustomerOption {
   id: number;
   name: string;
@@ -15,6 +17,7 @@ export interface CustomerOption {
   phone: string | null;
   company: string | null;
   address: string | null;
+  billingAddress: string | null;
   createdById: number;
   createdAt: string;
   updatedAt: string;
@@ -26,6 +29,46 @@ export interface ApproverOption {
   email: string;
 }
 
+export interface ProductOption {
+  id: number;
+  name: string;
+  description: string | null;
+  sku: string | null;
+  defaultUnitPrice: number;
+  currency: string;
+  taxable: boolean;
+  archived: boolean;
+}
+
+export interface TemplateOption {
+  id: number;
+  name: string;
+  description: string | null;
+  taxRate: number;
+  currency: string;
+  terms: string | null;
+  notes: string | null;
+  discountType: DiscountType;
+  discountValue: number;
+  items: Array<{
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    taxable: boolean;
+    discountType: DiscountType;
+    discountValue: number;
+    productId: number | null;
+  }>;
+}
+
+export interface OrganizationBranding {
+  companyName: string | null;
+  defaultCurrency: string;
+  defaultTaxRate: number;
+  taxLabel: string;
+  hasLogo: boolean;
+}
+
 export interface QuoteSummary {
   id: number;
   reference: string;
@@ -33,10 +76,16 @@ export interface QuoteSummary {
   status: QuoteStatus;
   issueDate: string;
   expiryDate: string;
+  currency: string;
   taxRate: number;
+  discountType: DiscountType;
+  discountValue: number;
+  discountAmount: number;
   subtotal: number;
+  tax: number;
   total: number;
   notes: string | null;
+  terms: string | null;
   decisionNote: string | null;
   submittedAt: string | null;
   decidedAt: string | null;
@@ -55,7 +104,12 @@ export interface QuoteItemSummary {
   description: string;
   quantity: number;
   unitPrice: number;
+  taxable: boolean;
+  discountType: DiscountType;
+  discountValue: number;
+  discountAmount: number;
   total: number;
+  productId: number | null;
 }
 
 export interface QuoteDetail extends QuoteSummary {
