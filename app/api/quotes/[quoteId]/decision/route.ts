@@ -4,7 +4,7 @@ import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { decideQuote } from '@/lib/quotes';
-import { userHasRole } from '@/lib/user';
+import { getUserAccessById, userHasModule, userHasRole } from '@/lib/user';
 import { quoteDecisionSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -62,9 +62,28 @@ export async function POST(
     entityId: String(quoteId),
     actorUserId: auth.user.id,
     targetUserId: result.createdBy.id,
-    metadata: { reference: result.reference, note: validation.data.note ?? null },
+    metadata: {
+      reference: result.reference,
+      trackingCode: result.trackingCode,
+      note: validation.data.note ?? null,
+    },
     request,
   });
 
-  return NextResponse.json({ quote: result });
+  // Server-driven prompt: surface a "create trip" CTA if the actor has the
+  // trip-planning module assigned and the quote was approved + has no trip yet.
+  let promptCreateTrip = false;
+  if (validation.data.decision === 'approved' && result.trip === null) {
+    if (isAdmin) {
+      promptCreateTrip = true;
+    } else {
+      const fresh = await getUserAccessById(auth.user.id);
+      promptCreateTrip = fresh ? userHasModule(fresh, 'trip-planning') : false;
+    }
+  }
+
+  return NextResponse.json({
+    quote: result,
+    prompts: { createTrip: promptCreateTrip },
+  });
 }

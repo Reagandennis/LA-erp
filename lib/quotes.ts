@@ -47,9 +47,17 @@ export interface QuoteItemSummary {
   productId: number | null;
 }
 
+export interface QuoteTripSummary {
+  id: number;
+  reference: string;
+  trackingCode: string;
+  status: string;
+}
+
 export interface QuoteSummary {
   id: number;
   reference: string;
+  trackingCode: string | null;
   subject: string;
   status: QuoteStatus;
   issueDate: string;
@@ -79,6 +87,7 @@ export interface QuoteSummary {
   createdBy: { id: number; name: string; email: string };
   approver: { id: number; name: string; email: string } | null;
   itemCount: number;
+  trip: QuoteTripSummary | null;
 }
 
 export interface QuoteDetail extends QuoteSummary {
@@ -88,6 +97,7 @@ export interface QuoteDetail extends QuoteSummary {
 interface QuoteRecord {
   id: number;
   reference: string;
+  trackingCode: string | null;
   customerId: number;
   createdById: number;
   approverId: number | null;
@@ -115,6 +125,7 @@ interface QuoteRecord {
   createdBy: { id: number; name: string; email: string };
   approver: { id: number; name: string; email: string } | null;
   items: QuoteItemRecord[];
+  trip: { id: number; reference: string; trackingCode: string; status: string } | null;
 }
 
 interface QuoteItemRecord {
@@ -136,6 +147,7 @@ const quoteInclude = {
   createdBy: { select: { id: true, name: true, email: true } },
   approver: { select: { id: true, name: true, email: true } },
   items: { orderBy: { position: 'asc' as const } },
+  trip: { select: { id: true, reference: true, trackingCode: true, status: true } },
 };
 
 type QuoteCollectionClient = {
@@ -324,6 +336,7 @@ function serializeSummary(record: QuoteRecord): QuoteSummary {
   return {
     id: record.id,
     reference: record.reference,
+    trackingCode: record.trackingCode,
     subject: record.subject,
     status: record.status as QuoteStatus,
     issueDate: record.issueDate.toISOString(),
@@ -348,6 +361,7 @@ function serializeSummary(record: QuoteRecord): QuoteSummary {
     createdBy: record.createdBy,
     approver: record.approver,
     itemCount: record.items?.length ?? 0,
+    trip: record.trip,
   };
 }
 
