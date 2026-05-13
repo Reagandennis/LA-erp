@@ -8,28 +8,40 @@ export type TripStatus = 'Draft' | 'Planned' | 'Active' | 'Completed' | 'Cancell
 
 export const TRIP_STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
 
+export type TripItemType = 'flight' | 'car' | 'hotel' | 'location' | 'activity';
+
 export interface TripItineraryItemDraft {
+  itemType?: TripItemType;
   description: string;
+  subtitle?: string | null;
   quantity: number;
   unitPrice?: number | null;
   sourceQuoteItemId?: number | null;
   scheduledAt?: string | null;
+  endsAt?: string | null;
   durationMinutes?: number | null;
   reminderMinutesBefore?: number | null;
+  imageUrl?: string | null;
+  confirmationCode?: string | null;
 }
 
 export interface TripItineraryItemSummary {
   id: number;
   position: number;
+  itemType: TripItemType;
   description: string;
+  subtitle: string | null;
   quantity: number;
   unitPrice: number | null;
   completedAt: string | null;
   sourceQuoteItemId: number | null;
   scheduledAt: string | null;
+  endsAt: string | null;
   durationMinutes: number | null;
   reminderMinutesBefore: number | null;
   reminderAt: string | null;
+  imageUrl: string | null;
+  confirmationCode: string | null;
 }
 
 export interface TripSummary {
@@ -83,16 +95,21 @@ interface TripRecord {
 interface TripItineraryItemRecord {
   id: number;
   position: number;
+  itemType: string;
   description: string;
+  subtitle: string | null;
   quantity: Prisma.Decimal;
   unitPrice: Prisma.Decimal | null;
   completedAt: Date | null;
   sourceQuoteItemId: number | null;
   scheduledAt: Date | null;
+  endsAt: Date | null;
   durationMinutes: number | null;
   reminderMinutesBefore: number | null;
   reminderAt: Date | null;
   reminderSentAt: Date | null;
+  imageUrl: string | null;
+  confirmationCode: string | null;
 }
 
 const tripInclude = {
@@ -125,14 +142,19 @@ type TripItineraryItemCollectionClient = {
     data: Array<{
       tripId: number;
       position: number;
+      itemType?: string;
       description: string;
+      subtitle?: string | null;
       quantity: Prisma.Decimal;
       unitPrice: Prisma.Decimal | null;
       sourceQuoteItemId: number | null;
       scheduledAt?: Date | null;
+      endsAt?: Date | null;
       durationMinutes?: number | null;
       reminderMinutesBefore?: number | null;
       reminderAt?: Date | null;
+      imageUrl?: string | null;
+      confirmationCode?: string | null;
     }>;
   }) => Promise<{ count: number }>;
   findUnique: (args: { where: { id: number } }) => Promise<TripItineraryItemRecord | null>;
@@ -208,15 +230,20 @@ function serializeItem(item: TripItineraryItemRecord): TripItineraryItemSummary 
   return {
     id: item.id,
     position: item.position,
+    itemType: (item.itemType as TripItemType) ?? 'activity',
     description: item.description,
+    subtitle: item.subtitle,
     quantity: toNumber(item.quantity) ?? 0,
     unitPrice: toNumber(item.unitPrice),
     completedAt: item.completedAt?.toISOString() ?? null,
     sourceQuoteItemId: item.sourceQuoteItemId,
     scheduledAt: item.scheduledAt?.toISOString() ?? null,
+    endsAt: item.endsAt?.toISOString() ?? null,
     durationMinutes: item.durationMinutes,
     reminderMinutesBefore: item.reminderMinutesBefore,
     reminderAt: item.reminderAt?.toISOString() ?? null,
+    imageUrl: item.imageUrl,
+    confirmationCode: item.confirmationCode,
   };
 }
 
@@ -365,18 +392,24 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
       await tripItineraryItem.createMany({
         data: input.items.map((item, index) => {
           const scheduledAt = parseScheduledAt(item.scheduledAt);
+          const endsAt = parseScheduledAt(item.endsAt);
           const reminderMinutesBefore = item.reminderMinutesBefore ?? null;
           return {
             tripId: created.id,
             position: index,
+            itemType: item.itemType ?? 'activity',
             description: item.description,
+            subtitle: item.subtitle ?? null,
             quantity: asDecimal(item.quantity),
             unitPrice: item.unitPrice == null ? null : asDecimal(item.unitPrice),
             sourceQuoteItemId: item.sourceQuoteItemId ?? null,
             scheduledAt,
+            endsAt,
             durationMinutes: item.durationMinutes ?? null,
             reminderMinutesBefore,
             reminderAt: computeReminderAt(scheduledAt, reminderMinutesBefore),
+            imageUrl: item.imageUrl ?? null,
+            confirmationCode: item.confirmationCode ?? null,
           };
         }),
       });
@@ -475,18 +508,24 @@ export async function addTripItems(params: {
     await tripItineraryItem.createMany({
       data: params.items.map((item, idx) => {
         const scheduledAt = parseScheduledAt(item.scheduledAt);
+        const endsAt = parseScheduledAt(item.endsAt);
         const reminderMinutesBefore = item.reminderMinutesBefore ?? null;
         return {
           tripId: params.tripId,
           position: startPosition + idx,
+          itemType: item.itemType ?? 'activity',
           description: item.description,
+          subtitle: item.subtitle ?? null,
           quantity: asDecimal(item.quantity),
           unitPrice: item.unitPrice == null ? null : asDecimal(item.unitPrice),
           sourceQuoteItemId: item.sourceQuoteItemId ?? null,
           scheduledAt,
+          endsAt,
           durationMinutes: item.durationMinutes ?? null,
           reminderMinutesBefore,
           reminderAt: computeReminderAt(scheduledAt, reminderMinutesBefore),
+          imageUrl: item.imageUrl ?? null,
+          confirmationCode: item.confirmationCode ?? null,
         };
       }),
     });
@@ -496,13 +535,18 @@ export async function addTripItems(params: {
 }
 
 export interface TripItineraryItemUpdateInput {
+  itemType?: TripItemType;
   description?: string;
+  subtitle?: string | null;
   quantity?: number;
   unitPrice?: number | null;
   completed?: boolean;
   scheduledAt?: string | null;
+  endsAt?: string | null;
   durationMinutes?: number | null;
   reminderMinutesBefore?: number | null;
+  imageUrl?: string | null;
+  confirmationCode?: string | null;
 }
 
 export async function updateTripItem(params: {
@@ -523,13 +567,22 @@ export async function updateTripItem(params: {
   return prisma.$transaction(async (tx) => {
     const { trip, tripItineraryItem } = txClients(tx);
     const data: Record<string, unknown> = {};
+    if (params.input.itemType !== undefined) data.itemType = params.input.itemType;
     if (params.input.description !== undefined) data.description = params.input.description;
+    if (params.input.subtitle !== undefined) data.subtitle = params.input.subtitle;
     if (params.input.quantity !== undefined) data.quantity = asDecimal(params.input.quantity);
     if (params.input.unitPrice !== undefined) {
       data.unitPrice = params.input.unitPrice == null ? null : asDecimal(params.input.unitPrice);
     }
     if (params.input.completed !== undefined) {
       data.completedAt = params.input.completed ? new Date() : null;
+    }
+    if (params.input.imageUrl !== undefined) data.imageUrl = params.input.imageUrl;
+    if (params.input.confirmationCode !== undefined) {
+      data.confirmationCode = params.input.confirmationCode;
+    }
+    if (params.input.endsAt !== undefined) {
+      data.endsAt = parseScheduledAt(params.input.endsAt);
     }
 
     // Schedule + reminder are coupled: any change recomputes reminderAt and clears reminderSentAt.

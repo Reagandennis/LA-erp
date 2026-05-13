@@ -2,18 +2,33 @@ export type TripStatus = 'Draft' | 'Planned' | 'Active' | 'Completed' | 'Cancell
 
 export type TripStatusFilter = 'All' | TripStatus;
 
+export type TripItemType = 'flight' | 'car' | 'hotel' | 'location' | 'activity';
+
+export const TRIP_ITEM_TYPES: { value: TripItemType; label: string }[] = [
+  { value: 'flight', label: 'Flight' },
+  { value: 'car', label: 'Car rental' },
+  { value: 'hotel', label: 'Hotel / lodging' },
+  { value: 'location', label: 'Place / stop' },
+  { value: 'activity', label: 'Activity' },
+];
+
 export interface TripItineraryItemSummary {
   id: number;
   position: number;
+  itemType: TripItemType;
   description: string;
+  subtitle: string | null;
   quantity: number;
   unitPrice: number | null;
   completedAt: string | null;
   sourceQuoteItemId: number | null;
   scheduledAt: string | null;
+  endsAt: string | null;
   durationMinutes: number | null;
   reminderMinutesBefore: number | null;
   reminderAt: string | null;
+  imageUrl: string | null;
+  confirmationCode: string | null;
 }
 
 export const REMINDER_OPTIONS: { value: number | null; label: string }[] = [
