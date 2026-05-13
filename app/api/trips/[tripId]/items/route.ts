@@ -41,13 +41,18 @@ export async function POST(
     userId: auth.user.id,
     isAdmin,
     items: validation.data.items.map((item) => ({
+      itemType: item.itemType,
       description: item.description,
+      subtitle: item.subtitle ?? null,
       quantity: item.quantity,
       unitPrice: item.unitPrice ?? null,
       sourceQuoteItemId: item.sourceQuoteItemId ?? null,
       scheduledAt: item.scheduledAt ?? null,
+      endsAt: item.endsAt ?? null,
       durationMinutes: item.durationMinutes ?? null,
       reminderMinutesBefore: item.reminderMinutesBefore ?? null,
+      imageUrl: item.imageUrl ?? null,
+      confirmationCode: item.confirmationCode ?? null,
     })),
   });
 

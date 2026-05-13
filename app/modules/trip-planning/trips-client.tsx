@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 
 import TripBuilder from './trip-builder';
-import TripDetailDrawer from './trip-detail-drawer';
 import type { OwnerOption, TripDetail, TripStatusFilter, TripSummary } from './types';
 
 interface CustomerOption {
@@ -16,7 +16,6 @@ interface CustomerOption {
 
 interface TripsClientProps {
   currentUser: { id: number; name: string; email: string };
-  isAdmin: boolean;
   initialTrips: TripSummary[];
   initialCustomers: CustomerOption[];
   initialOwners: OwnerOption[];
@@ -50,22 +49,26 @@ function formatDate(value: string | null) {
 
 export default function TripsClient({
   currentUser,
-  isAdmin,
   initialTrips,
   initialCustomers,
   initialOwners,
 }: TripsClientProps) {
+  const router = useRouter();
   const [trips, setTrips] = useState<TripSummary[]>(initialTrips);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<TripStatusFilter>('All');
-  const [selectedTripId, setSelectedTripId] = useState<number | null>(() => {
-    // Honour ?focus=<tripId> from the quote drawer link.
-    if (typeof window === 'undefined') return null;
+  const [builderOpen, setBuilderOpen] = useState(false);
+
+  // Honour legacy ?focus=<tripId> deep links (from quote drawer, notifications) by
+  // redirecting to the dedicated itinerary page.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const focus = Number(params.get('focus'));
-    return Number.isInteger(focus) && focus > 0 ? focus : null;
-  });
-  const [builderOpen, setBuilderOpen] = useState(false);
+    if (Number.isInteger(focus) && focus > 0) {
+      router.replace(`/modules/trip-planning/${focus}`);
+    }
+  }, [router]);
 
   const filteredTrips = useMemo(() => {
     const normalized = searchQuery.trim().toLowerCase();
@@ -118,8 +121,8 @@ export default function TripsClient({
     });
   };
 
-  const removeTrip = (tripId: number) => {
-    setTrips((current) => current.filter((t) => t.id !== tripId));
+  const openTrip = (tripId: number) => {
+    router.push(`/modules/trip-planning/${tripId}`);
   };
 
   return (
@@ -208,7 +211,7 @@ export default function TripsClient({
             <button
               key={trip.id}
               type="button"
-              onClick={() => setSelectedTripId(trip.id)}
+              onClick={() => openTrip(trip.id)}
               className="w-full text-left bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:border-emerald-200"
             >
               <div className="flex items-start justify-between gap-3">
@@ -269,7 +272,7 @@ export default function TripsClient({
               {filteredTrips.map((trip) => (
                 <tr
                   key={trip.id}
-                  onClick={() => setSelectedTripId(trip.id)}
+                  onClick={() => openTrip(trip.id)}
                   className="hover:bg-gray-50/80 transition-colors cursor-pointer group"
                 >
                   <td className="px-8 py-6">
@@ -373,21 +376,7 @@ export default function TripsClient({
           onSaved={(trip) => {
             upsertTrip(trip);
             setBuilderOpen(false);
-            setSelectedTripId(trip.id);
-          }}
-        />
-      )}
-
-      {selectedTripId !== null && (
-        <TripDetailDrawer
-          tripId={selectedTripId}
-          currentUser={currentUser}
-          isAdmin={isAdmin}
-          onClose={() => setSelectedTripId(null)}
-          onChanged={(trip) => upsertTrip(trip)}
-          onDeleted={(id) => {
-            removeTrip(id);
-            setSelectedTripId(null);
+            openTrip(trip.id);
           }}
         />
       )}
