@@ -164,12 +164,14 @@ type QuoteNotificationCollectionClient = {
   }) => Promise<{ count: number }>;
 };
 
-const quoteClient = (
-  prisma as unknown as { quote: QuoteCollectionClient }
-).quote;
-const quoteNotificationClient = (
-  prisma as unknown as { quoteNotification: QuoteNotificationCollectionClient }
-).quoteNotification;
+function getQuoteClient(): QuoteCollectionClient {
+  return (prisma as unknown as { quote: QuoteCollectionClient }).quote;
+}
+
+function getQuoteNotificationClient(): QuoteNotificationCollectionClient {
+  return (prisma as unknown as { quoteNotification: QuoteNotificationCollectionClient })
+    .quoteNotification;
+}
 
 function toNumber(value: Prisma.Decimal | number): number {
   if (typeof value === 'number') {
@@ -245,7 +247,7 @@ function computeItemTotals(items: QuoteItemDraft[], taxRate: number) {
 
 export async function nextReference(year = new Date().getUTCFullYear()): Promise<string> {
   const prefix = `QT-${year}-`;
-  const existing = await quoteClient.count({
+  const existing = await getQuoteClient().count({
     where: { reference: { startsWith: prefix } },
   });
   const sequence = String(existing + 1).padStart(4, '0');
@@ -265,7 +267,7 @@ export async function listQuotesForUser(params: {
   userId: number;
   isAdmin: boolean;
 }): Promise<QuoteSummary[]> {
-  const records = await quoteClient.findMany({
+  const records = await getQuoteClient().findMany({
     where: buildAccessFilter(params.userId, params.isAdmin),
     include: quoteInclude,
     orderBy: [{ updatedAt: 'desc' }],
@@ -278,7 +280,7 @@ export async function getQuoteForUser(params: {
   userId: number;
   isAdmin: boolean;
 }): Promise<QuoteDetail | null> {
-  const record = await quoteClient.findUnique({
+  const record = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -380,7 +382,7 @@ export async function updateDraftQuote(params: {
   isAdmin: boolean;
   input: QuoteUpdateInput;
 }): Promise<QuoteDetail | { error: string }> {
-  const existing = await quoteClient.findUnique({
+  const existing = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -470,7 +472,7 @@ export async function submitQuote(params: {
   userId: number;
   isAdmin: boolean;
 }): Promise<QuoteDetail | { error: string }> {
-  const existing = await quoteClient.findUnique({
+  const existing = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -491,7 +493,7 @@ export async function submitQuote(params: {
     return { error: 'Assign an approver before submitting' };
   }
 
-  await quoteClient.update({
+  await getQuoteClient().update({
     where: { id: params.id },
     data: {
       status: 'Submitted',
@@ -501,7 +503,7 @@ export async function submitQuote(params: {
     },
   });
 
-  await quoteNotificationClient.createMany({
+  await getQuoteNotificationClient().createMany({
     data: [
       {
         userId: existing.approverId,
@@ -512,7 +514,7 @@ export async function submitQuote(params: {
     ],
   });
 
-  const refreshed = await quoteClient.findUnique({
+  const refreshed = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -526,7 +528,7 @@ export async function decideQuote(params: {
   decision: 'approved' | 'declined';
   note: string | null;
 }): Promise<QuoteDetail | { error: string }> {
-  const existing = await quoteClient.findUnique({
+  const existing = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -546,7 +548,7 @@ export async function decideQuote(params: {
 
   const newStatus = params.decision === 'approved' ? 'Approved' : 'Declined';
 
-  await quoteClient.update({
+  await getQuoteClient().update({
     where: { id: params.id },
     data: {
       status: newStatus,
@@ -555,7 +557,7 @@ export async function decideQuote(params: {
     },
   });
 
-  await quoteNotificationClient.createMany({
+  await getQuoteNotificationClient().createMany({
     data: [
       {
         userId: existing.createdById,
@@ -569,7 +571,7 @@ export async function decideQuote(params: {
     ],
   });
 
-  const refreshed = await quoteClient.findUnique({
+  const refreshed = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -581,7 +583,7 @@ export async function markQuoteSent(params: {
   userId: number;
   isAdmin: boolean;
 }): Promise<QuoteDetail | { error: string }> {
-  const existing = await quoteClient.findUnique({
+  const existing = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -598,12 +600,12 @@ export async function markQuoteSent(params: {
     return { error: 'Only approved quotes can be marked as sent' };
   }
 
-  await quoteClient.update({
+  await getQuoteClient().update({
     where: { id: params.id },
     data: { status: 'Sent', sentAt: new Date() },
   });
 
-  const refreshed = await quoteClient.findUnique({
+  const refreshed = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -615,7 +617,7 @@ export async function deleteQuote(params: {
   userId: number;
   isAdmin: boolean;
 }): Promise<true | { error: string }> {
-  const existing = await quoteClient.findUnique({
+  const existing = await getQuoteClient().findUnique({
     where: { id: params.id },
     include: quoteInclude,
   });
@@ -632,7 +634,7 @@ export async function deleteQuote(params: {
     return { error: `Cannot delete a quote in status "${existing.status}"` };
   }
 
-  await quoteClient.delete({ where: { id: params.id } });
+  await getQuoteClient().delete({ where: { id: params.id } });
   return true;
 }
 
