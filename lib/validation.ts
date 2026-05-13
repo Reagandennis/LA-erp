@@ -224,6 +224,71 @@ export const templateCreateSchema = z.object({
 
 export const templateUpdateSchema = templateCreateSchema.partial();
 
+export const tripStatusSchema = z.enum(['Draft', 'Planned', 'Active', 'Completed', 'Cancelled']);
+
+const tripItineraryItemDraftSchema = z.object({
+  description: z.string().trim().min(1, 'Item description is required').max(280),
+  quantity: z.number().finite().gt(0, 'Quantity must be greater than zero').max(1_000_000),
+  unitPrice: z.number().finite().gte(0).max(100_000_000).optional().nullable(),
+  sourceQuoteItemId: z.number().int().positive().optional().nullable(),
+});
+
+export const tripCreateSchema = z.object({
+  customerId: z.number().int().positive('Customer is required'),
+  ownerId: z.number().int().positive().optional().nullable(),
+  title: z.string().trim().min(1, 'Title is required').max(200),
+  description: z.string().trim().max(2000).optional().nullable(),
+  status: tripStatusSchema.optional(),
+  startDate: z.string().trim().optional().nullable(),
+  endDate: z.string().trim().optional().nullable(),
+  currency: currencySchema.default('USD'),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  items: z.array(tripItineraryItemDraftSchema).min(0).max(200),
+});
+
+export const tripUpdateSchema = z
+  .object({
+    customerId: z.number().int().positive().optional(),
+    ownerId: z.number().int().positive().optional().nullable(),
+    title: z.string().trim().min(1).max(200).optional(),
+    description: z.string().trim().max(2000).optional().nullable(),
+    status: tripStatusSchema.optional(),
+    startDate: z.string().trim().optional().nullable(),
+    endDate: z.string().trim().optional().nullable(),
+    currency: currencySchema.optional(),
+    notes: z.string().trim().max(2000).optional().nullable(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated');
+
+export const tripItineraryItemAddSchema = z.object({
+  items: z.array(tripItineraryItemDraftSchema).min(1, 'Add at least one item').max(100),
+});
+
+export const tripItineraryItemUpdateSchema = z
+  .object({
+    description: z.string().trim().min(1).max(280).optional(),
+    quantity: z.number().finite().gt(0).max(1_000_000).optional(),
+    unitPrice: z.number().finite().gte(0).max(100_000_000).optional().nullable(),
+    completed: z.boolean().optional(),
+  })
+  .refine(
+    (value) =>
+      value.description !== undefined ||
+      value.quantity !== undefined ||
+      value.unitPrice !== undefined ||
+      value.completed !== undefined,
+    'At least one field must be updated',
+  );
+
+export const tripFromQuoteSchema = z.object({
+  ownerId: z.number().int().positive().optional().nullable(),
+  title: z.string().trim().max(200).optional().nullable(),
+  description: z.string().trim().max(2000).optional().nullable(),
+  startDate: z.string().trim().optional().nullable(),
+  endDate: z.string().trim().optional().nullable(),
+  notes: z.string().trim().max(2000).optional().nullable(),
+});
+
 export const organizationUpdateSchema = z.object({
   companyName: z.string().trim().max(160).optional().nullable(),
   addressLine1: z.string().trim().max(160).optional().nullable(),

@@ -69,9 +69,17 @@ export interface OrganizationBranding {
   hasLogo: boolean;
 }
 
+export interface QuoteTripSummary {
+  id: number;
+  reference: string;
+  trackingCode: string;
+  status: string;
+}
+
 export interface QuoteSummary {
   id: number;
   reference: string;
+  trackingCode: string | null;
   subject: string;
   status: QuoteStatus;
   issueDate: string;
@@ -96,6 +104,7 @@ export interface QuoteSummary {
   createdBy: { id: number; name: string; email: string };
   approver: { id: number; name: string; email: string } | null;
   itemCount: number;
+  trip: QuoteTripSummary | null;
 }
 
 export interface QuoteItemSummary {
