@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-type NotificationSource = 'todo' | 'quote' | 'trip';
+type NotificationSource = 'todo' | 'quote' | 'trip' | 'message' | 'file' | 'calendar';
 
 type RawTodoNotification = {
   id: number;
@@ -33,6 +33,33 @@ type RawTripNotification = {
   readAt: string | null;
 };
 
+type RawMessageNotification = {
+  id: number;
+  conversationId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+type RawFileNotification = {
+  id: number;
+  fileId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+type RawCalendarNotification = {
+  id: number;
+  eventId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
 type NotificationItem = {
   source: NotificationSource;
   id: number;
@@ -49,6 +76,9 @@ const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   todo: '/api/planning/notifications',
   quote: '/api/quotes/notifications',
   trip: '/api/planning/trip-notifications',
+  message: '/api/communication/notifications',
+  file: '/api/files/notifications',
+  calendar: '/api/calendar/notifications',
 };
 
 function compositeKey(item: { source: NotificationSource; id: number }): string {
@@ -65,6 +95,16 @@ function buildToastTitle(source: NotificationSource, type: string): string {
   if (source === 'trip') {
     return 'Trip reminder';
   }
+  if (source === 'message') {
+    return 'New message';
+  }
+  if (source === 'file') {
+    if (type === 'file.shared.sent') return 'File shared';
+    return 'File shared with you';
+  }
+  if (source === 'calendar') {
+    return 'Event reminder';
+  }
   return 'Shared with you';
 }
 
@@ -74,6 +114,15 @@ function buildHref(item: { source: NotificationSource; entityId: number }): stri
   }
   if (item.source === 'trip') {
     return `/modules/trip-planning/${item.entityId}`;
+  }
+  if (item.source === 'message') {
+    return '/modules/communication';
+  }
+  if (item.source === 'file') {
+    return '/modules/file-upload';
+  }
+  if (item.source === 'calendar') {
+    return '/modules/calendar';
   }
   return '/modules/todo-personal';
 }
@@ -92,10 +141,13 @@ export default function NotificationsBell() {
 
     const loadNotifications = async () => {
       try {
-        const [todoResponse, quoteResponse, tripResponse] = await Promise.all([
+        const [todoResponse, quoteResponse, tripResponse, messageResponse, fileResponse, calendarResponse] = await Promise.all([
           fetch(SOURCE_ENDPOINTS.todo, { credentials: 'include' }).catch(() => null),
           fetch(SOURCE_ENDPOINTS.quote, { credentials: 'include' }).catch(() => null),
           fetch(SOURCE_ENDPOINTS.trip, { credentials: 'include' }).catch(() => null),
+          fetch(SOURCE_ENDPOINTS.message, { credentials: 'include' }).catch(() => null),
+          fetch(SOURCE_ENDPOINTS.file, { credentials: 'include' }).catch(() => null),
+          fetch(SOURCE_ENDPOINTS.calendar, { credentials: 'include' }).catch(() => null),
         ]);
 
         const merged: NotificationItem[] = [];
@@ -153,6 +205,63 @@ export default function NotificationsBell() {
               readAt: item.readAt,
               href: buildHref({ source: 'trip', entityId: item.tripId }),
               toastTitle: buildToastTitle('trip', item.type),
+            });
+          }
+        }
+
+        if (messageResponse && messageResponse.ok) {
+          const data = (await messageResponse.json().catch(() => null)) as
+            | { notifications?: RawMessageNotification[] }
+            | null;
+          for (const item of data?.notifications ?? []) {
+            merged.push({
+              source: 'message',
+              id: item.id,
+              entityId: item.conversationId,
+              type: item.type,
+              message: item.message,
+              createdAt: item.createdAt,
+              readAt: item.readAt,
+              href: buildHref({ source: 'message', entityId: item.conversationId }),
+              toastTitle: buildToastTitle('message', item.type),
+            });
+          }
+        }
+
+        if (fileResponse && fileResponse.ok) {
+          const data = (await fileResponse.json().catch(() => null)) as
+            | { notifications?: RawFileNotification[] }
+            | null;
+          for (const item of data?.notifications ?? []) {
+            merged.push({
+              source: 'file',
+              id: item.id,
+              entityId: item.fileId,
+              type: item.type,
+              message: item.message,
+              createdAt: item.createdAt,
+              readAt: item.readAt,
+              href: buildHref({ source: 'file', entityId: item.fileId }),
+              toastTitle: buildToastTitle('file', item.type),
+            });
+          }
+        }
+
+        if (calendarResponse && calendarResponse.ok) {
+          const data = (await calendarResponse.json().catch(() => null)) as
+            | { notifications?: RawCalendarNotification[] }
+            | null;
+          for (const item of data?.notifications ?? []) {
+            merged.push({
+              source: 'calendar',
+              id: item.id,
+              entityId: item.eventId,
+              type: item.type,
+              message: item.message,
+              createdAt: item.createdAt,
+              readAt: item.readAt,
+              href: buildHref({ source: 'calendar', entityId: item.eventId }),
+              toastTitle: buildToastTitle('calendar', item.type),
             });
           }
         }
@@ -226,7 +335,7 @@ export default function NotificationsBell() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed top-6 right-6 z-120 flex items-center justify-center w-11 h-11 rounded-full bg-white shadow-lg border border-gray-200 text-gray-700 hover:text-emerald-600"
+        className="fixed top-12 right-6 z-120 flex items-center justify-center w-11 h-11 rounded-full bg-white shadow-lg border border-gray-200 text-gray-700 hover:text-emerald-600"
         aria-label="Open notifications"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -294,7 +403,7 @@ export default function NotificationsBell() {
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-gray-900">Notifications</p>
-                <p className="text-xs text-gray-500">Tasks, quotes, and trip reminders</p>
+                <p className="text-xs text-gray-500">Messages, tasks, quotes, and trip reminders</p>
               </div>
               <button
                 type="button"

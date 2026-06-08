@@ -61,10 +61,25 @@ export default function WorldClockTicker() {
   ));
 
   return (
-    <div className="ticker-bar overflow-hidden bg-primary text-white text-xs font-mono select-none">
-      {/* pause on hover via group */}
-      <div className="group flex h-full items-center">
-        <div className="ticker-track flex items-center group-hover:[animation-play-state:paused]">
+    <div className="ticker-bar world-clock-bar overflow-hidden bg-primary text-white text-xs font-mono select-none">
+      <style>{`
+        @keyframes world-clock-scroll {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .world-clock-track {
+          display: inline-flex;
+          align-items: center;
+          white-space: nowrap;
+          will-change: transform;
+          animation: world-clock-scroll 55s linear infinite;
+        }
+        .world-clock-bar:hover .world-clock-track {
+          animation-play-state: paused;
+        }
+      `}</style>
+      <div className="flex h-full items-center">
+        <div className="world-clock-track">
           {chips}
           {/* duplicate for seamless loop */}
           {chips}

@@ -1,11 +1,29 @@
-import ModulePlaceholderPage from '../_components/module-placeholder-page';
+import { redirect } from 'next/navigation';
 
-export default function FileUploadPage() {
+import { getServerAuth } from '@/lib/auth';
+import { computeStats, listFiles, listShareableUsers } from '@/lib/files';
+
+import FileUploadClient from './file-upload-client';
+
+export const dynamic = 'force-dynamic';
+
+export default async function FileUploadPage() {
+  const auth = await getServerAuth();
+  if (!auth) {
+    redirect('/auth/login');
+  }
+
+  const [items, users] = await Promise.all([
+    listFiles(auth.user.id),
+    listShareableUsers(auth.user.id),
+  ]);
+
   return (
-    <ModulePlaceholderPage
-      title="File Upload"
-      category="Files"
-      description="Upload operational documents, forms, images, and evidence files."
+    <FileUploadClient
+      viewer={{ id: auth.user.id, name: auth.user.name }}
+      initialItems={items}
+      initialStats={computeStats(items)}
+      shareableUsers={users}
     />
   );
 }

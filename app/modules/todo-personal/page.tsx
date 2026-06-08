@@ -2,6 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+import CalendarClient, { type CalendarExtraEvent } from '@/app/modules/calendar/calendar-client';
+
 
 const DEFAULT_KANBAN_COLUMNS = ['Backlog', 'In progress', 'In review'];
 const DEFAULT_COLUMN_COLORS: Record<string, string> = {
@@ -18,30 +20,6 @@ type MentionUser = {
 };
 
 const USER_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500'];
-
-const CALENDAR_WEATHER_ICONS: Array<{ codes: number[]; icon: string }> = [
-  { codes: [0, 1], icon: '☀️' },
-  { codes: [2, 3], icon: '⛅️' },
-  { codes: [45, 48], icon: '🌫️' },
-  { codes: [51, 53, 55, 56, 57], icon: '🌦️' },
-  { codes: [61, 63, 65, 80, 81, 82, 66, 67], icon: '🌧️' },
-  { codes: [71, 73, 75, 77, 85, 86], icon: '❄️' },
-  { codes: [95, 96, 99], icon: '⛈️' },
-];
-
-const resolveCalendarWeatherIcon = (code?: number | null) => {
-  if (code === null || code === undefined) {
-    return null;
-  }
-  for (const entry of CALENDAR_WEATHER_ICONS) {
-    if (entry.codes.includes(code)) {
-      return entry.icon;
-    }
-  }
-  return null;
-};
-
-const formatCalendarDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
 const getInitials = (name: string) => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -571,6 +549,7 @@ export default function TodoPersonalPage() {
   const [description, setDescription] = useState<string>('');
   const [dueTime, setDueTime] = useState<string>('');
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string>('');
   const [showMentions, setShowMentions] = useState(false);
@@ -603,8 +582,6 @@ export default function TodoPersonalPage() {
   const [columnColors, setColumnColors] = useState<Record<string, string>>(DEFAULT_COLUMN_COLORS);
   const [showAddColumn, setShowAddColumn] = useState(false);
   const kanbanSyncReady = useRef(false);
-  const [calendarMonth] = useState(() => new Date());
-  const [calendarWeather, setCalendarWeather] = useState<Record<string, number>>({});
   useEffect(() => {
     let isActive = true;
     const loadUsers = async () => {
@@ -710,48 +687,6 @@ export default function TodoPersonalPage() {
     };
   }, [kanbanColumns, columnColors]);
 
-  useEffect(() => {
-    let isActive = true;
-    const loadCalendarWeather = async () => {
-      const year = calendarMonth.getFullYear();
-      const month = calendarMonth.getMonth();
-      const startDate = formatCalendarDateKey(new Date(year, month, 1));
-      const endDate = formatCalendarDateKey(new Date(year, month + 1, 0));
-      try {
-        const params = new URLSearchParams({
-          latitude: '-1.286389',
-          longitude: '36.817223',
-          daily: 'weather_code',
-          timezone: 'auto',
-          start_date: startDate,
-          end_date: endDate,
-        });
-        const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as { daily?: { time: string[]; weather_code: number[] } };
-        if (!isActive || !data.daily) {
-          return;
-        }
-        const next: Record<string, number> = {};
-        data.daily.time.forEach((date, index) => {
-          const code = data.daily?.weather_code[index];
-          if (typeof code === 'number') {
-            next[date] = code;
-          }
-        });
-        setCalendarWeather(next);
-      } catch {
-        // ignore
-      }
-    };
-
-    void loadCalendarWeather();
-    return () => {
-      isActive = false;
-    };
-  }, [calendarMonth]);
   useEffect(() => {
     if (!selectedTask) {
       return;
@@ -920,14 +855,19 @@ export default function TodoPersonalPage() {
 
   const handleKanbanDragOver = (event: React.DragEvent<HTMLUListElement>) => {
     event.preventDefault();
+    const status = event.currentTarget.dataset.status ?? null;
+    if (status && status !== dragOverColumn) {
+      setDragOverColumn(status);
+    }
   };
   const handleKanbanDrop = (event: React.DragEvent<HTMLUListElement>) => {
     event.preventDefault();
     const nextStatus = event.currentTarget.dataset.status;
+    setDragOverColumn(null);
     if (draggedTask && nextStatus && draggedTask.status !== nextStatus) {
       updateTaskStatus(draggedTask, nextStatus);
-      setDraggedTask(null);
     }
+    setDraggedTask(null);
   };
   const handleKanbanDragStart = (event: React.DragEvent<HTMLButtonElement>) => {
     const taskId = event.currentTarget.dataset.taskId;
@@ -941,6 +881,19 @@ export default function TodoPersonalPage() {
   };
   const handleKanbanDragEnd = () => {
     setDraggedTask(null);
+    setDragOverColumn(null);
+  };
+
+  const DONE_COLUMN_RE = /done|complete|closed|review|shipped/i;
+  const isTaskOverdue = (task: Task) => {
+    if (DONE_COLUMN_RE.test(task.status)) return false;
+    const raw = task.dueDateIso ?? task.dueDate ?? '';
+    if (!raw) return false;
+    const due = new Date(raw);
+    if (Number.isNaN(due.getTime())) return false;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    return due < startOfToday;
   };
   const handleKanbanTaskOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
     const taskId = event.currentTarget.dataset.taskId;
@@ -1162,79 +1115,92 @@ export default function TodoPersonalPage() {
         {kanbanColumns.map((status) => {
           const statusTasks = getTasksByStatus(status);
           const accentColor = columnColors[status] ?? '#6366f1';
+          const total = tasks.length;
+          const sharePct = total > 0 ? Math.round((statusTasks.length / total) * 100) : 0;
+          const isDropTarget = dragOverColumn === status;
 
           return (
             <div
               key={status}
-              className="flex min-w-68 flex-1 flex-col rounded-2xl bg-[#f4f5f7]"
+              className={`flex min-w-68 flex-1 flex-col overflow-hidden rounded-2xl border bg-white transition-shadow ${
+                isDropTarget ? 'border-transparent shadow-lg' : 'border-slate-200 shadow-sm'
+              }`}
+              style={isDropTarget ? { boxShadow: `0 0 0 2px ${accentColor}` } : undefined}
             >
-              {/* Column Header */}
-              <div className="flex items-center justify-between px-4 pt-4 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <span
-                    className="flex h-3 w-3 shrink-0 rounded-full"
-                    style={{ backgroundColor: accentColor }}
-                  />
-                  {status in renameDrafts ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        autoFocus
-                        value={renameDrafts[status]}
-                        onChange={(e) => updateRenameDraft(status, e.target.value)}
-                        onBlur={() => renameKanbanColumn(status)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') { void renameKanbanColumn(status); }
-                          if (e.key === 'Escape') { clearRenameDraft(status); }
-                        }}
-                        className="w-28 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                      />
+              {/* Column Header (tinted accent band) */}
+              <div className="px-4 pt-4 pb-3" style={{ backgroundColor: `${accentColor}14` }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: accentColor }} />
+                    {status in renameDrafts ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          autoFocus
+                          value={renameDrafts[status]}
+                          onChange={(e) => updateRenameDraft(status, e.target.value)}
+                          onBlur={() => renameKanbanColumn(status)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { void renameKanbanColumn(status); }
+                            if (e.key === 'Escape') { clearRenameDraft(status); }
+                          }}
+                          className="w-28 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => renameKanbanColumn(status)}
+                          className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => renameKanbanColumn(status)}
-                        className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700"
+                        className="text-sm font-bold text-slate-800 hover:text-slate-900"
+                        onClick={() => updateRenameDraft(status, status)}
+                        title="Click to rename"
                       >
-                        Save
+                        {status}
                       </button>
-                    </div>
-                  ) : (
+                    )}
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
+                      {statusTasks.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="color"
+                      value={accentColor}
+                      onChange={(e) => updateColumnColor(status, e.target.value)}
+                      className="h-5 w-5 cursor-pointer rounded border-0 bg-transparent p-0"
+                      title="Column colour"
+                    />
                     <button
                       type="button"
-                      className="text-sm font-semibold text-slate-700 hover:text-slate-900"
-                      onClick={() => updateRenameDraft(status, status)}
-                      title="Click to rename"
+                      onClick={() => removeKanbanColumn(status)}
+                      className="rounded p-0.5 text-slate-400 hover:text-rose-500"
+                      title="Remove column"
                     >
-                      {status}
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
                     </button>
-                  )}
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm">
-                    {statusTasks.length}
-                  </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="color"
-                    value={accentColor}
-                    onChange={(e) => updateColumnColor(status, e.target.value)}
-                    className="h-5 w-5 cursor-pointer rounded border-0 bg-transparent p-0"
-                    title="Column colour"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeKanbanColumn(status)}
-                    className="rounded p-0.5 text-slate-400 hover:text-rose-500"
-                    title="Remove column"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+
+                {/* Column progress / share bar */}
+                <div className="mt-3 flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${sharePct}%`, backgroundColor: accentColor }} />
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-500" title="Share of all tasks">{sharePct}%</span>
                 </div>
               </div>
 
               {/* Task Cards */}
               <ul
-                className="flex-1 space-y-2.5 overflow-y-auto px-3 pb-3"
-                style={{ minHeight: '22rem' }}
+                className="flex-1 space-y-2.5 overflow-y-auto px-3 pb-3 pt-3 transition-colors"
+                style={{ minHeight: '22rem', backgroundColor: isDropTarget ? `${accentColor}0d` : undefined }}
                 data-status={status}
                 onDragOver={handleKanbanDragOver}
                 onDrop={handleKanbanDrop}
@@ -1243,6 +1209,7 @@ export default function TodoPersonalPage() {
                 {statusTasks.length > 0 ? (
                   statusTasks.map((task) => {
                     const pr = getPriorityStyle(task.priority);
+                    const overdue = isTaskOverdue(task);
                     return (
                       <li key={task.id}>
                         <button
@@ -1252,6 +1219,7 @@ export default function TodoPersonalPage() {
                           onDragEnd={handleKanbanDragEnd}
                           onClick={handleKanbanTaskOpen}
                           type="button"
+                          style={{ borderLeftColor: pr.dot, borderLeftWidth: '4px' }}
                           className={`w-full cursor-grab rounded-xl border border-slate-200/80 bg-white p-4 text-left shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all duration-150 active:cursor-grabbing hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(15,23,42,0.12)] ${
                             draggedTask?.id === task.id ? 'opacity-50' : ''
                           }`}
@@ -1281,11 +1249,20 @@ export default function TodoPersonalPage() {
                           {/* Footer: due date + assignees */}
                           <div className="mt-3 flex items-center justify-between">
                             {task.dueDate ? (
-                              <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                              <div
+                                className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                  overdue ? 'bg-rose-50 text-rose-600' : 'text-slate-400'
+                                }`}
+                              >
                                 <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  {overdue ? (
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                                  ) : (
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  )}
                                 </svg>
                                 {task.dueDate}
+                                {overdue && <span className="ml-0.5">· Overdue</span>}
                               </div>
                             ) : <span />}
                             {task.assignees > 0 && renderAssignees(task.assignees)}
@@ -1295,8 +1272,12 @@ export default function TodoPersonalPage() {
                     );
                   })
                 ) : (
-                  <li className="flex h-24 items-center justify-center rounded-xl border border-dashed border-slate-200 text-[13px] text-slate-400">
-                    No tasks yet
+                  <li
+                    className={`flex h-24 items-center justify-center rounded-xl border border-dashed text-[13px] transition-colors ${
+                      isDropTarget ? 'border-transparent text-slate-500' : 'border-slate-200 text-slate-400'
+                    }`}
+                  >
+                    {isDropTarget ? 'Drop here' : 'No tasks yet'}
                   </li>
                 )}
               </ul>
@@ -1305,7 +1286,7 @@ export default function TodoPersonalPage() {
               <button
                 type="button"
                 onClick={() => openNewTaskInColumn(status)}
-                className="mx-3 mb-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium text-slate-500 transition-colors hover:bg-white hover:text-slate-800"
+                className="mx-3 mb-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1328,7 +1309,7 @@ export default function TodoPersonalPage() {
                 placeholder="Column name…"
                 autoFocus
                 onKeyDown={(e) => { if (e.key === 'Enter') addKanbanColumn(); }}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
               <div className="flex items-center gap-2">
                 <label htmlFor="kanban-inline-column-color" className="text-xs font-medium text-slate-500">Colour</label>
@@ -1349,7 +1330,7 @@ export default function TodoPersonalPage() {
                 <button
                   type="button"
                   onClick={addKanbanColumn}
-                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
                 >Add column</button>
               </div>
             </div>
@@ -1357,7 +1338,7 @@ export default function TodoPersonalPage() {
             <button
               type="button"
               onClick={() => setShowAddColumn(true)}
-              className="flex h-full min-h-56 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-transparent text-[13px] font-medium text-slate-500 transition-colors hover:border-indigo-400 hover:bg-white hover:text-indigo-600"
+              className="flex h-full min-h-56 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-transparent text-[13px] font-medium text-slate-500 transition-colors hover:border-emerald-400 hover:bg-white hover:text-emerald-600"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -2039,147 +2020,24 @@ export default function TodoPersonalPage() {
   };
 
   const renderCalendarView = () => {
-    const currentMonth = calendarMonth;
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth();
+    // Personal tasks shown by their due date, overlaid on the full calendar.
+    const taskEvents: CalendarExtraEvent[] = tasks
+      .map((task) => {
+        const raw = task.dueDateIso ?? task.dueDate ?? '';
+        if (!raw) return null;
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return {
+          key: String(task.id),
+          title: task.title,
+          startsAt: parsed.toISOString(),
+          allDay: true,
+          tag: task.priority ?? 'Task',
+        } as CalendarExtraEvent;
+      })
+      .filter((e): e is CalendarExtraEvent => e !== null);
 
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    const startingDayOfWeek = firstDay.getDay();
-
-    const days = [];
-    for (let i = 0; i < startingDayOfWeek; i++) {
-      days.push(null);
-    }
-    for (let i = 1; i <= daysInMonth; i++) {
-      days.push(i);
-    }
-
-    const getTasksForDay = (day: number | null) => {
-      if (!day) return [];
-      return tasks.filter((task) => {
-        const rawDate = task.dueDateIso ?? task.dueDate ?? '';
-        if (!rawDate) {
-          return false;
-        }
-        const parsed = new Date(rawDate);
-        if (Number.isNaN(parsed.getTime())) {
-          return false;
-        }
-        return (
-          parsed.getFullYear() === year &&
-          parsed.getMonth() === month &&
-          parsed.getDate() === day
-        );
-      });
-    };
-
-    const getCalendarColor = (task: Task) => {
-      if (task.status === 'In progress') {
-        return 'bg-orange-100 text-orange-800';
-      }
-      if (task.status === 'In review') {
-        return 'bg-emerald-100 text-emerald-800';
-      }
-      if (task.priority === 'High') {
-        return 'bg-rose-100 text-rose-800';
-      }
-      if (task.priority === 'Medium') {
-        return 'bg-amber-100 text-amber-800';
-      }
-      return 'bg-sky-100 text-sky-800';
-    };
-
-    const monthName = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">{monthName}</h2>
-
-          {/* Week Days Header */}
-          <div className="grid grid-cols-7 gap-2 mb-4">
-            {weekDays.map((day) => (
-              <div key={day} className="text-center text-sm font-semibold text-gray-600 py-2">
-                {day}
-              </div>
-            ))}
-          </div>
-
-          {/* Calendar Days */}
-          <div className="grid grid-cols-7 gap-2">
-            {days.map((day, index) => {
-              const dayTasks = getTasksForDay(day);
-              const today = new Date();
-              const isToday =
-                day !== null &&
-                year === today.getFullYear() &&
-                month === today.getMonth() &&
-                day === today.getDate();
-              const dateKey = day === null ? null : formatCalendarDateKey(new Date(year, month, day));
-              const weatherIcon = dateKey ? resolveCalendarWeatherIcon(calendarWeather[dateKey]) : null;
-
-              return (
-                <div
-                  key={day ? `day-${day}` : `empty-${index}`}
-                  className={`min-h-24 p-2 border rounded-lg ${
-                    day === null
-                      ? 'bg-gray-50 border-gray-100'
-                      : isToday
-                      ? 'bg-blue-50 border-blue-300'
-                      : 'bg-white border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  {day !== null && (
-                    <>
-                      <div className="mb-1 flex items-center justify-between">
-                        <p className={`text-sm font-semibold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
-                          {day}
-                        </p>
-                        {weatherIcon && <span className="text-base" aria-hidden="true">{weatherIcon}</span>}
-                      </div>
-                      <div className="space-y-1">
-                        {dayTasks.slice(0, 2).map((task) => (
-                          <div
-                            key={task.id}
-                            className={`text-xs px-1.5 py-0.5 rounded truncate ${getCalendarColor(task)}`}
-                            title={task.title}
-                          >
-                            <div className="font-semibold truncate">{task.title}</div>
-                            {task.dueDate && (
-                              <div className="text-[10px] opacity-80">{task.dueDate}</div>
-                            )}
-                          </div>
-                        ))}
-                        {dayTasks.length > 2 && (
-                          <p className="text-xs text-gray-500 px-1.5">
-                            +{dayTasks.length - 2} more
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Legend */}
-          <div className="mt-6 pt-6 border-t border-gray-200 flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-orange-400"></div>
-              <span className="text-sm text-gray-600">Task Scheduled</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-400"></div>
-              <span className="text-sm text-gray-600">Today</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <CalendarClient initialEvents={[]} extraEvents={taskEvents} />;
   };
 
   const renderDashboardView = () => {

@@ -37,6 +37,21 @@ model User {
   createdTrips       Trip[]          @relation("TripCreatedBy")
   ownedTrips         Trip[]          @relation("TripOwner")
   tripItineraryItemNotifications TripItineraryItemNotification[]
+  createdConversations Conversation[] @relation("ConversationCreatedBy")
+  conversationMembers  ConversationMember[]
+  sentMessages         Message[]      @relation("MessageSender")
+  messageNotifications MessageNotification[]
+  feedback             Feedback[]     @relation("FeedbackAuthor")
+  feedbackUpvotes      FeedbackUpvote[]
+  feedbackComments     FeedbackComment[]
+  createdDriverLicenses DriverLicense[] @relation("DriverLicenseCreatedBy")
+  uploadedFiles        StoredFile[]   @relation("StoredFileUploadedBy")
+  receivedFileShares   StoredFileShare[]
+  fileNotifications    FileNotification[]
+  calendarEvents       CalendarEvent[]
+  calendarEventNotifications CalendarEventNotification[]
+  scheduleShifts        ScheduleShift[] @relation("ScheduleEmployee")
+  createdScheduleShifts ScheduleShift[] @relation("ScheduleCreatedBy")
 }
 
 model PersonalTodo {
@@ -483,4 +498,225 @@ model RateLimitBucket {
 
   @@unique([scope, key, windowStart])
   @@index([expiresAt])
+}
+
+model Conversation {
+  id          Int      @id @default(autoincrement())
+  type        String   @default("direct")
+  title       String?
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User     @relation("ConversationCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  members     ConversationMember[]
+  messages    Message[]
+
+  @@index([updatedAt])
+}
+
+model ConversationMember {
+  id             Int       @id @default(autoincrement())
+  conversationId Int
+  userId         Int
+  lastReadAt     DateTime?
+  joinedAt       DateTime  @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             Int      @id @default(autoincrement())
+  conversationId Int
+  senderId       Int
+  body           String
+  createdAt      DateTime @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  notifications  MessageNotification[]
+
+  @@index([conversationId, createdAt])
+}
+
+model MessageNotification {
+  id             Int       @id @default(autoincrement())
+  userId         Int
+  messageId      Int
+  conversationId Int
+  type           String
+  message        String
+  createdAt      DateTime  @default(now())
+  readAt         DateTime?
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageRef     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, conversationId])
+}
+
+model Feedback {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String
+  category    String   @default("Improvement")
+  status      String   @default("New")
+  authorId    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  author      User     @relation("FeedbackAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  upvotes     FeedbackUpvote[]
+  comments    FeedbackComment[]
+
+  @@index([status, createdAt])
+  @@index([category, createdAt])
+}
+
+model FeedbackUpvote {
+  id         Int      @id @default(autoincrement())
+  feedbackId Int
+  userId     Int
+  createdAt  DateTime @default(now())
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([feedbackId, userId])
+  @@index([userId])
+}
+
+model FeedbackComment {
+  id         Int      @id @default(autoincrement())
+  feedbackId Int
+  userId     Int
+  body       String
+  createdAt  DateTime @default(now())
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId, createdAt])
+}
+
+model DriverLicense {
+  id              Int      @id @default(autoincrement())
+  driverName      String
+  licenseNumber   String
+  category        String   @default("Class A")
+  expiryDate      DateTime
+  lastVerified    DateTime?
+  notes           String?
+  documentName    String?
+  documentMime    String?
+  documentSize    Int?
+  documentContent Bytes?
+  createdById     Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       User     @relation("DriverLicenseCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([expiryDate])
+  @@index([driverName])
+}
+
+model StoredFile {
+  id           Int      @id @default(autoincrement())
+  name         String
+  description  String?
+  mimeType     String
+  size         Int
+  content      Bytes
+  uploadedById Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  uploadedBy   User     @relation("StoredFileUploadedBy", fields: [uploadedById], references: [id], onDelete: Cascade)
+  shares       StoredFileShare[]
+  notifications FileNotification[]
+
+  @@index([createdAt])
+  @@index([uploadedById])
+}
+
+model StoredFileShare {
+  id        Int      @id @default(autoincrement())
+  fileId    Int
+  userId    Int
+  createdAt DateTime @default(now())
+  file      StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, userId])
+  @@index([userId])
+}
+
+model FileNotification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  fileId    Int
+  type      String
+  message   String
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  file      StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model CalendarEvent {
+  id                    Int       @id @default(autoincrement())
+  userId                Int
+  title                 String
+  description           String?
+  location              String?
+  tag                   String?
+  startsAt              DateTime
+  endsAt                DateTime?
+  allDay                Boolean   @default(false)
+  reminderMinutesBefore Int?
+  reminderAt            DateTime?
+  reminderSentAt        DateTime?
+  googleEventId         String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notifications         CalendarEventNotification[]
+
+  @@index([userId, startsAt])
+  @@index([reminderAt, reminderSentAt])
+}
+
+model CalendarEventNotification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  eventId   Int
+  type      String
+  message   String
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model ScheduleShift {
+  id             Int      @id @default(autoincrement())
+  employeeId     Int
+  date           String   // 'YYYY-MM-DD'
+  type           String
+  startTime      String?
+  endTime        String?
+  timeLabel      String?
+  statusLabel    String?
+  note           String?
+  tasksCompleted Int?
+  totalTasks     Int?
+  createdById    Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  employee       User     @relation("ScheduleEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy      User?    @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, date])
+  @@index([date])
 }
