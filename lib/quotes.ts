@@ -86,6 +86,7 @@ export interface QuoteSummary {
   };
   createdBy: { id: number; name: string; email: string };
   approver: { id: number; name: string; email: string } | null;
+  brandProfile: { id: number; name: string; companyName: string | null; primaryColor: string } | null;
   itemCount: number;
   trip: QuoteTripSummary | null;
 }
@@ -101,6 +102,7 @@ interface QuoteRecord {
   customerId: number;
   createdById: number;
   approverId: number | null;
+  brandProfileId: number | null;
   subject: string;
   status: string;
   issueDate: Date;
@@ -124,6 +126,7 @@ interface QuoteRecord {
   customer: { id: number; name: string; company: string | null; email: string | null };
   createdBy: { id: number; name: string; email: string };
   approver: { id: number; name: string; email: string } | null;
+  brandProfile: { id: number; name: string; companyName: string | null; primaryColor: string } | null;
   items: QuoteItemRecord[];
   trip: { id: number; reference: string; trackingCode: string; status: string } | null;
 }
@@ -146,6 +149,7 @@ const quoteInclude = {
   customer: { select: { id: true, name: true, company: true, email: true } },
   createdBy: { select: { id: true, name: true, email: true } },
   approver: { select: { id: true, name: true, email: true } },
+  brandProfile: { select: { id: true, name: true, companyName: true, primaryColor: true } },
   items: { orderBy: { position: 'asc' as const } },
   trip: { select: { id: true, reference: true, trackingCode: true, status: true } },
 };
@@ -362,6 +366,7 @@ function serializeSummary(record: QuoteRecord): QuoteSummary {
     customer: record.customer,
     createdBy: record.createdBy,
     approver: record.approver,
+    brandProfile: record.brandProfile,
     itemCount: record.items?.length ?? 0,
     trip: record.trip,
   };
@@ -419,6 +424,7 @@ export async function getQuoteForUser(params: {
 export interface QuoteCreateInput {
   customerId: number;
   approverId: number | null;
+  brandProfileId: number | null;
   subject: string;
   issueDate: string;
   expiryDate: string;
@@ -451,6 +457,7 @@ export async function createQuote(input: QuoteCreateInput): Promise<QuoteDetail>
         customerId: input.customerId,
         createdById: input.createdById,
         approverId: input.approverId,
+        brandProfileId: input.brandProfileId,
         subject: input.subject,
         status: 'Draft',
         issueDate: new Date(input.issueDate),
@@ -495,6 +502,7 @@ export async function createQuote(input: QuoteCreateInput): Promise<QuoteDetail>
 export interface QuoteUpdateInput {
   customerId?: number;
   approverId?: number | null;
+  brandProfileId?: number | null;
   subject?: string;
   issueDate?: string;
   expiryDate?: string;
@@ -563,6 +571,10 @@ export async function updateDraftQuote(params: {
         customerId: params.input.customerId ?? existing.customerId,
         approverId:
           params.input.approverId === undefined ? existing.approverId : params.input.approverId,
+        brandProfileId:
+          params.input.brandProfileId === undefined
+            ? existing.brandProfileId
+            : params.input.brandProfileId,
         subject: params.input.subject ?? existing.subject,
         issueDate:
           params.input.issueDate !== undefined ? new Date(params.input.issueDate) : existing.issueDate,
@@ -777,6 +789,7 @@ export async function duplicateQuote(params: {
   return createQuote({
     customerId: original.customerId,
     approverId: original.approverId,
+    brandProfileId: original.brandProfileId,
     subject: `${original.subject} (copy)`,
     issueDate: new Date().toISOString(),
     expiryDate: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),

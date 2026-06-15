@@ -153,6 +153,7 @@ const currencySchema = z
 export const quoteCreateSchema = z.object({
   customerId: z.number().int().positive('Customer is required'),
   approverId: z.number().int().positive('Approver is required').optional().nullable(),
+  brandProfileId: z.number().int().positive().optional().nullable(),
   subject: z.string().trim().min(1, 'Subject is required').max(200),
   issueDate: isoDateSchema,
   expiryDate: isoDateSchema,
@@ -347,4 +348,95 @@ export const organizationUpdateSchema = z.object({
   defaultCurrency: currencySchema.optional(),
   defaultTaxRate: z.number().finite().gte(0).lte(1).optional(),
   taxLabel: z.string().trim().min(1).max(40).optional(),
+});
+
+const hexColorSchema = z
+  .string()
+  .trim()
+  .regex(/^#[0-9a-fA-F]{6}$/, 'Color must be a 6-digit hex value like #03458f');
+
+export const brandProfileCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Profile name is required').max(120),
+  companyName: z.string().trim().max(160).optional().nullable(),
+  addressLine1: z.string().trim().max(160).optional().nullable(),
+  addressLine2: z.string().trim().max(160).optional().nullable(),
+  city: z.string().trim().max(80).optional().nullable(),
+  region: z.string().trim().max(80).optional().nullable(),
+  postalCode: z.string().trim().max(40).optional().nullable(),
+  country: z.string().trim().max(80).optional().nullable(),
+  email: z
+    .string()
+    .trim()
+    .max(160)
+    .email('Enter a valid email address')
+    .optional()
+    .or(z.literal(''))
+    .transform((value) => (value ? value.toLowerCase() : null)),
+  phone: z.string().trim().max(40).optional().nullable(),
+  website: z.string().trim().max(200).optional().nullable(),
+  primaryColor: hexColorSchema.default('#03458f'),
+  isDefault: z.boolean().optional(),
+});
+
+export const brandProfileUpdateSchema = brandProfileCreateSchema
+  .partial()
+  .extend({ archived: z.boolean().optional() })
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated');
+
+const invoiceItemSchema = z.object({
+  description: z.string().trim().min(1, 'Item description is required').max(280),
+  quantity: z
+    .number({ invalid_type_error: 'Days must be a number' })
+    .finite()
+    .gt(0, 'Days must be greater than zero')
+    .max(1_000_000),
+  unitPrice: z
+    .number({ invalid_type_error: 'Unit price must be a number' })
+    .finite()
+    .gte(0, 'Unit price cannot be negative')
+    .max(100_000_000),
+  taxable: z.boolean().optional(),
+  discountType: discountTypeSchema.optional(),
+  discountValue: z.number().finite().gte(0).max(100_000_000).optional(),
+  productId: z.number().int().positive().optional().nullable(),
+});
+
+export const invoiceCreateSchema = z.object({
+  customerId: z.number().int().positive('Customer is required'),
+  brandProfileId: z.number().int().positive().optional().nullable(),
+  sourceQuoteId: z.number().int().positive().optional().nullable(),
+  issueDate: isoDateSchema,
+  dueDate: isoDateSchema,
+  currency: currencySchema.default('USD'),
+  taxRate: z
+    .number({ invalid_type_error: 'Tax rate must be a number' })
+    .finite()
+    .gte(0, 'Tax rate cannot be negative')
+    .lte(1, 'Tax rate must be a decimal between 0 and 1'),
+  discountType: discountTypeSchema.default('none'),
+  discountValue: z.number().finite().gte(0).max(100_000_000).default(0),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  terms: z.string().trim().max(5000).optional().nullable(),
+  items: z.array(invoiceItemSchema).min(1, 'Add at least one line item').max(100),
+});
+
+export const invoiceUpdateSchema = invoiceCreateSchema.partial().extend({
+  items: z.array(invoiceItemSchema).min(1, 'Add at least one line item').max(100).optional(),
+});
+
+export const invoicePaymentSchema = z.object({
+  amount: z
+    .number({ invalid_type_error: 'Amount must be a number' })
+    .finite()
+    .gt(0, 'Amount must be greater than zero')
+    .max(100_000_000),
+  method: z.string().trim().min(1).max(40).default('Bank transfer'),
+  reference: z.string().trim().max(100).optional().nullable(),
+  note: z.string().trim().max(1000).optional().nullable(),
+  paidAt: isoDateSchema,
+});
+
+export const invoiceFromQuoteSchema = z.object({
+  quoteId: z.number().int().positive('Quote is required'),
+  dueInDays: z.number().int().gte(0).lte(365).optional(),
 });

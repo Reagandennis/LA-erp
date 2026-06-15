@@ -66,7 +66,7 @@ export default async function QuotePrintPage({ params }: PrintPageProps) {
         email: organization.email,
         phone: organization.phone,
         website: organization.website,
-        primaryColor: '#059669',
+        primaryColor: '#03458f',
         logoUrl: organization.hasLogo ? '/api/admin/organization/logo' : null,
       };
 

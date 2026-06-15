@@ -12,8 +12,21 @@ import {
 import React from 'react';
 import sharp from 'sharp';
 
-import type { OrganizationSummary } from './organization';
 import type { QuoteDetail } from './quotes';
+
+export interface BrandPdfInfo {
+  companyName: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  primaryColor: string;
+}
 
 const styles = StyleSheet.create({
   page: { padding: 40, fontSize: 10, color: '#111827', fontFamily: 'Helvetica' },
@@ -23,7 +36,7 @@ const styles = StyleSheet.create({
   companyName: { fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 4 },
   companyMetaLine: { color: '#6B7280', fontSize: 9, marginTop: 1 },
   headerRight: { textAlign: 'right', minWidth: 200 },
-  badge: { fontSize: 9, color: '#059669', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
+  badge: { fontSize: 9, color: '#03458f', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
   reference: { fontSize: 18, fontWeight: 700, color: '#111827' },
   metaRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 24, marginTop: 8 },
   metaCell: { textAlign: 'right' },
@@ -68,7 +81,7 @@ const styles = StyleSheet.create({
   totalsLabel: { color: '#6B7280' },
   totalsValue: { color: '#111827', fontWeight: 700 },
   grandTotalLabel: { color: '#111827', fontWeight: 700, fontSize: 12 },
-  grandTotalValue: { color: '#059669', fontWeight: 700, fontSize: 14 },
+  grandTotalValue: { color: '#03458f', fontWeight: 700, fontSize: 14 },
   divider: { marginVertical: 6, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   notesBox: { marginTop: 24, padding: 12, backgroundColor: '#FFFBEB', borderRadius: 6 },
   termsBox: { marginTop: 12, padding: 12, backgroundColor: '#F9FAFB', borderRadius: 6 },
@@ -96,27 +109,22 @@ function formatDate(value: string | null) {
   });
 }
 
-function describeDiscount(type: string, value: number, currency: string): string {
-  if (type === 'none' || !value) return '—';
-  if (type === 'percentage') return `${value}%`;
-  return formatMoney(value, currency);
-}
-
 function joinNonEmpty(parts: Array<string | null | undefined>, separator = ', ') {
   return parts.filter((part) => part && part.trim().length > 0).join(separator);
 }
 
 /** Returns each non-empty address line as its own string */
-function buildCompanyAddressLines(org: OrganizationSummary): string[] {
-  const cityLine = joinNonEmpty([org.city, org.region, org.postalCode], ' ');
-  return [org.addressLine1, org.addressLine2, cityLine, org.country].filter(
+function buildCompanyAddressLines(brand: BrandPdfInfo): string[] {
+  const cityLine = joinNonEmpty([brand.city, brand.region, brand.postalCode], ' ');
+  return [brand.addressLine1, brand.addressLine2, cityLine, brand.country].filter(
     (l): l is string => Boolean(l && l.trim()),
   );
 }
 
 interface QuotePdfProps {
   quote: QuoteDetail;
-  organization: OrganizationSummary;
+  brand: BrandPdfInfo;
+  taxLabel: string;
   logoDataUri: string | null;
   customer: {
     name: string;
@@ -127,10 +135,9 @@ interface QuotePdfProps {
   };
 }
 
-function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuotePdfProps) {
+function QuotePdfDocument({ quote, brand, taxLabel, logoDataUri, customer }: QuotePdfProps) {
   const currency = quote.currency;
-  const taxLabel = organization.taxLabel || 'Tax';
-  const addressLines = buildCompanyAddressLines(organization);
+  const addressLines = buildCompanyAddressLines(brand);
 
   const billToLines = [
     customer.company,
@@ -153,25 +160,25 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
               // eslint-disable-next-line jsx-a11y/alt-text
               <Image src={logoDataUri} style={styles.logo} />
             ) : null}
-            {organization.companyName ? (
-              <Text style={styles.companyName}>{organization.companyName}</Text>
+            {brand.companyName ? (
+              <Text style={styles.companyName}>{brand.companyName}</Text>
             ) : null}
             {addressLines.map((line, i) => (
               <Text key={i} style={styles.companyMetaLine}>{line}</Text>
             ))}
-            {organization.email ? (
-              <Text style={styles.companyMetaLine}>{organization.email}</Text>
+            {brand.email ? (
+              <Text style={styles.companyMetaLine}>{brand.email}</Text>
             ) : null}
-            {organization.phone ? (
-              <Text style={styles.companyMetaLine}>{organization.phone}</Text>
+            {brand.phone ? (
+              <Text style={styles.companyMetaLine}>{brand.phone}</Text>
             ) : null}
-            {organization.website ? (
-              <Text style={styles.companyMetaLine}>{organization.website}</Text>
+            {brand.website ? (
+              <Text style={styles.companyMetaLine}>{brand.website}</Text>
             ) : null}
           </View>
 
           <View style={styles.headerRight}>
-            <Text style={styles.badge}>Quotation</Text>
+            <Text style={[styles.badge, { color: brand.primaryColor }]}>Quotation</Text>
             <Text style={styles.reference}>{quote.reference}</Text>
             <View style={styles.metaRow}>
               <View style={styles.metaCell}>
@@ -221,9 +228,8 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
         <View style={styles.itemsTable}>
           <View style={styles.itemsHeader}>
             <Text style={[styles.colDescription, styles.headerText]}>Description</Text>
-            <Text style={[styles.colQty, styles.headerText]}>Qty</Text>
+            <Text style={[styles.colQty, styles.headerText]}>Days</Text>
             <Text style={[styles.colUnit, styles.headerText]}>Unit</Text>
-            <Text style={[styles.colDiscount, styles.headerText]}>Discount</Text>
             <Text style={[styles.colTotal, styles.headerText]}>Total</Text>
           </View>
           {quote.items.map((item) => (
@@ -236,9 +242,6 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
               </View>
               <Text style={[styles.colQty, styles.cellText]}>{item.quantity}</Text>
               <Text style={[styles.colUnit, styles.cellText]}>{formatMoney(item.unitPrice, currency)}</Text>
-              <Text style={[styles.colDiscount, styles.cellText]}>
-                {describeDiscount(item.discountType, item.discountValue, currency)}
-              </Text>
               <Text style={styles.colTotal}>{formatMoney(item.total, currency)}</Text>
             </View>
           ))}
@@ -267,7 +270,9 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
           <View style={styles.divider} />
           <View style={styles.totalsRow}>
             <Text style={styles.grandTotalLabel}>Total</Text>
-            <Text style={styles.grandTotalValue}>{formatMoney(quote.total, currency)}</Text>
+            <Text style={[styles.grandTotalValue, { color: brand.primaryColor }]}>
+              {formatMoney(quote.total, currency)}
+            </Text>
           </View>
         </View>
 
@@ -286,7 +291,7 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
         ) : null}
 
         <Text style={styles.footer} fixed>
-          {organization.companyName ?? ''}  •  {quote.reference}
+          {brand.companyName ?? ''}  •  {quote.reference}
         </Text>
       </Page>
     </Document>
@@ -295,7 +300,8 @@ function QuotePdfDocument({ quote, organization, logoDataUri, customer }: QuoteP
 
 export async function renderQuotePdf(input: {
   quote: QuoteDetail;
-  organization: OrganizationSummary;
+  brand: BrandPdfInfo;
+  taxLabel: string;
   logo: { buffer: Buffer; mimeType: string } | null;
   customer: QuotePdfProps['customer'];
 }): Promise<Buffer> {
@@ -315,7 +321,8 @@ export async function renderQuotePdf(input: {
   return renderToBuffer(
     <QuotePdfDocument
       quote={input.quote}
-      organization={input.organization}
+      brand={input.brand}
+      taxLabel={input.taxLabel}
       logoDataUri={logoDataUri}
       customer={input.customer}
     />,

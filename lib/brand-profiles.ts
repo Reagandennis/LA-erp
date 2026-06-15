@@ -140,7 +140,7 @@ export async function createBrandProfile(
       email: input.email ?? null,
       phone: input.phone ?? null,
       website: input.website ?? null,
-      primaryColor: input.primaryColor ?? '#059669',
+      primaryColor: input.primaryColor ?? '#03458f',
       isDefault: input.isDefault ?? false,
       archived: input.archived ?? false,
       createdById,

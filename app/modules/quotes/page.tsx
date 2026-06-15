@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 
 import { getServerAuth } from '@/lib/auth';
+import { listBrandProfiles } from '@/lib/brand-profiles';
 import { listCustomers } from '@/lib/customers';
 import { getOrganizationSettings } from '@/lib/organization';
 import { listProducts } from '@/lib/products';
@@ -24,14 +25,16 @@ export default async function QuotesPage() {
     redirect('/dashboard');
   }
 
-  const [quotes, customers, approvers, products, templates, organization] = await Promise.all([
-    listQuotesForUser({ userId: auth.user.id, isAdmin }),
-    listCustomers(),
-    listApproverCandidates(auth.user.id),
-    listProducts(),
-    listTemplates(),
-    getOrganizationSettings(),
-  ]);
+  const [quotes, customers, approvers, products, templates, organization, brandProfiles] =
+    await Promise.all([
+      listQuotesForUser({ userId: auth.user.id, isAdmin }),
+      listCustomers(),
+      listApproverCandidates(auth.user.id),
+      listProducts(),
+      listTemplates(),
+      getOrganizationSettings(),
+      listBrandProfiles({ includeArchived: false }),
+    ]);
 
   return (
     <QuotesClient
@@ -42,6 +45,14 @@ export default async function QuotesPage() {
       initialApprovers={approvers}
       initialProducts={products}
       initialTemplates={templates}
+      initialBrandProfiles={brandProfiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        companyName: profile.companyName,
+        primaryColor: profile.primaryColor,
+        isDefault: profile.isDefault,
+        hasLogo: profile.hasLogo,
+      }))}
       organization={{
         companyName: organization.companyName,
         defaultCurrency: organization.defaultCurrency,

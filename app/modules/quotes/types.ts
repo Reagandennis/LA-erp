@@ -61,6 +61,15 @@ export interface TemplateOption {
   }>;
 }
 
+export interface BrandProfileOption {
+  id: number;
+  name: string;
+  companyName: string | null;
+  primaryColor: string;
+  isDefault: boolean;
+  hasLogo: boolean;
+}
+
 export interface OrganizationBranding {
   companyName: string | null;
   defaultCurrency: string;
@@ -103,6 +112,7 @@ export interface QuoteSummary {
   customer: { id: number; name: string; company: string | null; email: string | null };
   createdBy: { id: number; name: string; email: string };
   approver: { id: number; name: string; email: string } | null;
+  brandProfile: { id: number; name: string; companyName: string | null; primaryColor: string } | null;
   itemCount: number;
   trip: QuoteTripSummary | null;
 }

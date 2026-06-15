@@ -1,11 +1,21 @@
-import ModulePlaceholderPage from '../_components/module-placeholder-page';
+import { redirect } from 'next/navigation';
 
-export default function RadioZelloPage() {
-  return (
-    <ModulePlaceholderPage
-      title="Radio/Zello API"
-      category="Communication"
-      description="Connect dispatch-style voice communication and radio workflows."
-    />
-  );
+import { getServerAuth } from '@/lib/auth';
+import { ADMIN_ROLE_NAME } from '@/lib/rbac';
+import { userHasModule, userHasRole } from '@/lib/user';
+
+import ZelloConsole from './zello-console';
+
+export const dynamic = 'force-dynamic';
+
+export default async function RadioZelloPage() {
+  const auth = await getServerAuth();
+  if (!auth) redirect('/auth/login');
+
+  const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
+  if (!isAdmin && !userHasModule(auth.user, 'radio-zello')) {
+    redirect('/dashboard');
+  }
+
+  return <ZelloConsole />;
 }

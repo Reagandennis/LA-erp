@@ -148,6 +148,124 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
   }
 };
 
+function DashStat({ label, value, accent = 'text-gray-900' }: { label: string; value: string; accent?: string }) {
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-white p-4 lg:p-5">
+      <p className="text-xs font-medium text-gray-500">{label}</p>
+      <p className={`mt-2 text-2xl font-bold ${accent}`}>{value}</p>
+    </div>
+  );
+}
+
+function DashCard({
+  title,
+  subtitle,
+  className = '',
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`rounded-2xl border border-gray-100 bg-white p-5 ${className}`}>
+      <p className="text-sm font-semibold text-gray-900">{title}</p>
+      {subtitle ? <p className="mt-0.5 text-xs text-gray-400">{subtitle}</p> : null}
+      <div className="mt-4">{children}</div>
+    </div>
+  );
+}
+
+function CompletionDonut({ percent, doneCount, total }: { percent: number; doneCount: number; total: number }) {
+  const r = 52;
+  const c = 2 * Math.PI * r;
+  const offset = c - (percent / 100) * c;
+  return (
+    <div className="flex flex-col items-center justify-center">
+      <svg width="150" height="150" viewBox="0 0 120 120" className="shrink-0">
+        <circle cx="60" cy="60" r={r} fill="none" stroke="#eef2f7" strokeWidth="12" />
+        <circle
+          cx="60"
+          cy="60"
+          r={r}
+          fill="none"
+          stroke="#03458f"
+          strokeWidth="12"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          transform="rotate(-90 60 60)"
+        />
+        <text x="60" y="58" textAnchor="middle" className="fill-gray-900" style={{ fontSize: 24, fontWeight: 700 }}>
+          {percent}%
+        </text>
+        <text x="60" y="78" textAnchor="middle" className="fill-gray-400" style={{ fontSize: 11 }}>
+          done
+        </text>
+      </svg>
+      <p className="mt-3 text-sm text-gray-500">
+        {doneCount} of {total} tasks
+      </p>
+    </div>
+  );
+}
+
+function StackedBar({
+  segments,
+  total,
+}: {
+  segments: { label: string; count: number; color: string }[];
+  total: number;
+}) {
+  return (
+    <div>
+      <div className="flex h-3.5 w-full overflow-hidden rounded-full bg-gray-100">
+        {segments
+          .filter((s) => s.count > 0)
+          .map((s) => (
+            <div
+              key={s.label}
+              style={{ width: `${total > 0 ? (s.count / total) * 100 : 0}%`, backgroundColor: s.color }}
+              title={`${s.label}: ${s.count}`}
+            />
+          ))}
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+        {segments.map((s) => (
+          <div key={s.label} className="flex items-center gap-2 text-xs">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+            <span className="truncate text-gray-600">{s.label}</span>
+            <span className="ml-auto font-semibold text-gray-900">{s.count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BarList({ rows }: { rows: { label: string; count: number; color: string }[] }) {
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <div className="mb-1 flex items-center justify-between text-xs">
+            <span className="font-medium text-gray-600">{row.label}</span>
+            <span className="text-gray-400">{row.count}</span>
+          </div>
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${(row.count / max) * 100}%`, backgroundColor: row.color }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TodoPersonalPage() {
   const [activeView, setActiveView] = useState<ViewType>('kanban');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -1105,7 +1223,7 @@ export default function TodoPersonalPage() {
   const getPriorityStyle = (priority: Task['priority']) => {
     if (priority === 'High') return { bg: 'bg-rose-50', text: 'text-rose-600', dot: '#f43f5e' };
     if (priority === 'Medium') return { bg: 'bg-amber-50', text: 'text-amber-600', dot: '#f59e0b' };
-    return { bg: 'bg-emerald-50', text: 'text-emerald-600', dot: '#10b981' };
+    return { bg: 'bg-primary/5', text: 'text-primary', dot: '#10b981' };
   };
 
   const renderKanbanView = () => (
@@ -1143,12 +1261,12 @@ export default function TodoPersonalPage() {
                             if (e.key === 'Enter') { void renameKanbanColumn(status); }
                             if (e.key === 'Escape') { clearRenameDraft(status); }
                           }}
-                          className="w-28 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                          className="w-28 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary"
                         />
                         <button
                           type="button"
                           onClick={() => renameKanbanColumn(status)}
-                          className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700"
+                          className="text-[11px] font-semibold text-primary hover:text-primary"
                         >
                           Save
                         </button>
@@ -1309,7 +1427,7 @@ export default function TodoPersonalPage() {
                 placeholder="Column name…"
                 autoFocus
                 onKeyDown={(e) => { if (e.key === 'Enter') addKanbanColumn(); }}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <div className="flex items-center gap-2">
                 <label htmlFor="kanban-inline-column-color" className="text-xs font-medium text-slate-500">Colour</label>
@@ -1330,7 +1448,7 @@ export default function TodoPersonalPage() {
                 <button
                   type="button"
                   onClick={addKanbanColumn}
-                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
                 >Add column</button>
               </div>
             </div>
@@ -1338,7 +1456,7 @@ export default function TodoPersonalPage() {
             <button
               type="button"
               onClick={() => setShowAddColumn(true)}
-              className="flex h-full min-h-56 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-transparent text-[13px] font-medium text-slate-500 transition-colors hover:border-emerald-400 hover:bg-white hover:text-emerald-600"
+              className="flex h-full min-h-56 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-transparent text-[13px] font-medium text-slate-500 transition-colors hover:border-primary/40 hover:bg-white hover:text-primary"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1471,7 +1589,7 @@ export default function TodoPersonalPage() {
                   <select
                     value={editedTask.priority}
                     onChange={(event) => handleEditPriorityChange(event.target.value as Task['priority'])}
-                    className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold"
+                    className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-semibold"
                   >
                     <option value="High">High</option>
                     <option value="Medium">Medium</option>
@@ -1492,7 +1610,7 @@ export default function TodoPersonalPage() {
                 <input
                   value={editedTask.title}
                   onChange={(event) => handleEditTitleChange(event.target.value)}
-                  className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-primary"
                   placeholder="Task title"
                 />
                 <textarea
@@ -1500,7 +1618,7 @@ export default function TodoPersonalPage() {
                   onChange={(event) => handleEditDescriptionChange(event.target.value)}
                   placeholder="Add a detailed description..."
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                 />
               </div>
 
@@ -1525,8 +1643,8 @@ export default function TodoPersonalPage() {
                         onClick={() => toggleTaggedUser(user.id)}
                         className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                           isTagged
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                            : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-200'
+                            ? 'border-primary/30 bg-primary/5 text-primary'
+                            : 'border-gray-200 bg-white text-gray-700 hover:border-primary/20'
                         }`}
                       >
                         <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
@@ -1557,13 +1675,13 @@ export default function TodoPersonalPage() {
                     type="date"
                     value={editedTask.dueDateIso ? editedTask.dueDateIso.slice(0, 10) : ''}
                     onChange={(event) => handleEditDueDateChange(event.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                   <input
                     type="time"
                     value={dueTime}
                     onChange={(event) => setDueTime(event.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
               </div>
@@ -1659,12 +1777,12 @@ export default function TodoPersonalPage() {
                       value={commentInput}
                       onChange={(e) => handleNotesChange(e.target.value)}
                       placeholder="Write a comment..."
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <button
                       type="button"
                       onClick={handleSendComment}
-                      className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                      className="p-2 bg-primary text-white rounded-lg hover:bg-primary/90"
                       aria-label="Send comment"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1711,7 +1829,7 @@ export default function TodoPersonalPage() {
                     <p className="text-sm font-semibold text-gray-900">Subtasks</p>
                   </div>
                   {subtasks.length > 0 && (
-                    <span className="text-xs font-semibold text-emerald-600">
+                    <span className="text-xs font-semibold text-primary">
                       {Math.round((subtasks.filter((s) => s.completed).length / subtasks.length) * 100)}% complete
                     </span>
                   )}
@@ -1729,12 +1847,12 @@ export default function TodoPersonalPage() {
                     value={subtaskTitle}
                     onChange={(event) => setSubtaskTitle(event.target.value)}
                     placeholder="Add a subtask"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                   <button
                     type="button"
                     onClick={handleAddSubtask}
-                    className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                    className="px-3 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
                   >
                     Add
                   </button>
@@ -1748,7 +1866,7 @@ export default function TodoPersonalPage() {
                         onChange={() => {
                           toggleLegacySubtask(subtask.id);
                         }}
-                        className="w-4 h-4 mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        className="w-4 h-4 mt-0.5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
                       />
                       <div className="flex-1">
                         <p className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
@@ -1774,7 +1892,7 @@ export default function TodoPersonalPage() {
             <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6 space-y-3">
               <button
                 onClick={handleSaveTaskChanges}
-                className="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold transition-colors"
+                className="w-full px-4 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 font-semibold transition-colors"
               >
                 Save Changes
               </button>
@@ -2042,82 +2160,89 @@ export default function TodoPersonalPage() {
 
   const renderDashboardView = () => {
     const total = tasks.length;
-    const backlog = tasks.filter((task) => task.status === 'Backlog').length;
+    const doneStatus = kanbanColumns[kanbanColumns.length - 1] ?? 'In review';
+    const doneCount = tasks.filter((task) => task.status === doneStatus).length;
+    const completionPct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
     const inProgress = tasks.filter((task) => task.status === 'In progress').length;
-    const inReview = tasks.filter((task) => task.status === 'In review').length;
-    const completed = tasks.filter((task) => task.status === 'In review').length;
-    const dueToday = tasks.filter((task) => {
-      if (!task.dueDate) return false;
-      const date = new Date(task.dueDate);
-      const now = new Date();
-      return (
-        date.getFullYear() === now.getFullYear() &&
-        date.getMonth() === now.getMonth() &&
-        date.getDate() === now.getDate()
-      );
-    }).length;
 
-    const renderDonut = (value: number, label: string, color: string) => {
-      const radius = 36;
-      const circumference = 2 * Math.PI * radius;
-      const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
-      const offset = circumference - (percentage / 100) * circumference;
+    const statusSegments = Array.from(new Set([...kanbanColumns, ...tasks.map((t) => t.status)])).map((name) => ({
+      label: name,
+      count: tasks.filter((t) => t.status === name).length,
+      color: columnColors[name] ?? '#03458f',
+    }));
+
+    const priorityRows = [
+      { label: 'High', count: tasks.filter((t) => t.priority === 'High').length, color: '#e11d48' },
+      { label: 'Medium', count: tasks.filter((t) => t.priority === 'Medium').length, color: '#f59e0b' },
+      { label: 'Low', count: tasks.filter((t) => t.priority === 'Low').length, color: '#10b981' },
+    ];
+
+    const startToday = new Date();
+    startToday.setHours(0, 0, 0, 0);
+    const endToday = new Date(startToday);
+    endToday.setDate(endToday.getDate() + 1);
+    const endWeek = new Date(startToday);
+    endWeek.setDate(endWeek.getDate() + 7);
+    let overdue = 0;
+    let dueToday = 0;
+    let dueWeek = 0;
+    let later = 0;
+    let noDate = 0;
+    for (const task of tasks) {
+      if (!task.dueDateIso) {
+        noDate += 1;
+        continue;
+      }
+      const d = new Date(task.dueDateIso).getTime();
+      if (d < startToday.getTime()) overdue += 1;
+      else if (d < endToday.getTime()) dueToday += 1;
+      else if (d < endWeek.getTime()) dueWeek += 1;
+      else later += 1;
+    }
+    const dueRows = [
+      { label: 'Overdue', count: overdue, color: '#e11d48' },
+      { label: 'Due today', count: dueToday, color: '#f59e0b' },
+      { label: 'This week', count: dueWeek, color: '#03458f' },
+      { label: 'Later', count: later, color: '#9ca3af' },
+      { label: 'No date', count: noDate, color: '#d1d5db' },
+    ];
+
+    if (total === 0) {
       return (
-        <div className="bg-white rounded-2xl border border-gray-200 p-5 flex items-center gap-4">
-          <svg width="90" height="90" className="shrink-0">
-            <circle
-              cx="45"
-              cy="45"
-              r={radius}
-              fill="none"
-              stroke="#e5e7eb"
-              strokeWidth="8"
-            />
-            <circle
-              cx="45"
-              cy="45"
-              r={radius}
-              fill="none"
-              stroke={color}
-              strokeWidth="8"
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-              strokeLinecap="round"
-              transform="rotate(-90 45 45)"
-            />
-            <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" className="fill-gray-900 text-sm font-semibold">
-              {percentage}%
-            </text>
-          </svg>
-          <div>
-            <p className="text-sm text-gray-500">{label}</p>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
-          </div>
+        <div className="rounded-2xl border border-gray-100 bg-white px-6 py-20 text-center">
+          <h3 className="text-lg font-semibold text-gray-900">No tasks yet</h3>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">
+            Create a task and your charts will appear here.
+          </p>
         </div>
       );
-    };
+    }
 
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {renderDonut(backlog, 'Backlog', '#9ca3af')}
-          {renderDonut(inProgress, 'In progress', '#f97316')}
-          {renderDonut(inReview, 'In review', '#10b981')}
-          {renderDonut(completed, 'Completed', '#3b82f6')}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+          <DashStat label="Total tasks" value={`${total}`} accent="text-primary" />
+          <DashStat label="In progress" value={`${inProgress}`} />
+          <DashStat label="Due today" value={`${dueToday}`} accent={dueToday > 0 ? 'text-amber-600' : 'text-gray-900'} />
+          <DashStat label="Overdue" value={`${overdue}`} accent={overdue > 0 ? 'text-rose-600' : 'text-gray-900'} />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <p className="text-sm text-gray-500">Total Tasks</p>
-            <p className="text-3xl font-bold text-gray-900 mt-2">{total}</p>
-          </div>
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <p className="text-sm text-gray-500">Due Today</p>
-            <p className="text-3xl font-bold text-amber-600 mt-2">{dueToday}</p>
-          </div>
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <p className="text-sm text-gray-500">Realtime status</p>
-            <p className="text-sm text-emerald-600 font-semibold mt-3">Live updates every 10s</p>
-          </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <DashCard title="Completion" subtitle={`Tasks in “${doneStatus}”`}>
+            <CompletionDonut percent={completionPct} doneCount={doneCount} total={total} />
+          </DashCard>
+          <DashCard title="By status" subtitle="Distribution across your columns" className="lg:col-span-2">
+            <StackedBar segments={statusSegments} total={total} />
+          </DashCard>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <DashCard title="By priority">
+            <BarList rows={priorityRows} />
+          </DashCard>
+          <DashCard title="By due date">
+            <BarList rows={dueRows} />
+          </DashCard>
         </div>
       </div>
     );
@@ -2127,13 +2252,13 @@ export default function TodoPersonalPage() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
         {notifications.length > 0 && (
-          <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-900">
+          <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/5 px-5 py-4 text-primary">
             <p className="text-sm font-semibold mb-2">Shared with you</p>
             <div className="space-y-2">
               {notifications.slice(0, 3).map((notification) => (
-                <div key={notification.id} className="text-sm text-emerald-800">
+                <div key={notification.id} className="text-sm text-primary">
                   {notification.message}
-                  <span className="ml-2 text-xs text-emerald-600">
+                  <span className="ml-2 text-xs text-primary">
                     {new Date(notification.createdAt).toLocaleString()}
                   </span>
                 </div>
@@ -2165,7 +2290,7 @@ export default function TodoPersonalPage() {
                 resetCreateDrawer();
                 setShowCreateDrawer(true);
               }}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 text-sm font-medium"
+              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 flex items-center gap-2 text-sm font-medium"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -2183,7 +2308,7 @@ export default function TodoPersonalPage() {
               onClick={() => setActiveView(view.id)}
               className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${
                 activeView === view.id
-                  ? 'bg-emerald-600 text-white'
+                  ? 'bg-primary text-white'
                   : 'text-gray-700 hover:bg-gray-100'
               }`}
             >
@@ -2239,7 +2364,7 @@ export default function TodoPersonalPage() {
                     <select
                       value={editedTask.priority}
                       onChange={(e) => handleEditPriorityChange(e.target.value as Task['priority'])}
-                      className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold"
+                      className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-semibold"
                     >
                       <option value="High">High</option>
                       <option value="Medium">Medium</option>
@@ -2258,7 +2383,7 @@ export default function TodoPersonalPage() {
                   <input
                     value={editedTask.title}
                     onChange={(e) => handleEditTitleChange(e.target.value)}
-                    className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-emerald-500"
+                    className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-primary"
                     placeholder="Task title"
                   />
                   <textarea
@@ -2266,7 +2391,7 @@ export default function TodoPersonalPage() {
                     onChange={(e) => handleEditDescriptionChange(e.target.value)}
                     placeholder="Add a detailed description..."
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                   />
                 </div>
 
@@ -2281,7 +2406,7 @@ export default function TodoPersonalPage() {
                           key={user.id}
                           type="button"
                           onClick={() => toggleTaggedUser(user.id)}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${isTagged ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-200'}`}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${isTagged ? 'border-primary/30 bg-primary/5 text-primary' : 'border-gray-200 bg-white text-gray-700 hover:border-primary/20'}`}
                         >
                           <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white`}>
                             {user.initials}
@@ -2302,13 +2427,13 @@ export default function TodoPersonalPage() {
                       type="date"
                       value={editedTask.dueDateIso ? editedTask.dueDateIso.slice(0, 10) : ''}
                       onChange={(e) => handleEditDueDateChange(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <input
                       type="time"
                       value={dueTime}
                       onChange={(e) => setDueTime(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
                 </div>
@@ -2364,10 +2489,10 @@ export default function TodoPersonalPage() {
                       value={commentInput}
                       onChange={(e) => handleNotesChange(e.target.value)}
                       placeholder="Write a comment..."
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                       onKeyDown={(e) => { if (e.key === 'Enter') void handleSendComment(); }}
                     />
-                    <button type="button" onClick={handleSendComment} className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700" aria-label="Send comment">
+                    <button type="button" onClick={handleSendComment} className="p-2 bg-primary text-white rounded-lg hover:bg-primary/90" aria-label="Send comment">
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12l16-8-4 8 4 8-16-8z" /></svg>
                     </button>
                   </div>
@@ -2378,7 +2503,7 @@ export default function TodoPersonalPage() {
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold text-gray-900">Subtasks</p>
                     {subtasks.length > 0 && (
-                      <span className="text-xs font-semibold text-emerald-600">
+                      <span className="text-xs font-semibold text-primary">
                         {Math.round((subtasks.filter((s) => s.completed).length / subtasks.length) * 100)}% complete
                       </span>
                     )}
@@ -2397,9 +2522,9 @@ export default function TodoPersonalPage() {
                       onChange={(e) => setSubtaskTitle(e.target.value)}
                       placeholder="Add a subtask"
                       onKeyDown={(e) => { if (e.key === 'Enter') handleAddSubtask(); }}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     />
-                    <button type="button" onClick={handleAddSubtask} className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Add</button>
+                    <button type="button" onClick={handleAddSubtask} className="px-3 py-2 bg-primary text-white rounded-lg hover:bg-primary/90">Add</button>
                   </div>
                   <div className="space-y-2">
                     {subtasks.map((st) => (
@@ -2408,7 +2533,7 @@ export default function TodoPersonalPage() {
                           type="checkbox"
                           checked={st.completed}
                           onChange={() => toggleLegacySubtask(st.id)}
-                          className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
                         />
                         <p className={`flex-1 text-sm ${st.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>{st.title}</p>
                         <button type="button" onClick={() => removeLegacySubtask(st.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100">
@@ -2425,7 +2550,7 @@ export default function TodoPersonalPage() {
                 <button
                   type="button"
                   onClick={handleSaveTaskChanges}
-                  className="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold"
+                  className="w-full px-4 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 font-semibold"
                 >
                   Save Changes
                 </button>
@@ -2491,7 +2616,7 @@ export default function TodoPersonalPage() {
                     <select
                       value={createTask.priority}
                       onChange={(e) => setCreateTask((current) => ({ ...current, priority: e.target.value as Task['priority'] }))}
-                      className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold"
+                      className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-semibold"
                     >
                       <option value="High">High</option>
                       <option value="Medium">Medium</option>
@@ -2513,14 +2638,14 @@ export default function TodoPersonalPage() {
                     value={createTask.title}
                     onChange={(e) => setCreateTask((current) => ({ ...current, title: e.target.value }))}
                     placeholder="Task title"
-                    className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-emerald-500"
+                    className="w-full text-3xl font-bold text-gray-900 mb-3 border-b border-gray-200 focus:outline-none focus:border-primary"
                   />
                   <textarea
                     value={createDescription}
                     onChange={(e) => setCreateDescription(e.target.value)}
                     placeholder="Add a detailed description..."
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                   />
                   {createError && (
                     <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -2546,8 +2671,8 @@ export default function TodoPersonalPage() {
                           onClick={() => toggleCreateTaggedUser(user.id)}
                           className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                             isTagged
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                              : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-200'
+                              ? 'border-primary/30 bg-primary/5 text-primary'
+                              : 'border-gray-200 bg-white text-gray-700 hover:border-primary/20'
                           }`}
                         >
                           <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
@@ -2577,13 +2702,13 @@ export default function TodoPersonalPage() {
                       type="date"
                       value={createTask.dueDate ?? ''}
                       onChange={(e) => setCreateTask((current) => ({ ...current, dueDate: e.target.value || null }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <input
                       type="time"
                       value={createDueTime}
                       onChange={(e) => setCreateDueTime(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
                 </div>
@@ -2599,7 +2724,7 @@ export default function TodoPersonalPage() {
                     value={createTask.list}
                     onChange={(e) => setCreateTask((current) => ({ ...current, list: e.target.value }))}
                     placeholder="Task type"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
@@ -2646,12 +2771,12 @@ export default function TodoPersonalPage() {
                       value={createSubtaskTitle}
                       onChange={(e) => setCreateSubtaskTitle(e.target.value)}
                       placeholder="New subtask"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <button
                       type="button"
                       onClick={addCreateSubtask}
-                      className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                      className="px-3 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
                     >
                       Add
                     </button>
@@ -2663,7 +2788,7 @@ export default function TodoPersonalPage() {
                           type="checkbox"
                           checked={subtask.completed}
                           onChange={() => toggleCreateSubtask(subtask.id)}
-                          className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                          className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         <p className="flex-1 text-sm text-gray-900">{subtask.title}</p>
                         <button
@@ -2688,7 +2813,7 @@ export default function TodoPersonalPage() {
                     onChange={(e) => handleCreateNotesChange(e.target.value)}
                     placeholder="Add notes..."
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                   />
                   {showCreateMentions && (
                     <div className="mt-2 border border-gray-200 rounded-lg bg-white shadow-sm max-h-40 overflow-y-auto">
@@ -2722,7 +2847,7 @@ export default function TodoPersonalPage() {
               <div className="sticky bottom-0 bg-white border-t border-gray-200 p-6 space-y-3">
                 <button
                   onClick={handleCreateDrawerSave}
-                  className="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold transition-colors"
+                  className="w-full px-4 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 font-semibold transition-colors"
                 >
                   Save Task
                 </button>

@@ -75,7 +75,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${
-        active ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:bg-gray-100'
+        active ? 'bg-primary text-white shadow' : 'text-gray-400 hover:bg-gray-100'
       }`}
     >
       {children}
@@ -136,14 +136,14 @@ function DefaultsTab({ initial }: { initial: OrganizationSummary }) {
           <input
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
           />
         </Field>
         <Field label="Default currency">
           <select
             value={defaultCurrency}
             onChange={(e) => setDefaultCurrency(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
           >
             {COMMON_CURRENCIES.map((c) => (
               <option key={c} value={c}>
@@ -159,46 +159,46 @@ function DefaultsTab({ initial }: { initial: OrganizationSummary }) {
             step="0.01"
             value={defaultTaxRatePct}
             onChange={(e) => setDefaultTaxRatePct(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
           />
         </Field>
         <Field label="Tax label">
           <input
             value={taxLabel}
             onChange={(e) => setTaxLabel(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
           />
         </Field>
         <Field label="Contact email">
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
           />
         </Field>
         <Field label="Contact phone">
           <input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
           />
         </Field>
         <Field label="Website">
           <input
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
-            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+            className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
           />
         </Field>
       </div>
       {error && <p className="text-sm font-bold text-rose-600">{error}</p>}
-      {message && <p className="text-sm font-bold text-emerald-600">{message}</p>}
+      {message && <p className="text-sm font-bold text-primary">{message}</p>}
       <div className="flex justify-end">
         <button
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
+          className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary/90 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save defaults'}
         </button>
@@ -246,7 +246,7 @@ function BrandProfilesTab({ initial }: { initial: BrandProfileSummary[] }) {
         <button
           type="button"
           onClick={() => setShowNew(true)}
-          className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700"
+          className="px-4 py-2 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary/90"
         >
           New profile
         </button>
@@ -354,7 +354,7 @@ function BrandProfileCard({
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-black text-gray-900 truncate">{profile.name}</p>
             {profile.isDefault && (
-              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-700">
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-primary/5 text-primary">
                 Default
               </span>
             )}
@@ -382,7 +382,7 @@ function BrandProfileCard({
           <button
             type="button"
             onClick={handleSetDefault}
-            className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100"
+            className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest bg-primary/5 text-primary rounded-lg hover:bg-primary/10"
           >
             Set default
           </button>
@@ -429,7 +429,7 @@ function BrandProfileForm({
     email: initial?.email ?? '',
     phone: initial?.phone ?? '',
     website: initial?.website ?? '',
-    primaryColor: initial?.primaryColor ?? '#059669',
+    primaryColor: initial?.primaryColor ?? '#03458f',
     isDefault: initial?.isDefault ?? false,
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -537,77 +537,77 @@ function BrandProfileForm({
               <input
                 value={form.name}
                 onChange={(e) => update({ name: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Company name (printed)">
               <input
                 value={form.companyName}
                 onChange={(e) => update({ companyName: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Address line 1">
               <input
                 value={form.addressLine1}
                 onChange={(e) => update({ addressLine1: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Address line 2">
               <input
                 value={form.addressLine2}
                 onChange={(e) => update({ addressLine2: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="City">
               <input
                 value={form.city}
                 onChange={(e) => update({ city: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Region">
               <input
                 value={form.region}
                 onChange={(e) => update({ region: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Postal code">
               <input
                 value={form.postalCode}
                 onChange={(e) => update({ postalCode: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Country">
               <input
                 value={form.country}
                 onChange={(e) => update({ country: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Contact email">
               <input
                 value={form.email}
                 onChange={(e) => update({ email: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Contact phone">
               <input
                 value={form.phone}
                 onChange={(e) => update({ phone: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Website">
               <input
                 value={form.website}
                 onChange={(e) => update({ website: e.target.value })}
-                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
             <Field label="Primary color">
@@ -621,7 +621,7 @@ function BrandProfileForm({
                 <input
                   value={form.primaryColor}
                   onChange={(e) => update({ primaryColor: e.target.value })}
-                  className="flex-1 px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold font-mono focus:ring-2 focus:ring-emerald-500"
+                  className="flex-1 px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold font-mono focus:ring-2 focus:ring-primary"
                 />
               </div>
             </Field>
@@ -670,7 +670,7 @@ function BrandProfileForm({
             type="button"
             onClick={handleSave}
             disabled={saving || !form.name.trim()}
-            className="px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
+            className="px-6 py-2.5 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary/90 disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

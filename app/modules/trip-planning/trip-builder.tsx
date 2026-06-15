@@ -116,7 +116,7 @@ export default function TripBuilder({
         <div className="bg-white w-full max-w-2xl h-full sm:h-auto sm:max-h-[92vh] overflow-y-auto rounded-none sm:rounded-[2rem] shadow-2xl pointer-events-auto">
           <div className="p-6 sm:p-8 border-b border-gray-100 flex items-start justify-between gap-4 sticky top-0 bg-white z-10">
             <div>
-              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em]">
+              <p className="text-[10px] font-black text-primary uppercase tracking-[0.3em]">
                 New Trip
               </p>
               <h2 className="mt-1 text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
@@ -149,7 +149,7 @@ export default function TripBuilder({
                 <select
                   value={customerId}
                   onChange={(e) => setCustomerId(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
                   <option value="">Select a customer…</option>
                   {customers.map((c) => (
@@ -164,7 +164,7 @@ export default function TripBuilder({
                 <select
                   value={ownerId}
                   onChange={(e) => setOwnerId(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
                   <option value={String(currentUser.id)}>
                     {currentUser.name} (you)
@@ -182,7 +182,7 @@ export default function TripBuilder({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Short, descriptive title"
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>
               <Field label="Description" wide>
@@ -190,7 +190,7 @@ export default function TripBuilder({
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={2}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-primary"
                 />
               </Field>
               <Field label="Start date">
@@ -198,7 +198,7 @@ export default function TripBuilder({
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>
               <Field label="End date">
@@ -206,14 +206,14 @@ export default function TripBuilder({
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>
               <Field label="Currency">
                 <select
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
                   {COMMON_CURRENCIES.includes(currency) ? null : (
                     <option value={currency}>{currency}</option>
@@ -229,7 +229,7 @@ export default function TripBuilder({
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as TripStatus)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
                   {STATUSES.map((s) => (
                     <option key={s} value={s}>
@@ -245,7 +245,7 @@ export default function TripBuilder({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
-                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-primary"
               />
             </Field>
 
@@ -269,7 +269,7 @@ export default function TripBuilder({
               type="button"
               onClick={handleSave}
               disabled={pending}
-              className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
+              className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary/90 disabled:opacity-50"
             >
               {pending ? 'Saving…' : 'Create & open itinerary'}
             </button>

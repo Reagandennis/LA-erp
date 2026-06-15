@@ -33,6 +33,9 @@ model User {
   quoteNotifications QuoteNotification[]
   createdProducts    Product[]       @relation("ProductCreatedBy")
   createdQuoteTemplates QuoteTemplate[] @relation("QuoteTemplateCreatedBy")
+  createdBrandProfiles BrandProfile[] @relation("BrandProfileCreatedBy")
+  createdInvoices    Invoice[]       @relation("InvoiceCreatedBy")
+  recordedInvoicePayments InvoicePayment[] @relation("InvoicePaymentCreatedBy")
   organizationUpdates OrganizationSettings[] @relation("OrganizationUpdatedBy")
   createdTrips       Trip[]          @relation("TripCreatedBy")
   ownedTrips         Trip[]          @relation("TripOwner")
@@ -52,6 +55,8 @@ model User {
   calendarEventNotifications CalendarEventNotification[]
   scheduleShifts        ScheduleShift[] @relation("ScheduleEmployee")
   createdScheduleShifts ScheduleShift[] @relation("ScheduleCreatedBy")
+  zelloActivities       ZelloActivity[] @relation("ZelloActivityRecordedBy")
+  whatsAppMessages      WhatsAppMessage[] @relation("WhatsAppMessageRecordedBy")
 }
 
 model PersonalTodo {
@@ -256,6 +261,7 @@ model Customer {
   updatedAt      DateTime @updatedAt
   createdBy      User     @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   quotes         Quote[]
+  invoices       Invoice[]
   trips          Trip[]
 
   @@index([createdById, createdAt])
@@ -269,6 +275,7 @@ model Quote {
   customerId     Int
   createdById    Int
   approverId     Int?
+  brandProfileId Int?
   subject        String
   status         String    @default("Draft")
   issueDate      DateTime
@@ -292,15 +299,18 @@ model Quote {
   customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
   createdBy      User      @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   approver       User?     @relation("QuoteApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
   items          QuoteItem[]
   notifications  QuoteNotification[]
   trip           Trip?     @relation("QuoteSourceTrip")
+  invoices       Invoice[] @relation("QuoteInvoices")
 
   @@index([createdById, status])
   @@index([approverId, status])
   @@index([customerId])
   @@index([status, expiryDate])
   @@index([trackingCode])
+  @@index([brandProfileId])
 }
 
 model QuoteItem {
@@ -353,6 +363,7 @@ model Product {
   updatedAt        DateTime @updatedAt
   createdBy        User     @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   quoteItems       QuoteItem[]
+  invoiceItems     InvoiceItem[]
 
   @@index([archived, name])
   @@index([createdById])
@@ -400,6 +411,115 @@ model OrganizationSettings {
 }
 
 model QuoteSequence {
+  year       Int @id
+  lastNumber Int @default(0)
+}
+
+model BrandProfile {
+  id           Int      @id @default(autoincrement())
+  name         String
+  companyName  String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  region       String?
+  postalCode   String?
+  country      String?
+  email        String?
+  phone        String?
+  website      String?
+  logo         Bytes?
+  logoMimeType String?
+  primaryColor String   @default("#03458f")
+  isDefault    Boolean  @default(false)
+  archived     Boolean  @default(false)
+  createdById  Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    User     @relation("BrandProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  quotes       Quote[]
+  invoices     Invoice[]
+
+  @@index([archived, name])
+  @@index([isDefault])
+}
+
+model Invoice {
+  id             Int       @id @default(autoincrement())
+  number         String    @unique
+  customerId     Int
+  createdById    Int
+  brandProfileId Int?
+  sourceQuoteId  Int?
+  status         String    @default("Draft")
+  issueDate      DateTime
+  dueDate        DateTime
+  currency       String    @default("USD")
+  taxRate        Decimal   @default(0) @db.Decimal(6, 4)
+  discountType   String    @default("none")
+  discountValue  Decimal   @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal   @default(0) @db.Decimal(14, 2)
+  subtotal       Decimal   @default(0) @db.Decimal(14, 2)
+  tax            Decimal   @default(0) @db.Decimal(14, 2)
+  total          Decimal   @default(0) @db.Decimal(14, 2)
+  amountPaid     Decimal   @default(0) @db.Decimal(14, 2)
+  notes          String?
+  terms          String?
+  sentAt         DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy      User      @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
+  sourceQuote    Quote?    @relation("QuoteInvoices", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
+  items          InvoiceItem[]
+  payments       InvoicePayment[]
+
+  @@index([customerId])
+  @@index([status, dueDate])
+  @@index([createdById])
+  @@index([brandProfileId])
+  @@index([number])
+}
+
+model InvoiceItem {
+  id             Int     @id @default(autoincrement())
+  invoiceId      Int
+  position       Int
+  description    String
+  quantity       Decimal @db.Decimal(12, 2)
+  unitPrice      Decimal @db.Decimal(14, 2)
+  taxable        Boolean @default(true)
+  discountType   String  @default("none")
+  discountValue  Decimal @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal @default(0) @db.Decimal(14, 2)
+  total          Decimal @db.Decimal(14, 2)
+  productId      Int?
+  invoice        Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId, position])
+  @@index([productId])
+}
+
+model InvoicePayment {
+  id          Int      @id @default(autoincrement())
+  invoiceId   Int
+  amount      Decimal  @db.Decimal(14, 2)
+  method      String   @default("Bank transfer")
+  reference   String?
+  note        String?
+  paidAt      DateTime
+  createdById Int
+  createdAt   DateTime @default(now())
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation("InvoicePaymentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId, paidAt])
+}
+
+model InvoiceSequence {
   year       Int @id
   lastNumber Int @default(0)
 }
@@ -719,4 +839,64 @@ model ScheduleShift {
 
   @@unique([employeeId, date])
   @@index([date])
+}
+
+// Radio (Zello) channel traffic — persisted so switching channels keeps history.
+model ZelloActivity {
+  id           Int      @id @default(autoincrement())
+  network      String   @default("")
+  channel      String
+  kind         String // 'voice' | 'text'
+  fromName     String // Zello username / display name of the speaker or sender
+  direction    String   @default("in") // 'in' (received) | 'out' (this console)
+  text         String? // text message body
+  transcript   String? // verbatim voice transcript
+  translation  String? // English translation
+  language     String?
+  durationMs   Int?
+  hasAudio     Boolean  @default(false)
+  audio        Bytes? // 16 kHz mono WAV of the transmission, for replay (security archive)
+  at           DateTime // when it occurred on the channel
+  createdAt    DateTime @default(now())
+  recordedById Int?
+  recordedBy   User?    @relation("ZelloActivityRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([network, channel, at])
+}
+
+// Latest known position per Zello device — drives the live tracking map.
+model ZelloDeviceLocation {
+  id        Int      @id @default(autoincrement())
+  network   String   @default("")
+  channel   String
+  device    String // Zello username
+  latitude  Float
+  longitude Float
+  accuracy  Float?
+  address   String?
+  at        DateTime // when the device reported this position
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, channel, device])
+  @@index([network, channel])
+}
+
+// WhatsApp Cloud API message log — one row per inbound/outbound message.
+model WhatsAppMessage {
+  id           Int      @id @default(autoincrement())
+  waMessageId  String?  @unique // Graph API "wamid." — unique per message, dedupes webhook retries
+  direction    String // 'in' (received) | 'out' (sent from this console)
+  contact      String // the other party's phone number (E.164, no +)
+  contactName  String? // WhatsApp profile name, when the webhook provides it
+  type         String   @default("text") // text | template | image | ...
+  body         String? // message text (or template name for templates)
+  status       String   @default("sent") // queued | sent | delivered | read | failed | received
+  errorText    String? // populated when status = failed
+  at           DateTime // when the message was sent/received
+  createdAt    DateTime @default(now())
+  recordedById Int?
+  recordedBy   User?    @relation("WhatsAppMessageRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([contact, at])
+  @@index([at])
 }

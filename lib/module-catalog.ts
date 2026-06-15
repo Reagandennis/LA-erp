@@ -240,8 +240,8 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
   },
   {
     slug: 'invoices-review',
-    name: 'Invoices Submitted / Review',
-    description: 'Track invoices submitted and those awaiting finance review.',
+    name: 'Invoices',
+    description: 'Create and send client invoices, record payments, and track what is overdue.',
     category: 'Finance',
     sortOrder: 34,
   },

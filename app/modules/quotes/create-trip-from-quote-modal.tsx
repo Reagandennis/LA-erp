@@ -105,7 +105,7 @@ export default function CreateTripFromQuoteModal({
         <div className="bg-white w-full max-w-xl h-full sm:h-auto sm:max-h-[92vh] overflow-y-auto rounded-none sm:rounded-[2rem] shadow-2xl pointer-events-auto">
           <div className="p-6 sm:p-8 border-b border-gray-100 flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em]">
+              <p className="text-[10px] font-black text-primary uppercase tracking-[0.3em]">
                 Create trip from quote
               </p>
               <h2 className="mt-1 text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
@@ -142,7 +142,7 @@ export default function CreateTripFromQuoteModal({
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
             </Field>
 
@@ -150,7 +150,7 @@ export default function CreateTripFromQuoteModal({
               <select
                 value={ownerId}
                 onChange={(e) => setOwnerId(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               >
                 <option value={String(currentUser.id)}>{currentUser.name} (you)</option>
                 {owners.map((o) => (
@@ -167,7 +167,7 @@ export default function CreateTripFromQuoteModal({
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>
               <Field label="End date">
@@ -175,7 +175,7 @@ export default function CreateTripFromQuoteModal({
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>
             </div>
@@ -185,7 +185,7 @@ export default function CreateTripFromQuoteModal({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
-                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-primary"
               />
             </Field>
 
@@ -231,7 +231,7 @@ export default function CreateTripFromQuoteModal({
               type="button"
               onClick={handleCreate}
               disabled={pending}
-              className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
+              className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary/90 disabled:opacity-50"
             >
               {pending ? 'Creating…' : 'Create trip'}
             </button>

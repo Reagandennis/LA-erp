@@ -53,9 +53,9 @@ export default function WorldClockTicker() {
 
   const chips = ZONES.map((z) => (
     <span key={z.city} className="flex items-center gap-1.5 shrink-0 px-3">
-      <span className="font-semibold tracking-wide opacity-80">{z.city}</span>
-      <span className="tabular-nums opacity-95">{fmt(now, z.tz)}</span>
-      <span className="text-[10px] opacity-50">{fmtDay(now, z.tz)}</span>
+      <span className="font-bold tracking-wide opacity-90">{z.city}</span>
+      <span className="tabular-nums font-bold opacity-100">{fmt(now, z.tz)}</span>
+      <span className="text-[10px] font-semibold opacity-60">{fmtDay(now, z.tz)}</span>
       <span className="mx-2 opacity-30 select-none">·</span>
     </span>
   ));

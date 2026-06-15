@@ -7,6 +7,7 @@ import QuoteBuilder from './quote-builder';
 import QuoteDetailDrawer from './quote-detail-drawer';
 import type {
   ApproverOption,
+  BrandProfileOption,
   CustomerOption,
   OrganizationBranding,
   ProductOption,
@@ -24,6 +25,7 @@ interface QuotesClientProps {
   initialApprovers: ApproverOption[];
   initialProducts: ProductOption[];
   initialTemplates: TemplateOption[];
+  initialBrandProfiles: BrandProfileOption[];
   organization: OrganizationBranding;
 }
 
@@ -36,13 +38,14 @@ const STATUS_FILTERS: StatusFilter[] = [
   'Sent',
 ];
 
+// Soft, semantic status badges — quiet by default, meaning carried by hue.
 const STATUS_STYLES: Record<string, string> = {
-  Draft: 'bg-gray-50 text-gray-500 border-gray-100',
-  Submitted: 'bg-blue-50 text-blue-600 border-blue-100',
-  Approved: 'bg-emerald-50 text-emerald-600 border-emerald-100',
-  Declined: 'bg-rose-50 text-rose-600 border-rose-100',
-  Sent: 'bg-violet-50 text-violet-600 border-violet-100',
-  Expired: 'bg-amber-50 text-amber-600 border-amber-100',
+  Draft: 'bg-gray-100 text-gray-600',
+  Submitted: 'bg-blue-50 text-blue-700',
+  Approved: 'bg-emerald-50 text-emerald-700',
+  Declined: 'bg-rose-50 text-rose-700',
+  Sent: 'bg-violet-50 text-violet-700',
+  Expired: 'bg-amber-50 text-amber-700',
 };
 
 function formatDate(value: string) {
@@ -69,6 +72,7 @@ export default function QuotesClient({
   initialApprovers,
   initialProducts,
   initialTemplates,
+  initialBrandProfiles,
   organization,
 }: QuotesClientProps) {
   const [quotes, setQuotes] = useState<QuoteSummary[]>(initialQuotes);
@@ -76,6 +80,7 @@ export default function QuotesClient({
   const [approvers] = useState<ApproverOption[]>(initialApprovers);
   const [products] = useState<ProductOption[]>(initialProducts);
   const [templates, setTemplates] = useState<TemplateOption[]>(initialTemplates);
+  const [brandProfiles] = useState<BrandProfileOption[]>(initialBrandProfiles);
   const [selectedQuoteId, setSelectedQuoteId] = useState<number | null>(null);
   const [builderState, setBuilderState] = useState<
     | { open: false }
@@ -141,6 +146,7 @@ export default function QuotesClient({
           customer: quote.customer,
           createdBy: quote.createdBy,
           approver: quote.approver,
+          brandProfile: quote.brandProfile,
           itemCount: 'items' in quote ? quote.items.length : quote.itemCount,
           trip: quote.trip,
         },
@@ -158,74 +164,74 @@ export default function QuotesClient({
     setBuilderState({ open: true, mode: 'edit', quote });
   };
 
+  const hasQuotes = quotes.length > 0;
+
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-10">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6 mb-6 md:mb-10">
+    <div className="min-h-screen bg-gray-50/50 p-4 sm:p-6 lg:p-10">
+      <div className="mx-auto max-w-7xl space-y-6 lg:space-y-8">
+        {/* Header */}
+        <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">
               Quotations
             </h1>
-            <p className="text-gray-500 mt-1 font-bold text-[10px] sm:text-xs uppercase tracking-widest">
-              Build proposals, route through approval, dispatch to clients
+            <p className="mt-1 text-sm text-gray-500">
+              Build proposals, route them for approval, and send them to clients.
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-            <div className="flex gap-2 text-[10px] font-black uppercase tracking-widest">
+          <div className="flex flex-wrap items-center gap-2">
+            <nav className="flex items-center gap-0.5 rounded-xl border border-gray-100 bg-white p-1">
               <Link
                 href="/modules/quotes/catalog"
-                className="px-4 py-2 border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-100 whitespace-nowrap"
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary"
               >
                 Catalog
               </Link>
               <Link
                 href="/modules/quotes/templates"
-                className="px-4 py-2 border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-100 whitespace-nowrap"
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary"
               >
                 Templates
               </Link>
               {isAdmin && (
                 <Link
-                  href="/admin/organization"
-                  className="px-4 py-2 border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-100 whitespace-nowrap"
+                  href="/modules/quotes/settings"
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary"
                 >
-                  Branding
+                  Companies
                 </Link>
               )}
-            </div>
+            </nav>
             <button
               type="button"
               onClick={() => setBuilderState({ open: true, mode: 'create' })}
-              className="w-full sm:w-auto px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-3"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={3}
-                  d="M12 4v16m8-8H4"
-                />
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
               </svg>
-              New Quotation
+              New quotation
             </button>
           </div>
-        </div>
+        </header>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-10">
+        {/* Summary */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
           <SummaryCard
-            label="Total Value"
+            label="Total value"
             value={formatMoney(totals.totalValue, totals.currency)}
-            accent="text-gray-900"
+            accent="text-primary"
           />
-          <SummaryCard label="Pending Approval" value={`${totals.pending}`} accent="text-blue-600" />
-          <SummaryCard label="Approved or Sent" value={`${totals.approved}`} accent="text-emerald-600" />
-          <SummaryCard label="Drafts and Declined" value={`${totals.drafts}`} accent="text-gray-400" />
+          <SummaryCard label="Pending approval" value={`${totals.pending}`} />
+          <SummaryCard label="Approved & sent" value={`${totals.approved}`} />
+          <SummaryCard label="Drafts & declined" value={`${totals.drafts}`} />
         </div>
 
-        <div className="bg-white p-3 sm:p-4 rounded-3xl border border-gray-100 shadow-sm mb-6 flex flex-col lg:flex-row lg:items-center gap-3 md:gap-4">
+        {/* Toolbar */}
+        <div className="flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
             <svg
-              className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -234,27 +240,27 @@ export default function QuotesClient({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"
               />
             </svg>
             <input
               type="text"
-              placeholder="Search by reference, subject, customer..."
+              placeholder="Search by reference, subject, or customer…"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full pl-12 pr-6 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+              className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {STATUS_FILTERS.map((status) => (
               <button
                 type="button"
                 key={status}
                 onClick={() => setActiveFilter(status)}
-                className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${
+                className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
                   activeFilter === status
-                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100'
-                    : 'text-gray-400 hover:bg-gray-100'
+                    ? 'bg-primary text-white'
+                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
                 }`}
               >
                 {status}
@@ -264,7 +270,7 @@ export default function QuotesClient({
         </div>
 
         {/* Mobile card list */}
-        <div className="md:hidden space-y-3">
+        <div className="space-y-3 md:hidden">
           {filteredQuotes.map((quote) => {
             const needsMyApproval =
               quote.status === 'Submitted' &&
@@ -274,71 +280,63 @@ export default function QuotesClient({
                 key={quote.id}
                 type="button"
                 onClick={() => setSelectedQuoteId(quote.id)}
-                className="w-full text-left bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:border-emerald-200"
+                className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left transition-colors hover:border-primary/30"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-gray-900">
                       {quote.reference}
                     </p>
-                    <p className="text-sm font-black text-gray-900 mt-1">{quote.subject}</p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {quote.customer.name}
-                      {quote.customer.company ? ` • ${quote.customer.company}` : ''}
-                    </p>
+                    <p className="truncate text-sm text-gray-500">{quote.subject}</p>
                   </div>
-                  <span
-                    className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border whitespace-nowrap ${
-                      STATUS_STYLES[quote.status] ?? STATUS_STYLES.Draft
-                    }`}
-                  >
-                    {quote.status}
-                  </span>
+                  <StatusBadge status={quote.status} />
                 </div>
-                <div className="flex items-end justify-between mt-3">
+                <p className="mt-2 truncate text-xs text-gray-400">
+                  {quote.customer.name}
+                  {quote.customer.company ? ` · ${quote.customer.company}` : ''}
+                </p>
+                <div className="mt-3 flex items-end justify-between">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                      Expires {formatDate(quote.expiryDate)}
-                    </p>
-                    {needsMyApproval && (
-                      <p className="text-[10px] mt-1 font-black text-blue-600 uppercase tracking-widest">
-                        Awaiting your decision
-                      </p>
-                    )}
+                    <p className="text-xs text-gray-400">Expires {formatDate(quote.expiryDate)}</p>
+                    {needsMyApproval && <ApprovalPill className="mt-1.5" />}
                   </div>
-                  <p className="text-base font-black text-gray-900">
+                  <p className="text-base font-bold text-gray-900">
                     {formatMoney(quote.total, quote.currency)}
                   </p>
                 </div>
               </button>
             );
           })}
+
+          {filteredQuotes.length === 0 && (
+            <EmptyState onCreate={() => setBuilderState({ open: true, mode: 'create' })} filtered={hasQuotes} />
+          )}
         </div>
 
         {/* Desktop table */}
-        <div className="hidden md:block bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full text-left border-collapse">
+        <div className="hidden overflow-hidden rounded-2xl border border-gray-100 bg-white md:block">
+          <table className="w-full border-collapse text-left">
             <thead>
-              <tr className="bg-gray-50/50 border-b border-gray-100">
-                <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
-                  Reference & Subject
+              <tr className="border-b border-gray-100">
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Reference
                 </th>
-                <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">
                   Customer
                 </th>
-                <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] text-right">
+                <th className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">
                   Value
                 </th>
-                <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">
                   Status
                 </th>
-                <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">
                   Approver
                 </th>
-                <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
-                  Expiry
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Expires
                 </th>
-                <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]" />
+                <th className="w-10 px-6 py-3.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -350,88 +348,64 @@ export default function QuotesClient({
                   <tr
                     key={quote.id}
                     onClick={() => setSelectedQuoteId(quote.id)}
-                    className="hover:bg-gray-50/80 transition-colors cursor-pointer group"
+                    className="group cursor-pointer transition-colors hover:bg-gray-50/70"
                   >
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-gray-900 flex items-center justify-center text-white text-[10px] font-black shrink-0">
-                          QT
-                        </div>
-                        <div>
-                          <p className="text-sm font-black text-gray-900 group-hover:text-emerald-700 transition-colors">
-                            {quote.reference}
-                          </p>
-                          <p className="text-[10px] text-gray-400 font-bold uppercase truncate max-w-[200px] mt-0.5">
-                            {quote.subject}
-                          </p>
-                          {quote.trackingCode && (
-                            <p className="text-[9px] text-emerald-700 font-black uppercase tracking-widest mt-0.5">
-                              {quote.trackingCode}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <p className="text-xs font-black text-gray-700">{quote.customer.name}</p>
-                      {quote.customer.company && (
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">
-                          {quote.customer.company}
-                        </p>
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-semibold text-gray-900 transition-colors group-hover:text-primary">
+                        {quote.reference}
+                      </p>
+                      <p className="mt-0.5 max-w-[240px] truncate text-sm text-gray-500">
+                        {quote.subject}
+                      </p>
+                      {quote.trackingCode && (
+                        <p className="mt-0.5 text-xs text-gray-400">{quote.trackingCode}</p>
                       )}
                     </td>
-                    <td className="px-8 py-6 text-right">
-                      <p className="text-sm font-black text-gray-900">
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-gray-700">{quote.customer.name}</p>
+                      {quote.customer.company && (
+                        <p className="mt-0.5 text-xs text-gray-400">{quote.customer.company}</p>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <p className="text-sm font-semibold text-gray-900">
                         {formatMoney(quote.total, quote.currency)}
                       </p>
-                      <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">
-                        {quote.itemCount} line items
+                      <p className="text-xs text-gray-400">
+                        {quote.itemCount} item{quote.itemCount === 1 ? '' : 's'}
                       </p>
                     </td>
-                    <td className="px-8 py-6">
-                      <span
-                        className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${
-                          STATUS_STYLES[quote.status] ?? STATUS_STYLES.Draft
-                        }`}
-                      >
-                        {quote.status}
-                      </span>
-                      {needsMyApproval && (
-                        <p className="text-[9px] mt-1 font-black text-blue-600 uppercase tracking-widest">
-                          Awaiting your decision
-                        </p>
-                      )}
+                    <td className="px-6 py-4">
+                      <StatusBadge status={quote.status} />
+                      {needsMyApproval && <ApprovalPill className="mt-1.5" />}
                       {quote.trip && (
-                        <p className="text-[9px] mt-1 font-black text-emerald-700 uppercase tracking-widest">
-                          → {quote.trip.reference}
-                        </p>
+                        <p className="mt-1 text-xs text-gray-400">→ {quote.trip.reference}</p>
                       )}
                     </td>
-                    <td className="px-8 py-6">
-                      <p className="text-[11px] font-bold text-gray-600">
-                        {quote.approver?.name ?? <span className="text-gray-300">— unassigned —</span>}
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-gray-600">
+                        {quote.approver?.name ?? (
+                          <span className="text-gray-300">Unassigned</span>
+                        )}
                       </p>
                     </td>
-                    <td className="px-8 py-6">
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                        {formatDate(quote.expiryDate)}
-                      </p>
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-gray-500">{formatDate(quote.expiryDate)}</p>
                     </td>
-                    <td className="px-8 py-6 text-right">
-                      <button
-                        type="button"
-                        className="p-2 text-gray-300 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
-                        aria-label="Open quote"
+                    <td className="px-6 py-4 text-right">
+                      <svg
+                        className="ml-auto h-4 w-4 text-gray-300 transition-colors group-hover:text-primary"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={3}
-                            d="M9 5l7 7-7 7"
-                          />
-                        </svg>
-                      </button>
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
                     </td>
                   </tr>
                 );
@@ -440,35 +414,9 @@ export default function QuotesClient({
           </table>
 
           {filteredQuotes.length === 0 && (
-            <div className="p-24 text-center">
-              <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-6 text-gray-200">
-                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-              </div>
-              <h3 className="text-2xl font-black text-gray-900 tracking-tight">
-                No quotations to show
-              </h3>
-              <p className="text-gray-500 mt-2 font-bold text-sm">
-                Build your first proposal with the New Quotation button.
-              </p>
-            </div>
+            <EmptyState onCreate={() => setBuilderState({ open: true, mode: 'create' })} filtered={hasQuotes} />
           )}
         </div>
-
-        {filteredQuotes.length === 0 && (
-          <div className="md:hidden bg-white rounded-2xl p-10 text-center border border-gray-100">
-            <h3 className="text-lg font-black text-gray-900">No quotations to show</h3>
-            <p className="text-gray-500 mt-2 text-sm">
-              Tap New Quotation to build your first proposal.
-            </p>
-          </div>
-        )}
       </div>
 
       {builderState.open && (
@@ -479,6 +427,7 @@ export default function QuotesClient({
           approvers={approvers}
           products={products}
           templates={templates}
+          brandProfiles={brandProfiles}
           organization={organization}
           onClose={() => setBuilderState({ open: false })}
           onCustomerCreated={(customer) =>
@@ -523,16 +472,66 @@ export default function QuotesClient({
           onEdit={openBuilderForEdit}
         />
       )}
+    </div>
+  );
+}
 
-      <style jsx global>{`
-        .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-        }
-        .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-      `}</style>
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+        STATUS_STYLES[status] ?? STATUS_STYLES.Draft
+      }`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function ApprovalPill({ className = '' }: { className?: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full bg-secondary/20 px-2 py-0.5 text-[11px] font-semibold text-primary ${className}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
+      Needs your approval
+    </span>
+  );
+}
+
+function EmptyState({ onCreate, filtered }: { onCreate: () => void; filtered: boolean }) {
+  return (
+    <div className="px-6 py-16 text-center sm:py-20">
+      <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-50 text-gray-300">
+        <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+          />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900">
+        {filtered ? 'No matching quotations' : 'No quotations yet'}
+      </h3>
+      <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">
+        {filtered
+          ? 'Try a different search or clear the active filter.'
+          : 'Create your first proposal to get started.'}
+      </p>
+      {!filtered && (
+        <button
+          type="button"
+          onClick={onCreate}
+          className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+          </svg>
+          New quotation
+        </button>
+      )}
     </div>
   );
 }
@@ -540,18 +539,16 @@ export default function QuotesClient({
 function SummaryCard({
   label,
   value,
-  accent,
+  accent = 'text-gray-900',
 }: {
   label: string;
   value: string;
-  accent: string;
+  accent?: string;
 }) {
   return (
-    <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-[2.5rem] border border-gray-100 shadow-sm">
-      <p className="text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
-        {label}
-      </p>
-      <p className={`text-lg md:text-2xl font-black ${accent}`}>{value}</p>
+    <div className="rounded-2xl border border-gray-100 bg-white p-4 lg:p-5">
+      <p className="text-xs font-medium text-gray-500">{label}</p>
+      <p className={`mt-2 text-xl font-bold lg:text-2xl ${accent}`}>{value}</p>
     </div>
   );
 }

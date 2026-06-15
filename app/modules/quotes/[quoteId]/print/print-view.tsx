@@ -49,12 +49,6 @@ function formatDate(value: string | null) {
   });
 }
 
-function describeDiscount(type: string, value: number, currency: string) {
-  if (type === 'none' || !value) return '—';
-  if (type === 'percentage') return `${value}%`;
-  return formatMoney(value, currency);
-}
-
 export default function PrintView({ quote, taxLabel, brand, customer }: Props) {
   useEffect(() => {
     document.title = `${quote.reference} — ${quote.subject}`;
@@ -77,23 +71,22 @@ export default function PrintView({ quote, taxLabel, brand, customer }: Props) {
   const shipLine = customer.address ?? customer.billingAddress;
 
   return (
-    <div className="bg-gray-100 min-h-screen p-6 print:p-0 print:bg-white">
-      <div className="max-w-3xl mx-auto bg-white shadow-sm print:shadow-none print:max-w-none">
-        <div className="px-4 py-3 print:hidden flex items-center justify-between border-b border-gray-100">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
-            Printable view — {quote.reference}
-          </p>
+    <div className="min-h-screen bg-gray-100 p-6 print:bg-white print:p-0">
+      <div className="mx-auto max-w-3xl overflow-hidden rounded-xl bg-white shadow-sm print:max-w-none print:rounded-none print:shadow-none">
+        {/* Screen-only toolbar */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3 print:hidden">
+          <p className="text-sm font-medium text-gray-500">Proposal preview — {quote.reference}</p>
           <div className="flex gap-2">
             <a
               href={`/api/quotes/${quote.id}/pdf`}
-              className="px-4 py-2 text-[10px] font-black uppercase tracking-widest border-2 border-gray-200 rounded-xl hover:bg-gray-100"
+              className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
             >
               Download PDF
             </a>
             <button
               type="button"
               onClick={() => window.print()}
-              className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white rounded-xl hover:opacity-90"
+              className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
               style={{ backgroundColor: brand.primaryColor }}
             >
               Print
@@ -101,19 +94,19 @@ export default function PrintView({ quote, taxLabel, brand, customer }: Props) {
           </div>
         </div>
 
-        <div className="p-10 text-sm text-gray-900">
+        {/* Brand accent bar */}
+        <div className="h-1.5 w-full" style={{ backgroundColor: brand.primaryColor }} />
+
+        <div className="p-10 text-sm text-gray-800">
+          {/* Header */}
           <div className="flex items-start justify-between gap-6">
             <div className="max-w-xs">
               {brand.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={brand.logoUrl}
-                  alt=""
-                  className="max-h-16 max-w-[180px] object-contain mb-3"
-                />
+                <img src={brand.logoUrl} alt="" className="mb-3 max-h-16 max-w-[180px] object-contain" />
               ) : null}
               {brand.companyName && (
-                <p className="text-lg font-black">{brand.companyName}</p>
+                <p className="text-lg font-bold text-gray-900">{brand.companyName}</p>
               )}
               {addressLines.map((line, i) => (
                 <p key={i} className="text-xs text-gray-500">
@@ -125,91 +118,67 @@ export default function PrintView({ quote, taxLabel, brand, customer }: Props) {
               {brand.website && <p className="text-xs text-gray-500">{brand.website}</p>}
             </div>
 
-            <div className="text-right min-w-[14rem]">
+            <div className="min-w-[14rem] text-right">
               <p
-                className="text-xs uppercase tracking-widest font-black"
+                className="text-xs font-semibold uppercase tracking-wider"
                 style={{ color: brand.primaryColor }}
               >
                 Quotation
               </p>
-              <p className="text-2xl font-black">{quote.reference}</p>
-              <div className="mt-3 grid grid-cols-2 gap-x-6 text-right">
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-500">
-                    Issue date
-                  </p>
-                  <p className="font-bold">{formatDate(quote.issueDate)}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-500">
-                    Valid until
-                  </p>
-                  <p className="font-bold">{formatDate(quote.expiryDate)}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-500">
-                    Status
-                  </p>
-                  <p className="font-bold">{quote.status}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-500">
-                    Currency
-                  </p>
-                  <p className="font-bold">{quote.currency}</p>
-                </div>
+              <p className="text-2xl font-bold text-gray-900">{quote.reference}</p>
+              <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-right">
+                <Meta label="Issue date" value={formatDate(quote.issueDate)} />
+                <Meta label="Valid until" value={formatDate(quote.expiryDate)} />
+                <Meta label="Status" value={quote.status} />
+                <Meta label="Currency" value={quote.currency} />
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mt-8">
-            <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-              <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">
-                Bill to
-              </p>
+          {/* Bill to / Ship to */}
+          <div className="mt-8 grid grid-cols-2 gap-4">
+            <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-4">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Bill to</p>
               {billToLines.length === 0 ? (
-                <p>—</p>
+                <p className="text-gray-400">—</p>
               ) : (
-                billToLines.map((line, i) => <p key={i}>{line}</p>)
+                billToLines.map((line, i) => (
+                  <p key={i} className={i === 0 ? 'font-medium text-gray-900' : 'text-gray-600'}>
+                    {line}
+                  </p>
+                ))
               )}
             </div>
-            <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-              <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">
-                Ship to
-              </p>
-              <p>{shipLine ?? '—'}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-4">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Ship to</p>
+              <p className="text-gray-600">{shipLine ?? '—'}</p>
             </div>
           </div>
 
-          <p className="mt-6 text-lg font-black">{quote.subject}</p>
+          <p className="mt-8 text-lg font-semibold text-gray-900">{quote.subject}</p>
 
-          <table className="w-full mt-4 border-t border-gray-200">
+          {/* Items */}
+          <table className="mt-4 w-full">
             <thead>
-              <tr className="bg-gray-50 text-[10px] uppercase tracking-widest text-gray-500">
-                <th className="text-left py-2 px-2">Description</th>
-                <th className="text-right py-2 px-2">Qty</th>
-                <th className="text-right py-2 px-2">Unit</th>
-                <th className="text-right py-2 px-2">Discount</th>
-                <th className="text-right py-2 px-2">Total</th>
+              <tr className="border-b-2 text-xs uppercase tracking-wider text-gray-500" style={{ borderColor: brand.primaryColor }}>
+                <th className="px-2 py-2.5 text-left font-semibold">Description</th>
+                <th className="px-2 py-2.5 text-right font-semibold">Days</th>
+                <th className="px-2 py-2.5 text-right font-semibold">Unit</th>
+                <th className="px-2 py-2.5 text-right font-semibold">Total</th>
               </tr>
             </thead>
             <tbody>
               {quote.items.map((item) => (
                 <tr key={item.id} className="border-b border-gray-100">
-                  <td className="py-2 px-2">
-                    {item.description}
-                    {!item.taxable && (
-                      <span className="text-[10px] text-gray-400 ml-2">Not taxable</span>
-                    )}
+                  <td className="px-2 py-2.5">
+                    <span className="font-medium text-gray-900">{item.description}</span>
+                    {!item.taxable && <span className="ml-2 text-xs text-gray-400">Not taxable</span>}
                   </td>
-                  <td className="py-2 px-2 text-right">{item.quantity}</td>
-                  <td className="py-2 px-2 text-right">
+                  <td className="px-2 py-2.5 text-right tabular-nums">{item.quantity}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">
                     {formatMoney(item.unitPrice, quote.currency)}
                   </td>
-                  <td className="py-2 px-2 text-right">
-                    {describeDiscount(item.discountType, item.discountValue, quote.currency)}
-                  </td>
-                  <td className="py-2 px-2 text-right font-bold">
+                  <td className="px-2 py-2.5 text-right font-semibold tabular-nums text-gray-900">
                     {formatMoney(item.total, quote.currency)}
                   </td>
                 </tr>
@@ -217,75 +186,83 @@ export default function PrintView({ quote, taxLabel, brand, customer }: Props) {
             </tbody>
           </table>
 
-          <div className="flex justify-end mt-4">
-            <div className="w-64 border border-gray-200 rounded-lg p-3 text-sm">
-              <div className="flex justify-between py-1">
+          {/* Totals */}
+          <div className="mt-5 flex justify-end">
+            <div className="w-72 space-y-1.5">
+              <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Subtotal</span>
-                <span className="font-bold">
+                <span className="font-medium tabular-nums text-gray-900">
                   {formatMoney(quote.subtotal, quote.currency)}
                 </span>
               </div>
-              <div className="flex justify-between py-1">
+              <div className="flex justify-between text-sm">
                 <span className="text-gray-500">
                   {taxLabel} ({(quote.taxRate * 100).toFixed(2)}%)
                 </span>
-                <span className="font-bold">
+                <span className="font-medium tabular-nums text-gray-900">
                   {formatMoney(quote.tax, quote.currency)}
                 </span>
               </div>
               {quote.discountType !== 'none' && quote.discountAmount > 0 && (
-                <div className="flex justify-between py-1">
+                <div className="flex justify-between text-sm">
                   <span className="text-gray-500">
-                    Discount
-                    {quote.discountType === 'percentage' ? ` (${quote.discountValue}%)` : ''}
+                    Discount{quote.discountType === 'percentage' ? ` (${quote.discountValue}%)` : ''}
                   </span>
-                  <span className="font-bold">
+                  <span className="font-medium tabular-nums text-gray-900">
                     − {formatMoney(quote.discountAmount, quote.currency)}
                   </span>
                 </div>
               )}
-              <div className="border-t border-gray-200 my-1" />
-              <div className="flex justify-between py-1">
-                <span className="font-black">Total</span>
-                <span
-                  className="font-black text-lg"
-                  style={{ color: brand.primaryColor }}
-                >
+              <div className="mt-1 flex items-center justify-between border-t-2 pt-2.5" style={{ borderColor: brand.primaryColor }}>
+                <span className="text-sm font-semibold text-gray-900">Total</span>
+                <span className="text-xl font-bold tabular-nums" style={{ color: brand.primaryColor }}>
                   {formatMoney(quote.total, quote.currency)}
                 </span>
               </div>
             </div>
           </div>
 
+          {/* Notes / terms */}
           {quote.notes && (
-            <div className="mt-6 p-3 bg-amber-50 rounded-lg">
-              <p className="text-[10px] uppercase tracking-widest text-amber-700 mb-1">
-                Notes
-              </p>
-              <p className="text-amber-900 whitespace-pre-wrap">{quote.notes}</p>
+            <div className="mt-8 rounded-lg bg-amber-50 p-4">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-700">Notes</p>
+              <p className="whitespace-pre-wrap leading-relaxed text-amber-900">{quote.notes}</p>
             </div>
           )}
           {quote.terms && (
-            <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-              <p className="text-[10px] uppercase tracking-widest text-gray-700 mb-1">
+            <div className="mt-3 rounded-lg bg-gray-50 p-4">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Terms &amp; conditions
               </p>
-              <p className="text-gray-800 whitespace-pre-wrap">{quote.terms}</p>
+              <p className="whitespace-pre-wrap leading-relaxed text-gray-700">{quote.terms}</p>
             </div>
           )}
 
-          <p className="mt-10 text-center text-[10px] text-gray-400">
-            {brand.companyName ?? ''} • {quote.reference}
+          <p className="mt-10 text-center text-xs text-gray-400">
+            {brand.companyName ?? ''} · {quote.reference}
           </p>
         </div>
       </div>
 
       <style jsx global>{`
         @media print {
-          body { background: white !important; }
-          .print\\:hidden { display: none !important; }
+          body {
+            background: white !important;
+          }
+          .print\\:hidden {
+            display: none !important;
+          }
         }
       `}</style>
+    </div>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-gray-400">{label}</p>
+      <p className="font-semibold text-gray-900">{value}</p>
     </div>
   );
 }

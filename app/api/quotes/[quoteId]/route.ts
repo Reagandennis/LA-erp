@@ -72,6 +72,7 @@ export async function PATCH(
     input: {
       customerId: validation.data.customerId,
       approverId: validation.data.approverId,
+      brandProfileId: validation.data.brandProfileId,
       subject: validation.data.subject,
       issueDate: validation.data.issueDate,
       expiryDate: validation.data.expiryDate,

@@ -150,7 +150,7 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
         <button
           type="button"
           onClick={startCreate}
-          className="px-5 py-2.5 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700"
+          className="px-5 py-2.5 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary/90"
         >
           + New product
         </button>
@@ -248,14 +248,14 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
                 placeholder="Name *"
                 value={draft.name}
                 onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
               <textarea
                 placeholder="Description"
                 value={draft.description}
                 onChange={(event) => setDraft({ ...draft, description: event.target.value })}
                 rows={2}
-                className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm focus:ring-2 focus:ring-primary"
               />
               <div className="grid grid-cols-2 gap-3">
                 <input
@@ -263,12 +263,12 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
                   placeholder="SKU"
                   value={draft.sku}
                   onChange={(event) => setDraft({ ...draft, sku: event.target.value })}
-                  className="px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
                 <select
                   value={draft.currency}
                   onChange={(event) => setDraft({ ...draft, currency: event.target.value })}
-                  className="px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
                   {CURRENCIES.includes(draft.currency) ? null : (
                     <option value={draft.currency}>{draft.currency}</option>
@@ -287,7 +287,7 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
                 placeholder="Default unit price"
                 value={draft.defaultUnitPrice}
                 onChange={(event) => setDraft({ ...draft, defaultUnitPrice: event.target.value })}
-                className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
@@ -295,7 +295,7 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
                     type="checkbox"
                     checked={draft.taxable}
                     onChange={(event) => setDraft({ ...draft, taxable: event.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
                   />
                   Taxable by default
                 </label>
@@ -328,7 +328,7 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
                   type="button"
                   onClick={handleSave}
                   disabled={pending}
-                  className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 bg-primary text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-primary/90 disabled:opacity-50"
                 >
                   {pending ? 'Saving…' : draft.id ? 'Update' : 'Create'}
                 </button>

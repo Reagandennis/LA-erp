@@ -1,9 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import type {
   ApproverOption,
+  BrandProfileOption,
   CustomerOption,
   DiscountType,
   OrganizationBranding,
@@ -14,6 +16,11 @@ import type {
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'ZAR', 'KES', 'NGN'];
 
+const inputClass =
+  'w-full rounded-xl bg-gray-50 px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30';
+const labelClass = 'block text-xs font-medium text-gray-600 mb-1.5';
+const sectionTitleClass = 'text-sm font-semibold text-gray-900';
+
 interface QuoteBuilderProps {
   mode: 'create' | 'edit';
   quote: QuoteDetail | null;
@@ -21,6 +28,7 @@ interface QuoteBuilderProps {
   approvers: ApproverOption[];
   products: ProductOption[];
   templates: TemplateOption[];
+  brandProfiles: BrandProfileOption[];
   organization: OrganizationBranding;
   onClose: () => void;
   onSaved: (quote: QuoteDetail) => void;
@@ -92,14 +100,23 @@ export default function QuoteBuilder({
   approvers,
   products,
   templates,
+  brandProfiles,
   organization,
   onClose,
   onSaved,
   onCustomerCreated,
   onTemplateCreated,
 }: QuoteBuilderProps) {
+  const defaultBrandId = brandProfiles.find((b) => b.isDefault)?.id ?? null;
   const [customerId, setCustomerId] = useState<string>(
     quote?.customer.id ? String(quote.customer.id) : '',
+  );
+  const [brandProfileId, setBrandProfileId] = useState<string>(
+    quote?.brandProfile?.id
+      ? String(quote.brandProfile.id)
+      : mode === 'create' && defaultBrandId
+        ? String(defaultBrandId)
+        : '',
   );
   const [approverId, setApproverId] = useState<string>(
     quote?.approver?.id ? String(quote.approver.id) : '',
@@ -177,16 +194,7 @@ export default function QuoteBuilder({
     const lineSummaries = items.map((item) => {
       const qty = Number(item.quantity) || 0;
       const unit = Number(item.unitPrice) || 0;
-      const gross = qty * unit;
-      const discountValue = Number(item.discountValue) || 0;
-      let lineDiscount = 0;
-      if (item.discountType === 'percentage') {
-        lineDiscount = (gross * discountValue) / 100;
-      } else if (item.discountType === 'fixed') {
-        lineDiscount = discountValue;
-      }
-      lineDiscount = clamp(round2(lineDiscount), round2(gross));
-      const net = round2(gross - lineDiscount);
+      const net = round2(qty * unit);
       return { net, taxable: item.taxable };
     });
 
@@ -258,8 +266,8 @@ export default function QuoteBuilder({
       quantity: Number(item.quantity),
       unitPrice: Number(item.unitPrice),
       taxable: item.taxable,
-      discountType: item.discountType,
-      discountValue: Number(item.discountValue) || 0,
+      discountType: 'none' as DiscountType,
+      discountValue: 0,
       productId: item.productId,
     }));
 
@@ -299,6 +307,7 @@ export default function QuoteBuilder({
     const payload = {
       customerId: numericCustomerId,
       approverId: numericApproverId,
+      brandProfileId: brandProfileId ? Number(brandProfileId) : null,
       subject: subject.trim(),
       issueDate,
       expiryDate,
@@ -441,104 +450,142 @@ export default function QuoteBuilder({
     }
   };
 
+  const selectedBrand = brandProfiles.find((b) => String(b.id) === brandProfileId) ?? null;
+
   return (
     <>
       <div
-        className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm z-40"
+        className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm"
         onClick={() => (submitting ? null : onClose())}
       />
-      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 pointer-events-none">
-        <div className="bg-white w-full max-w-4xl h-full sm:h-auto sm:max-h-[92vh] overflow-y-auto rounded-none sm:rounded-[2rem] shadow-2xl pointer-events-auto">
-          <div className="p-6 sm:p-8 border-b border-gray-100 flex items-start justify-between gap-4 sticky top-0 bg-white z-10">
+      <div className="fixed inset-0 z-50 flex items-stretch justify-center pointer-events-none sm:items-center sm:p-4">
+        <div className="pointer-events-auto h-full w-full max-w-3xl overflow-y-auto bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl">
+          {/* Header */}
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-100 bg-white px-6 py-5 sm:px-8">
             <div>
-              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em]">
-                {mode === 'edit' ? 'Edit Quotation' : 'New Quotation'}
-              </p>
-              <h2 className="mt-1 text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
-                {mode === 'edit' && quote ? `Editing ${quote.reference}` : 'Build a proposal'}
+              <h2 className="text-lg font-bold tracking-tight text-gray-900 sm:text-xl">
+                {mode === 'edit' && quote ? `Edit ${quote.reference}` : 'New quotation'}
               </h2>
-              {organization.companyName && (
-                <p className="text-[10px] sm:text-xs font-bold text-gray-500 mt-1">
-                  Issued by {organization.companyName}
-                </p>
-              )}
+              <p className="mt-0.5 text-sm text-gray-500">
+                {mode === 'edit'
+                  ? 'Update the details below and save.'
+                  : 'Fill in the details, add line items, then save or submit for approval.'}
+              </p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-700 rounded-xl"
+              className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
               aria-label="Close builder"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
 
-          <div className="p-6 sm:p-8 space-y-6 sm:space-y-8">
+          <div className="space-y-8 px-6 py-6 sm:px-8">
             {mode === 'create' && templates.length > 0 && (
-              <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div>
-                    <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">
-                      Start from a template
-                    </p>
-                    <p className="text-xs text-emerald-900 mt-1">
-                      Pre-fills currency, tax, terms, and line items.
-                    </p>
-                  </div>
-                  <select
-                    onChange={(event) => {
-                      const id = Number(event.target.value);
-                      const template = templates.find((t) => t.id === id);
-                      if (template) applyTemplate(template);
-                      event.target.value = '';
-                    }}
-                    defaultValue=""
-                    className="px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="" disabled>
-                      Apply a template…
-                    </option>
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name}
-                      </option>
-                    ))}
-                  </select>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/15 bg-primary/5 px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-primary">Start from a template</p>
+                  <p className="text-xs text-primary/70">Pre-fills currency, tax, terms, and line items.</p>
                 </div>
+                <select
+                  onChange={(event) => {
+                    const id = Number(event.target.value);
+                    const template = templates.find((t) => t.id === id);
+                    if (template) applyTemplate(template);
+                    event.target.value = '';
+                  }}
+                  defaultValue=""
+                  className="rounded-lg border border-primary/20 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="" disabled>
+                    Apply a template…
+                  </option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            {/* From / To */}
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
               <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Customer
-                </label>
-                <div className="mt-2 flex items-center gap-2">
-                  <select
-                    value={customerId}
-                    onChange={(event) => setCustomerId(event.target.value)}
-                    className="flex-1 px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="">Select a customer…</option>
-                    {customers.map((customer) => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                        {customer.company ? ` — ${customer.company}` : ''}
+                <label className={labelClass}>Issued by</label>
+                {brandProfiles.length > 0 ? (
+                  <div className="relative">
+                    {selectedBrand && (
+                      <span
+                        className="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full ring-1 ring-black/5"
+                        style={{ backgroundColor: selectedBrand.primaryColor }}
+                      />
+                    )}
+                    <select
+                      value={brandProfileId}
+                      onChange={(event) => setBrandProfileId(event.target.value)}
+                      className={`${inputClass} ${selectedBrand ? 'pl-8' : ''}`}
+                    >
+                      <option value="">
+                        {organization.companyName
+                          ? `${organization.companyName} (default)`
+                          : 'Organization default'}
                       </option>
-                    ))}
-                  </select>
+                      {brandProfiles.map((brand) => (
+                        <option key={brand.id} value={brand.id}>
+                          {brand.companyName || brand.name}
+                          {brand.isDefault ? ' • default' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3.5 py-2.5 text-sm text-gray-500">
+                    No companies yet —{' '}
+                    <Link
+                      href="/modules/quotes/settings"
+                      className="font-semibold text-primary hover:underline"
+                    >
+                      add one in Settings
+                    </Link>
+                    .
+                  </div>
+                )}
+                <p className="mt-1.5 text-xs text-gray-400">
+                  The company this quote comes from — its logo, address &amp; color appear on the proposal.
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className={labelClass}>Prepared for</label>
                   <button
                     type="button"
                     onClick={() => setShowCustomerForm((value) => !value)}
-                    className="px-3 sm:px-4 py-3 border-2 border-gray-200 text-gray-700 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-gray-50 whitespace-nowrap"
+                    className="mb-1.5 text-xs font-semibold text-primary hover:text-primary/80"
                   >
-                    {showCustomerForm ? 'Cancel' : '+ New'}
+                    {showCustomerForm ? 'Cancel' : '+ New customer'}
                   </button>
                 </div>
+                <select
+                  value={customerId}
+                  onChange={(event) => setCustomerId(event.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Select a customer…</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}
+                      {customer.company ? ` — ${customer.company}` : ''}
+                    </option>
+                  ))}
+                </select>
                 {showCustomerForm && (
-                  <div className="mt-3 p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
+                  <div className="mt-3 space-y-3 rounded-xl border border-gray-100 bg-gray-50 p-4">
                     <input
                       type="text"
                       placeholder="Customer name *"
@@ -546,9 +593,9 @@ export default function QuoteBuilder({
                       onChange={(event) =>
                         setCustomerDraft((current) => ({ ...current, name: event.target.value }))
                       }
-                      className="w-full px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                      className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <input
                         type="email"
                         placeholder="Email"
@@ -556,7 +603,7 @@ export default function QuoteBuilder({
                         onChange={(event) =>
                           setCustomerDraft((current) => ({ ...current, email: event.target.value }))
                         }
-                        className="px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                        className="rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                       />
                       <input
                         type="text"
@@ -565,7 +612,7 @@ export default function QuoteBuilder({
                         onChange={(event) =>
                           setCustomerDraft((current) => ({ ...current, phone: event.target.value }))
                         }
-                        className="px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                        className="rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                       />
                     </div>
                     <input
@@ -575,7 +622,7 @@ export default function QuoteBuilder({
                       onChange={(event) =>
                         setCustomerDraft((current) => ({ ...current, company: event.target.value }))
                       }
-                      className="w-full px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                      className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
                     <input
                       type="text"
@@ -584,7 +631,7 @@ export default function QuoteBuilder({
                       onChange={(event) =>
                         setCustomerDraft((current) => ({ ...current, address: event.target.value }))
                       }
-                      className="w-full px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                      className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
                     <input
                       type="text"
@@ -593,31 +640,91 @@ export default function QuoteBuilder({
                       onChange={(event) =>
                         setCustomerDraft((current) => ({ ...current, billingAddress: event.target.value }))
                       }
-                      className="w-full px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                      className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
-                    {customerError && (
-                      <p className="text-xs font-bold text-rose-600">{customerError}</p>
-                    )}
+                    {customerError && <p className="text-xs font-medium text-rose-600">{customerError}</p>}
                     <button
                       type="button"
                       disabled={creatingCustomer}
                       onClick={handleCreateCustomer}
-                      className="w-full py-2.5 bg-gray-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black disabled:opacity-50"
+                      className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
                     >
                       {creatingCustomer ? 'Saving…' : 'Save customer'}
                     </button>
                   </div>
                 )}
               </div>
+            </section>
+
+            {/* Subject + meta */}
+            <section className="space-y-4">
+              <div>
+                <label className={labelClass}>Subject</label>
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                  placeholder="What is this quote for?"
+                  className={inputClass}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <label className={labelClass}>Issue date</label>
+                  <input
+                    type="date"
+                    value={issueDate}
+                    onChange={(event) => setIssueDate(event.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Expiry date</label>
+                  <input
+                    type="date"
+                    value={expiryDate}
+                    onChange={(event) => setExpiryDate(event.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Currency</label>
+                  <select
+                    value={currency}
+                    onChange={(event) => setCurrency(event.target.value)}
+                    className={inputClass}
+                  >
+                    {COMMON_CURRENCIES.includes(currency) ? null : (
+                      <option value={currency}>{currency}</option>
+                    )}
+                    {COMMON_CURRENCIES.map((code) => (
+                      <option key={code} value={code}>
+                        {code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>{organization.taxLabel || 'Tax'} rate (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={taxRatePct}
+                    onChange={(event) => setTaxRatePct(event.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
 
               <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Approver
-                </label>
+                <label className={labelClass}>Approver</label>
                 <select
                   value={approverId}
                   onChange={(event) => setApproverId(event.target.value)}
-                  className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className={inputClass}
                 >
                   <option value="">No approver yet</option>
                   {approvers.map((approver) => (
@@ -626,121 +733,54 @@ export default function QuoteBuilder({
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] font-bold text-gray-400 mt-2">
-                  Required when you submit the quote for approval.
-                </p>
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Subject
-                </label>
-                <input
-                  type="text"
-                  value={subject}
-                  onChange={(event) => setSubject(event.target.value)}
-                  placeholder="What is this quote for?"
-                  className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Issue date
-                </label>
-                <input
-                  type="date"
-                  value={issueDate}
-                  onChange={(event) => setIssueDate(event.target.value)}
-                  className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Expiry date
-                </label>
-                <input
-                  type="date"
-                  value={expiryDate}
-                  onChange={(event) => setExpiryDate(event.target.value)}
-                  className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Currency
-                </label>
-                <select
-                  value={currency}
-                  onChange={(event) => setCurrency(event.target.value)}
-                  className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                >
-                  {COMMON_CURRENCIES.includes(currency) ? null : <option value={currency}>{currency}</option>}
-                  {COMMON_CURRENCIES.map((code) => (
-                    <option key={code} value={code}>
-                      {code}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  {organization.taxLabel || 'Tax'} rate (%)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={taxRatePct}
-                  onChange={(event) => setTaxRatePct(event.target.value)}
-                  className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
-                />
+                <p className="mt-1.5 text-xs text-gray-400">Required when you submit for approval.</p>
               </div>
             </section>
 
+            {/* Line items */}
             <section>
-              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">
-                  Line items
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setItems((current) => [...current, emptyItem()])}
-                  className="text-xs font-black text-emerald-600 uppercase tracking-widest hover:text-emerald-800"
-                >
-                  + Add item
-                </button>
-              </div>
-              <div className="space-y-3">
-                {items.map((item) => {
+              <h3 className={`${sectionTitleClass} mb-3`}>Line items</h3>
+              <div className="space-y-2.5">
+                {items.map((item, index) => {
                   const qty = Number(item.quantity) || 0;
                   const unit = Number(item.unitPrice) || 0;
-                  const gross = qty * unit;
-                  const dv = Number(item.discountValue) || 0;
-                  let lineDiscount = 0;
-                  if (item.discountType === 'percentage') lineDiscount = (gross * dv) / 100;
-                  else if (item.discountType === 'fixed') lineDiscount = dv;
-                  lineDiscount = clamp(round2(lineDiscount), round2(gross));
-                  const net = round2(gross - lineDiscount);
+                  const net = round2(qty * unit);
                   return (
                     <div
                       key={item.key}
-                      className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3"
+                      className="space-y-3 rounded-xl border border-gray-100 bg-gray-50/60 p-3.5"
                     >
-                      <div className="grid grid-cols-12 gap-2 items-center">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-400">Item {index + 1}</span>
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem(item.key)}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m1 0l-.5 12a2 2 0 01-2 2H9.5a2 2 0 01-2-2L7 7"
+                              />
+                            </svg>
+                            Remove
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-12 items-center gap-2">
                         <div className="col-span-12 md:col-span-6">
                           <input
                             type="text"
-                            placeholder="Description"
+                            placeholder={`Item ${index + 1} description`}
                             value={item.description}
                             onChange={(event) =>
                               updateItem(item.key, { description: event.target.value, productId: null })
                             }
-                            className="w-full px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                            className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                           />
                           {products.length > 0 && (
                             <button
@@ -750,7 +790,7 @@ export default function QuoteBuilder({
                                   current === item.key ? null : item.key,
                                 )
                               }
-                              className="mt-1 text-[10px] font-black text-emerald-700 uppercase tracking-widest hover:text-emerald-900"
+                              className="mt-1.5 text-xs font-medium text-primary hover:text-primary/80"
                             >
                               {productPickerForKey === item.key ? 'Hide catalog' : '+ Insert from catalog'}
                             </button>
@@ -759,11 +799,11 @@ export default function QuoteBuilder({
                         <input
                           type="number"
                           min="0"
-                          step="0.01"
-                          placeholder="Qty"
+                          step="1"
+                          placeholder="Days"
                           value={item.quantity}
                           onChange={(event) => updateItem(item.key, { quantity: event.target.value })}
-                          className="col-span-4 md:col-span-2 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                          className="col-span-4 rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 md:col-span-2"
                         />
                         <input
                           type="number"
@@ -772,76 +812,34 @@ export default function QuoteBuilder({
                           placeholder="Unit price"
                           value={item.unitPrice}
                           onChange={(event) => updateItem(item.key, { unitPrice: event.target.value })}
-                          className="col-span-4 md:col-span-2 px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                          className="col-span-4 rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 md:col-span-2"
                         />
-                        <p className="col-span-3 md:col-span-1 text-right text-sm font-black text-gray-900">
+                        <p className="col-span-4 text-right text-sm font-semibold text-gray-900 md:col-span-2">
                           {formatMoney(net, currency)}
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.key)}
-                          className="col-span-1 p-2 text-gray-300 hover:text-rose-600 rounded-xl"
-                          aria-label="Remove line item"
-                          disabled={items.length === 1}
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a2 2 0 012-2h2a2 2 0 012 2v3"
-                            />
-                          </svg>
-                        </button>
                       </div>
 
-                      <div className="grid grid-cols-12 gap-2 items-center">
-                        <label className="col-span-12 md:col-span-3 flex items-center gap-2 text-[11px] font-bold text-gray-700">
-                          <input
-                            type="checkbox"
-                            checked={item.taxable}
-                            onChange={(event) => updateItem(item.key, { taxable: event.target.checked })}
-                            className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                          />
-                          Taxable
-                        </label>
-                        <select
-                          value={item.discountType}
-                          onChange={(event) =>
-                            updateItem(item.key, { discountType: event.target.value as DiscountType })
-                          }
-                          className="col-span-6 md:col-span-3 px-3 py-2 bg-white rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500"
-                        >
-                          <option value="none">No discount</option>
-                          <option value="percentage">% discount</option>
-                          <option value="fixed">Fixed discount</option>
-                        </select>
+                      <label className="flex w-fit items-center gap-2 text-xs font-medium text-gray-600">
                         <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="Discount"
-                          value={item.discountValue}
-                          disabled={item.discountType === 'none'}
-                          onChange={(event) => updateItem(item.key, { discountValue: event.target.value })}
-                          className="col-span-6 md:col-span-3 px-3 py-2 bg-white rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100 disabled:text-gray-400"
+                          type="checkbox"
+                          checked={item.taxable}
+                          onChange={(event) => updateItem(item.key, { taxable: event.target.checked })}
+                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/30"
                         />
-                        <p className="col-span-12 md:col-span-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                          Gross {formatMoney(round2(gross), currency)} − discount {formatMoney(lineDiscount, currency)}
-                        </p>
-                      </div>
+                        Taxable
+                      </label>
 
                       {productPickerForKey === item.key && (
-                        <div className="bg-white rounded-xl border border-gray-200 max-h-56 overflow-y-auto">
+                        <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white">
                           {products.map((product) => (
                             <button
                               key={product.id}
                               type="button"
                               onClick={() => applyProduct(item.key, product)}
-                              className="w-full text-left px-3 py-2 hover:bg-emerald-50 border-b border-gray-100 last:border-b-0"
+                              className="w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-primary/5"
                             >
-                              <p className="text-sm font-bold text-gray-900">{product.name}</p>
-                              <p className="text-[10px] text-gray-500">
+                              <p className="text-sm font-medium text-gray-900">{product.name}</p>
+                              <p className="text-xs text-gray-500">
                                 {formatMoney(product.defaultUnitPrice, product.currency)}
                                 {product.sku ? ` • SKU ${product.sku}` : ''}
                                 {product.taxable ? '' : ' • non-taxable'}
@@ -854,39 +852,48 @@ export default function QuoteBuilder({
                   );
                 })}
               </div>
+              <button
+                type="button"
+                onClick={() => setItems((current) => [...current, emptyItem()])}
+                className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-3 text-sm font-semibold text-gray-500 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+                </svg>
+                Add line item
+              </button>
             </section>
 
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2 space-y-3">
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Notes (internal)
-                </label>
-                <textarea
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                  rows={3}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-emerald-500"
-                />
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Terms & conditions (shown to client)
-                </label>
-                <textarea
-                  value={terms}
-                  onChange={(event) => setTerms(event.target.value)}
-                  rows={4}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div className="bg-gray-50 rounded-2xl p-5 space-y-4">
+            {/* Notes / terms / totals */}
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="space-y-4 md:col-span-2">
                 <div>
-                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                    Quote-level discount
-                  </label>
-                  <div className="mt-2 flex gap-2">
+                  <label className={labelClass}>Notes (internal)</label>
+                  <textarea
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    rows={3}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Terms &amp; conditions (shown to client)</label>
+                  <textarea
+                    value={terms}
+                    onChange={(event) => setTerms(event.target.value)}
+                    rows={4}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              <div className="space-y-4 rounded-xl border border-gray-100 bg-gray-50/60 p-5">
+                <div>
+                  <label className={labelClass}>Quote-level discount</label>
+                  <div className="flex gap-2">
                     <select
                       value={quoteDiscountType}
                       onChange={(event) => setQuoteDiscountType(event.target.value as DiscountType)}
-                      className="flex-1 px-3 py-2 bg-white rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500"
+                      className="flex-1 rounded-lg bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
                     >
                       <option value="none">None</option>
                       <option value="percentage">% of total</option>
@@ -899,12 +906,12 @@ export default function QuoteBuilder({
                       value={quoteDiscountValue}
                       disabled={quoteDiscountType === 'none'}
                       onChange={(event) => setQuoteDiscountValue(event.target.value)}
-                      className="w-24 px-3 py-2 bg-white rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100 disabled:text-gray-400"
+                      className="w-24 rounded-lg bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-gray-100 disabled:text-gray-400"
                     />
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-gray-200 space-y-1">
+                <div className="space-y-1.5 border-t border-gray-200 pt-3">
                   <Row label="Subtotal" value={formatMoney(totals.subtotal, currency)} />
                   <Row
                     label={`${organization.taxLabel || 'Tax'} (${(totals.taxRate * 100).toFixed(2)}%)`}
@@ -916,32 +923,32 @@ export default function QuoteBuilder({
                       value={`- ${formatMoney(totals.quoteDiscount, currency)}`}
                     />
                   )}
-                  <div className="flex justify-between text-sm font-black text-gray-900 pt-2 border-t border-gray-200">
-                    <span>Total</span>
-                    <span className="text-emerald-600">{formatMoney(totals.total, currency)}</span>
+                  <div className="flex items-center justify-between border-t border-gray-200 pt-2.5">
+                    <span className="text-sm font-semibold text-gray-900">Total</span>
+                    <span className="text-lg font-bold text-primary">
+                      {formatMoney(totals.total, currency)}
+                    </span>
                   </div>
                 </div>
               </div>
             </section>
 
             {showTemplateForm ? (
-              <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                  Save as reusable template
-                </p>
+              <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                <p className={sectionTitleClass}>Save as reusable template</p>
                 <input
                   type="text"
                   placeholder="Template name"
                   value={templateName}
                   onChange={(event) => setTemplateName(event.target.value)}
-                  className="w-full px-3 py-2 bg-white rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
-                {templateError && <p className="text-xs font-bold text-rose-600">{templateError}</p>}
+                {templateError && <p className="text-xs font-medium text-rose-600">{templateError}</p>}
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => setShowTemplateForm(false)}
-                    className="px-4 py-2 border-2 border-gray-200 text-gray-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-gray-100"
+                    className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
                   >
                     Cancel
                   </button>
@@ -949,7 +956,7 @@ export default function QuoteBuilder({
                     type="button"
                     onClick={handleSaveAsTemplate}
                     disabled={submitting !== null}
-                    className="flex-1 px-4 py-2 bg-gray-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black disabled:opacity-50"
+                    className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
                   >
                     {submitting === 'template' ? 'Saving…' : 'Save template'}
                   </button>
@@ -959,25 +966,26 @@ export default function QuoteBuilder({
               <button
                 type="button"
                 onClick={() => setShowTemplateForm(true)}
-                className="text-xs font-black text-gray-500 uppercase tracking-widest hover:text-gray-900"
+                className="text-sm font-medium text-gray-500 hover:text-gray-900"
               >
                 + Save current setup as a template
               </button>
             )}
 
             {error && (
-              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-sm font-bold text-rose-700">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-700">
                 {error}
               </div>
             )}
           </div>
 
-          <div className="p-4 sm:p-6 border-t border-gray-100 flex flex-col sm:flex-row gap-3 sticky bottom-0 bg-white">
+          {/* Footer */}
+          <div className="sticky bottom-0 flex flex-col gap-2.5 border-t border-gray-100 bg-white px-6 py-4 sm:flex-row sm:px-8">
             <button
               type="button"
               onClick={onClose}
               disabled={submitting !== null}
-              className="sm:ml-auto px-6 py-3 border-2 border-gray-200 text-gray-700 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-gray-50 disabled:opacity-50"
+              className="rounded-xl px-5 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 disabled:opacity-50 sm:ml-auto"
             >
               Cancel
             </button>
@@ -985,7 +993,7 @@ export default function QuoteBuilder({
               type="button"
               onClick={() => handleSave('save')}
               disabled={submitting !== null}
-              className="px-6 py-3 border-2 border-gray-900 text-gray-900 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-gray-50 disabled:opacity-50"
+              className="rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50"
             >
               {submitting === 'save' ? 'Saving…' : 'Save draft'}
             </button>
@@ -993,23 +1001,22 @@ export default function QuoteBuilder({
               type="button"
               onClick={() => handleSave('submit')}
               disabled={submitting !== null}
-              className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
+              className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               {submitting === 'submit' ? 'Submitting…' : 'Submit for approval'}
             </button>
           </div>
         </div>
       </div>
-
     </>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between text-xs font-bold text-gray-500">
+    <div className="flex justify-between text-xs text-gray-500">
       <span>{label}</span>
-      <span>{value}</span>
+      <span className="font-medium text-gray-700">{value}</span>
     </div>
   );
 }

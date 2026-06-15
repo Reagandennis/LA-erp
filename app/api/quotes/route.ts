@@ -77,9 +77,20 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (validation.data.brandProfileId) {
+    const brand = await prisma.brandProfile.findUnique({
+      where: { id: validation.data.brandProfileId },
+      select: { id: true, archived: true },
+    });
+    if (!brand || brand.archived) {
+      return NextResponse.json({ error: 'Selected company is not available' }, { status: 400 });
+    }
+  }
+
   const quote = await createQuote({
     customerId: validation.data.customerId,
     approverId: validation.data.approverId ?? null,
+    brandProfileId: validation.data.brandProfileId ?? null,
     subject: validation.data.subject,
     issueDate: validation.data.issueDate,
     expiryDate: validation.data.expiryDate,
