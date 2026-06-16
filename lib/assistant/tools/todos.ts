@@ -29,12 +29,12 @@ const listTodosTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'list_todos',
-    description: "List the current user's personal to-do items.",
+    description: "List the current user's tasks (excludes deleted tasks).",
     parameters: { type: 'object', properties: {} },
   },
   async handler(_args, ctx) {
     const rows = (await prisma.personalTodo.findMany({
-      where: { userId: ctx.userId },
+      where: { userId: ctx.userId, deletedAt: null },
       orderBy: [{ completed: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
       select: { id: true, title: true, priority: true, status: true, completed: true, dueDate: true },
     })) as TodoRow[];
@@ -54,7 +54,7 @@ const createTodoTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'create_todo',
-    description: 'Create a personal to-do item for the current user.',
+    description: 'Create a task for the current user.',
     parameters: {
       type: 'object',
       properties: {
@@ -93,7 +93,7 @@ const updateTodoTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'update_todo',
-    description: 'Update a personal to-do — title, priority, status, due date, or mark it complete/incomplete. Provide only fields to change.',
+    description: 'Update a task — title, priority, status, due date, or mark it complete/incomplete. Provide only fields to change.',
     parameters: {
       type: 'object',
       properties: {
@@ -110,8 +110,8 @@ const updateTodoTool: ToolDefinition = {
   async handler(args, ctx) {
     const id = asInt(args.todoId);
     if (!id) return { error: 'A valid todoId is required.' };
-    const existing = await prisma.personalTodo.findFirst({ where: { id, userId: ctx.userId }, select: { id: true } });
-    if (!existing) return { error: 'To-do not found.' };
+    const existing = await prisma.personalTodo.findFirst({ where: { id, userId: ctx.userId, deletedAt: null }, select: { id: true } });
+    if (!existing) return { error: 'Task not found.' };
 
     const data: Record<string, unknown> = {};
     if (args.title !== undefined) {
@@ -143,15 +143,15 @@ const deleteTodoTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'delete_todo',
-    description: 'Delete a personal to-do item.',
+    description: 'Delete a task. It is archived (kept under the Deleted filter) and can be restored.',
     parameters: { type: 'object', properties: { todoId: { type: 'integer' } }, required: ['todoId'] },
   },
   async handler(args, ctx) {
     const id = asInt(args.todoId);
     if (!id) return { error: 'A valid todoId is required.' };
-    const existing = await prisma.personalTodo.findFirst({ where: { id, userId: ctx.userId }, select: { id: true } });
-    if (!existing) return { error: 'To-do not found.' };
-    await prisma.personalTodo.delete({ where: { id } });
+    const existing = await prisma.personalTodo.findFirst({ where: { id, userId: ctx.userId, deletedAt: null }, select: { id: true } });
+    if (!existing) return { error: 'Task not found.' };
+    await prisma.personalTodo.update({ where: { id }, data: { deletedAt: new Date() } });
     await recordAuditEvent({ action: 'ai.todo.delete', entityType: 'PersonalTodo', entityId: String(id), actorUserId: ctx.userId, request: ctx.request });
     return { deleted: true, todoId: id };
   },

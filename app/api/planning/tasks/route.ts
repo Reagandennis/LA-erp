@@ -17,6 +17,7 @@ type TaskRecord = {
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
+  deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -66,6 +67,7 @@ function serializeTask(task: TaskRecord) {
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
+    deletedAt: task.deletedAt?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };

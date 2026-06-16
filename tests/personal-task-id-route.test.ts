@@ -72,9 +72,67 @@ describe('planning task detail route', () => {
     expect(payload.task.completed).toBe(true);
   });
 
+  it('soft-deletes a task by setting deletedAt', async () => {
+    requireRequestAuth.mockResolvedValue({ auth: { user: { id: 9 } }, response: null });
+    personalTodoUpdateMany.mockResolvedValue({ count: 1 });
+
+    const response = await DELETE(
+      new NextRequest('http://localhost/api/planning/tasks/3', { method: 'DELETE' }),
+      { params: Promise.resolve({ taskId: '3' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(personalTodoUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 3, userId: 9 },
+        data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+      }),
+    );
+    // Soft delete must NOT remove the row.
+    expect(personalTodoDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('restores a task via PUT { deleted: false }', async () => {
+    requireRequestAuth.mockResolvedValue({ auth: { user: { id: 9 } }, response: null });
+    personalTodoUpdateMany.mockResolvedValue({ count: 1 });
+    personalTodoFindFirst.mockResolvedValue({
+      id: 3,
+      title: 'Close open invoices',
+      description: null,
+      priority: 'high',
+      status: 'Backlog',
+      dueDate: null,
+      completed: false,
+      completedAt: null,
+      deletedAt: null,
+      createdAt: new Date('2026-04-07T10:00:00.000Z'),
+      updatedAt: new Date('2026-04-07T14:00:00.000Z'),
+    });
+
+    const response = await PUT(
+      new NextRequest('http://localhost/api/planning/tasks/3', {
+        method: 'PUT',
+        body: JSON.stringify({ deleted: false }),
+        headers: { 'content-type': 'application/json' },
+      }),
+      { params: Promise.resolve({ taskId: '3' }) },
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(personalTodoUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 3, userId: 9 },
+        data: expect.objectContaining({ deletedAt: null }),
+      }),
+    );
+    expect(payload.task.deletedAt).toBeNull();
+  });
+
   it('returns not found when deleting another user task', async () => {
     requireRequestAuth.mockResolvedValue({ auth: { user: { id: 1 } }, response: null });
-    personalTodoDeleteMany.mockResolvedValue({ count: 0 });
+    personalTodoUpdateMany.mockResolvedValue({ count: 0 });
 
     const response = await DELETE(
       new NextRequest('http://localhost/api/planning/tasks/999', {

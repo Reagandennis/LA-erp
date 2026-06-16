@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { hashPassword } from '@/lib/auth';
 import { recordAuditEvent } from '@/lib/audit';
+import { isEmailConfigured } from '@/lib/email';
 import { prisma } from '@/lib/prisma';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { requireAdminRequest } from '@/lib/request-auth';
+import { emailWelcomeToUser } from '@/lib/transactional-email';
 import {
   createManagedUser,
   getUserByEmail,
@@ -13,6 +15,8 @@ import {
   listRolesWithPermissions,
 } from '@/lib/user';
 import { managedUserSchema } from '@/lib/validation';
+
+export const runtime = 'nodejs';
 
 async function ensureRolesExist(roleIds: number[]) {
   const roles = await prisma.role.findMany({
@@ -152,5 +156,20 @@ export async function POST(request: NextRequest) {
     request,
   });
 
-  return NextResponse.json({ success: true, user }, { status: 201 });
+  // Best-effort welcome email — never block or fail account creation on email issues.
+  let welcomeEmailed = false;
+  if (isEmailConfigured()) {
+    try {
+      await emailWelcomeToUser({
+        name: user.name,
+        email: user.email,
+        loginUrl: new URL('/auth/login', request.nextUrl.origin).toString(),
+      });
+      welcomeEmailed = true;
+    } catch {
+      welcomeEmailed = false;
+    }
+  }
+
+  return NextResponse.json({ success: true, user, welcomeEmailed }, { status: 201 });
 }

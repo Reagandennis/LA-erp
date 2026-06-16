@@ -263,6 +263,7 @@ export default function AdminClient({
               {isSyncing ? 'Syncing...' : 'Sync Data'}
             </button>
             <div className="h-6 w-px bg-gray-100 mx-2" />
+            <Link href="/admin/email" className="px-4 py-2 text-gray-400 hover:text-gray-900 font-bold text-xs uppercase tracking-widest transition-all">Email</Link>
             <Link href="/dashboard" className="px-4 py-2 text-gray-400 hover:text-gray-900 font-bold text-xs uppercase tracking-widest transition-all">Portal</Link>
             <LogoutButton />
           </div>

@@ -479,7 +479,7 @@ export default function QuoteDetailDrawer({
                   disabled={actionPending !== null}
                   className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {actionPending === 'send' ? 'Marking sent…' : 'Mark as dispatched'}
+                  {actionPending === 'send' ? 'Sending…' : 'Email to customer'}
                 </button>
               )}
 

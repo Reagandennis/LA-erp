@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
-import { sendInvoice } from '@/lib/invoices';
+import { EmailError, isEmailConfigured } from '@/lib/email';
+import { getInvoice, sendInvoice } from '@/lib/invoices';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { emailInvoiceToCustomer } from '@/lib/transactional-email';
 import { userHasModule, userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const runtime = 'nodejs';
 
 function parseId(value: string) {
   const parsed = Number(value);
@@ -25,9 +28,37 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const id = parseId(raw);
   if (!id) return NextResponse.json({ error: 'Invalid invoice id' }, { status: 400 });
 
-  const result = await sendInvoice(id);
-  if ('error' in result) {
-    return NextResponse.json({ error: result.error }, { status: result.error === 'Invoice not found' ? 404 : 400 });
+  const invoice = await getInvoice(id);
+  if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+  if (invoice.status === 'Void') {
+    return NextResponse.json({ error: 'Cannot send a void invoice' }, { status: 400 });
+  }
+  if (!isEmailConfigured()) {
+    return NextResponse.json(
+      { error: 'Email is not set up yet. Configure SMTP under Admin → Email.' },
+      { status: 400 },
+    );
+  }
+  if (!invoice.customer.email) {
+    return NextResponse.json(
+      { error: 'This customer has no email address on file. Add one before sending.' },
+      { status: 400 },
+    );
+  }
+
+  // Deliver first; only mark the invoice as sent if the email actually goes out.
+  let emailedTo: string;
+  try {
+    const delivered = await emailInvoiceToCustomer(invoice);
+    emailedTo = delivered.to;
+  } catch (error) {
+    const message = error instanceof EmailError ? error.message : 'Could not send the invoice email.';
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+
+  const sent = await sendInvoice(id);
+  if ('error' in sent) {
+    return NextResponse.json({ error: sent.error }, { status: 400 });
   }
 
   await recordAuditEvent({
@@ -35,9 +66,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     entityType: 'invoice',
     entityId: String(id),
     actorUserId: auth.user.id,
-    metadata: { number: result.number },
+    metadata: { number: sent.number, emailedTo },
     request,
   });
 
-  return NextResponse.json({ invoice: result });
+  return NextResponse.json({ invoice: sent, emailedTo });
 }

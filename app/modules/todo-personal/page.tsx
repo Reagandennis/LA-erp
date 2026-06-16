@@ -60,7 +60,19 @@ type Task = {
   dueDateIso?: string | null;
   status: string;
   assignees: number;
+  completed?: boolean;
+  deletedAt?: string | null;
 };
+
+type TaskScope = 'Active' | 'Completed' | 'Deleted';
+const TASK_SCOPES: TaskScope[] = ['Active', 'Completed', 'Deleted'];
+
+function taskMatchesScope(task: Task, scope: TaskScope): boolean {
+  if (task.deletedAt) return scope === 'Deleted';
+  if (scope === 'Deleted') return false;
+  if (scope === 'Completed') return Boolean(task.completed);
+  return !task.completed; // Active
+}
 
 type Subtask = {
   id: string;
@@ -108,6 +120,7 @@ type ApiTask = {
   status?: string;
   dueDate: string | null;
   completed: boolean;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -141,6 +154,8 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
         dueDateIso: task.dueDate,
         status,
         assignees: 0,
+        completed: task.completed,
+        deletedAt: task.deletedAt ?? null,
       };
     });
   } catch {
@@ -268,6 +283,7 @@ function BarList({ rows }: { rows: { label: string; count: number; color: string
 
 export default function TodoPersonalPage() {
   const [activeView, setActiveView] = useState<ViewType>('kanban');
+  const [scope, setScope] = useState<TaskScope>('Active');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editedTask, setEditedTask] = useState<Task | null>(null);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
@@ -953,20 +969,39 @@ export default function TodoPersonalPage() {
     setDescription('');
     setDueTime('');
   };
-  const handleDeleteSelectedTask = () => {
-    if (!selectedTask) return;
-    const taskToDelete = selectedTask;
-    setTasks((ts) => ts.filter((t) => t.id !== taskToDelete.id));
+  const closeTaskDrawer = () => {
     setSelectedTask(null);
     setEditedTask(null);
     setSubtasks([]);
     setCommentInput('');
     setDescription('');
     setDueTime('');
+  };
+  const handleDeleteSelectedTask = () => {
+    if (!selectedTask) return;
+    const taskToDelete = selectedTask;
+    // Soft delete: keep the task so it stays visible under the "Deleted" filter.
+    const deletedAt = new Date().toISOString();
+    setTasks((ts) => ts.map((t) => (t.id === taskToDelete.id ? { ...t, deletedAt } : t)));
+    closeTaskDrawer();
     if (taskToDelete.dbId) {
       fetch(`/api/planning/tasks/${taskToDelete.dbId}`, {
         method: 'DELETE',
         credentials: 'include',
+      }).catch(() => { /* ignore */ });
+    }
+  };
+  const handleRestoreSelectedTask = () => {
+    if (!selectedTask) return;
+    const taskToRestore = selectedTask;
+    setTasks((ts) => ts.map((t) => (t.id === taskToRestore.id ? { ...t, deletedAt: null } : t)));
+    closeTaskDrawer();
+    if (taskToRestore.dbId) {
+      fetch(`/api/planning/tasks/${taskToRestore.dbId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deleted: false }),
       }).catch(() => { /* ignore */ });
     }
   };
@@ -1226,7 +1261,7 @@ export default function TodoPersonalPage() {
     return { bg: 'bg-primary/5', text: 'text-primary', dot: '#10b981' };
   };
 
-  const renderKanbanView = () => (
+  const renderKanbanView = (tasks: Task[]) => (
     <div className="flex flex-col gap-6">
       {/* Board */}
       <div className="flex gap-4 overflow-x-auto pb-4">
@@ -1469,7 +1504,7 @@ export default function TodoPersonalPage() {
     </div>
   );
 
-  const renderListView = () => (
+  const renderListView = (tasks: Task[]) => (
     <>
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="divide-y divide-gray-200">
@@ -1910,12 +1945,21 @@ export default function TodoPersonalPage() {
                 >
                   Cancel
                 </button>
-                <button
-                  onClick={handleDeleteSelectedTask}
-                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
-                >
-                  Delete
-                </button>
+                {selectedTask.deletedAt ? (
+                  <button
+                    onClick={handleRestoreSelectedTask}
+                    className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+                  >
+                    Restore
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleDeleteSelectedTask}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1924,7 +1968,7 @@ export default function TodoPersonalPage() {
     </>
   );
 
-  const renderGanttView = () => {
+  const renderGanttView = (tasks: Task[]) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -2137,7 +2181,7 @@ export default function TodoPersonalPage() {
     );
   };
 
-  const renderCalendarView = () => {
+  const renderCalendarView = (tasks: Task[]) => {
     // Personal tasks shown by their due date, overlaid on the full calendar.
     const taskEvents: CalendarExtraEvent[] = tasks
       .map((task) => {
@@ -2158,7 +2202,7 @@ export default function TodoPersonalPage() {
     return <CalendarClient initialEvents={[]} extraEvents={taskEvents} />;
   };
 
-  const renderDashboardView = () => {
+  const renderDashboardView = (tasks: Task[]) => {
     const total = tasks.length;
     const doneStatus = kanbanColumns[kanbanColumns.length - 1] ?? 'In review';
     const doneCount = tasks.filter((task) => task.status === doneStatus).length;
@@ -2269,7 +2313,7 @@ export default function TodoPersonalPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Personal To-do</h1>
+            <h1 className="text-3xl font-bold text-gray-900">Tasks</h1>
             <p className="text-gray-600 text-sm mt-1">Manage your tasks efficiently</p>
           </div>
           <div className="flex items-center gap-3">
@@ -2318,12 +2362,34 @@ export default function TodoPersonalPage() {
           ))}
         </div>
 
+        {/* Scope filter: Active / Completed / Deleted */}
+        {activeView !== 'dashboard' && (
+          <div className="flex items-center gap-1 mb-6 bg-white rounded-lg border border-gray-200 p-1 w-fit">
+            {TASK_SCOPES.map((s) => {
+              const count = tasks.filter((t) => taskMatchesScope(t, s)).length;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScope(s)}
+                  className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    scope === s ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {s}
+                  <span className={`ml-1.5 text-xs ${scope === s ? 'text-white/80' : 'text-gray-400'}`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Content Area */}
-        {activeView === 'kanban' && renderKanbanView()}
-        {activeView === 'list' && renderListView()}
-        {activeView === 'gantt' && renderGanttView()}
-        {activeView === 'calendar' && renderCalendarView()}
-        {activeView === 'dashboard' && renderDashboardView()}
+        {activeView === 'kanban' && renderKanbanView(tasks.filter((t) => taskMatchesScope(t, scope)))}
+        {activeView === 'list' && renderListView(tasks.filter((t) => taskMatchesScope(t, scope)))}
+        {activeView === 'gantt' && renderGanttView(tasks.filter((t) => taskMatchesScope(t, scope)))}
+        {activeView === 'calendar' && renderCalendarView(tasks.filter((t) => taskMatchesScope(t, scope)))}
+        {activeView === 'dashboard' && renderDashboardView(tasks.filter((t) => !t.deletedAt))}
 
         {/* ── Shared task drawer (Kanban / Gantt / Calendar views) ── */}
         {activeView !== 'list' && selectedTask && editedTask && (
@@ -2569,13 +2635,23 @@ export default function TodoPersonalPage() {
                   >
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleDeleteSelectedTask}
-                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
-                  >
-                    Delete
-                  </button>
+                  {selectedTask.deletedAt ? (
+                    <button
+                      type="button"
+                      onClick={handleRestoreSelectedTask}
+                      className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+                    >
+                      Restore
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleDeleteSelectedTask}
+                      className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

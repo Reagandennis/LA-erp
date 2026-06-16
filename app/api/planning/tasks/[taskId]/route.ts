@@ -11,6 +11,7 @@ type TaskUpdateInput = {
   status?: string;
   dueDate?: string | null;
   completed?: boolean;
+  deleted?: boolean;
 };
 
 type TaskRecord = {
@@ -22,6 +23,7 @@ type TaskRecord = {
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
+  deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -37,10 +39,10 @@ type PersonalTodoDetailClient = {
       dueDate?: Date | null;
       completed?: boolean;
       completedAt?: Date | null;
+      deletedAt?: Date | null;
     };
   }) => Promise<{ count: number }>;
   findFirst: (args: { where: { id: number; userId: number } }) => Promise<TaskRecord | null>;
-  deleteMany: (args: { where: { id: number; userId: number } }) => Promise<{ count: number }>;
 };
 
 const personalTodoClient = (prisma as unknown as { personalTodo: PersonalTodoDetailClient }).personalTodo;
@@ -69,6 +71,7 @@ function serializeTask(task: TaskRecord) {
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
+    deletedAt: task.deletedAt?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };
@@ -110,6 +113,9 @@ function normalizeUpdateInput(input: TaskUpdateInput) {
           : input.completed
             ? new Date()
             : null,
+      // `deleted: false` restores a soft-deleted task; `deleted: true` archives it.
+      deletedAt:
+        input.deleted === undefined ? undefined : input.deleted ? new Date() : null,
     },
   };
 }
@@ -194,10 +200,15 @@ export async function DELETE(
     return NextResponse.json({ error: 'Invalid task id' }, { status: 400 });
   }
 
-  const result = await personalTodoClient.deleteMany({
+  // Soft delete: keep the row so the task stays visible and restorable under the
+  // "Deleted" filter. Hard removal would lose the history the user wants to see.
+  const result = await personalTodoClient.updateMany({
     where: {
       id: taskId,
       userId: auth.user.id,
+    },
+    data: {
+      deletedAt: new Date(),
     },
   });
 

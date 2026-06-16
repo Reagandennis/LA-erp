@@ -9,17 +9,10 @@ export interface SeedModuleDefinition {
 export const DEFAULT_MODULES: SeedModuleDefinition[] = [
   {
     slug: 'todo-personal',
-    name: 'To-do List Personal',
-    description: 'Track personal priorities, reminders, and individual follow-ups.',
+    name: 'Tasks',
+    description: 'Track your tasks, priorities, reminders, and follow-ups.',
     category: 'Productivity',
     sortOrder: 1,
-  },
-  {
-    slug: 'todo-group',
-    name: 'To-do List Group',
-    description: 'Coordinate team tasks, ownership, and shared action items.',
-    category: 'Productivity',
-    sortOrder: 2,
   },
   {
     slug: 'bulletin-board',

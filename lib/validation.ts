@@ -74,6 +74,7 @@ export const personalTodoUpdateSchema = z
     status: personalTodoStatusSchema.optional(),
     dueDate: z.string().trim().optional().nullable(),
     completed: z.boolean().optional(),
+    deleted: z.boolean().optional(),
   })
   .refine(
     (value) =>
@@ -82,7 +83,8 @@ export const personalTodoUpdateSchema = z
       value.priority !== undefined ||
       value.status !== undefined ||
       value.dueDate !== undefined ||
-      value.completed !== undefined,
+      value.completed !== undefined ||
+      value.deleted !== undefined,
     {
       message: 'At least one field must be updated',
     },
