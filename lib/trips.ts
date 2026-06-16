@@ -62,6 +62,7 @@ export interface TripSummary {
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
   itemCount: number;
+  assignmentCount: number;
 }
 
 export interface TripDetail extends TripSummary {
@@ -90,6 +91,7 @@ interface TripRecord {
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
   items: TripItineraryItemRecord[];
+  _count?: { assignments: number };
 }
 
 interface TripItineraryItemRecord {
@@ -123,6 +125,7 @@ const tripInclude = {
       { position: 'asc' as const },
     ],
   },
+  _count: { select: { assignments: true } },
 };
 
 type TripCollectionClient = {
@@ -280,6 +283,7 @@ function serializeSummary(record: TripRecord): TripSummary {
     owner: record.owner,
     sourceQuote: record.sourceQuote,
     itemCount: record.items?.length ?? 0,
+    assignmentCount: record._count?.assignments ?? 0,
   };
 }
 

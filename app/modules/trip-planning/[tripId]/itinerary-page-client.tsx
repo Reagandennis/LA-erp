@@ -199,6 +199,8 @@ export default function ItineraryPageClient({
   const [addingUnscheduled, setAddingUnscheduled] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editor, setEditor] = useState<EditorState>(blankEditor(null));
+  // A card dropped into a new slot waiting for the user to allocate its new time.
+  const [reschedule, setReschedule] = useState<{ item: TripItineraryItemSummary; date: string; time: string } | null>(null);
   // Days the user has added in this session (beyond today + days that already have items).
   const [extraDays, setExtraDays] = useState<string[]>([]);
 
@@ -356,67 +358,66 @@ export default function ItineraryPageClient({
     }
   };
 
-  // Drag-and-drop reorder within a day: keep the day's time slots but reassign them
-  // to the new visual order, so the dragged item picks up an updated (chronological) time.
-  const reorderDay = async (orderedItems: TripItineraryItemSummary[]) => {
-    const slots = orderedItems
-      .map((i) => (i.scheduledAt ? new Date(i.scheduledAt).getTime() : null))
-      .filter((t): t is number => t != null)
-      .sort((a, b) => a - b);
+  // Drag-and-drop within a day no longer silently retimes the card. Instead, dropping
+  // it into a new slot prompts the user to allocate a new time, suggesting one based on
+  // where it landed (between its new neighbours). The day re-sorts once the time is set.
+  const requestReschedule = (orderedItems: TripItineraryItemSummary[], movedId: number) => {
+    const idx = orderedItems.findIndex((i) => i.id === movedId);
+    if (idx < 0) return;
+    const moved = orderedItems[idx];
+    const day = isoDateOnly(moved.scheduledAt) ?? today;
 
-    const updates: { id: number; scheduledAt: string; endsAt: string | null }[] = [];
-    let prev = -Infinity;
-    orderedItems.forEach((item, idx) => {
-      let start = slots[idx] ?? (prev === -Infinity ? Date.now() : prev + 60_000);
-      if (start <= prev) start = prev + 60_000; // strictly increasing so the order sticks
-      prev = start;
-      const oldStart = item.scheduledAt ? new Date(item.scheduledAt).getTime() : null;
-      if (oldStart === null || start !== oldStart) {
-        const dur =
-          item.endsAt && item.scheduledAt
-            ? new Date(item.endsAt).getTime() - new Date(item.scheduledAt).getTime()
-            : null;
-        updates.push({
-          id: item.id,
-          scheduledAt: new Date(start).toISOString(),
-          endsAt: dur != null && dur > 0 ? new Date(start + dur).toISOString() : null,
-        });
-      }
-    });
+    const prevT = orderedItems[idx - 1]?.scheduledAt
+      ? new Date(orderedItems[idx - 1].scheduledAt as string).getTime()
+      : null;
+    const nextT = orderedItems[idx + 1]?.scheduledAt
+      ? new Date(orderedItems[idx + 1].scheduledAt as string).getTime()
+      : null;
 
-    if (updates.length === 0) return;
+    let suggested: number | null = null;
+    if (prevT != null && nextT != null && nextT > prevT) suggested = Math.round((prevT + nextT) / 2);
+    else if (prevT != null) suggested = prevT + 30 * 60_000;
+    else if (nextT != null) suggested = nextT - 30 * 60_000;
+    else if (moved.scheduledAt) suggested = new Date(moved.scheduledAt).getTime();
 
-    // Optimistic: retime locally so the reorder is instant, then persist each change.
-    setTrip((prevTrip) => ({
-      ...prevTrip,
-      items: prevTrip.items.map((it) => {
-        const u = updates.find((x) => x.id === it.id);
-        return u ? { ...it, scheduledAt: u.scheduledAt, endsAt: u.endsAt } : it;
-      }),
-    }));
+    const time = suggested != null ? new Date(suggested).toTimeString().slice(0, 5) : timeInputValue(moved.scheduledAt) || '09:00';
 
     setError(null);
-    setPending('reorder');
+    setReschedule({ item: moved, date: day, time });
+  };
+
+  const confirmReschedule = async () => {
+    if (!reschedule) return;
+    const scheduledAt = combineDateTime(reschedule.date, reschedule.time);
+    if (!scheduledAt) {
+      setError('Pick a valid date and time for the card');
+      return;
+    }
+    const item = reschedule.item;
+    const dur =
+      item.endsAt && item.scheduledAt
+        ? new Date(item.endsAt).getTime() - new Date(item.scheduledAt).getTime()
+        : null;
+    const endsAt = dur != null && dur > 0 ? new Date(new Date(scheduledAt).getTime() + dur).toISOString() : null;
+
+    setError(null);
+    setPendingItemId(item.id);
     try {
-      let latest: TripDetail | null = null;
-      for (const u of updates) {
-        const r = await fetch(`/api/trips/${trip.id}/items/${u.id}`, {
-          method: 'PATCH',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scheduledAt: u.scheduledAt, endsAt: u.endsAt }),
-        });
-        const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
-        if (!r.ok || !data?.trip) {
-          setError(data?.error ?? 'Could not save the new order');
-          if (latest) setTrip(latest);
-          return;
-        }
-        latest = data.trip;
+      const r = await fetch(`/api/trips/${trip.id}/items/${item.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledAt, endsAt }),
+      });
+      const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
+      if (!r.ok || !data?.trip) {
+        setError(data?.error ?? 'Could not save the new time');
+        return;
       }
-      if (latest) setTrip(latest);
+      setTrip(data.trip);
+      setReschedule(null);
     } finally {
-      setPending(null);
+      setPendingItemId(null);
     }
   };
 
@@ -499,7 +500,7 @@ export default function ItineraryPageClient({
 
         {/* Day timeline */}
         <div>
-          {displayDays.map((day, idx) => {
+          {displayDays.map((day) => {
             const dayItems = itemsByDay.map.get(day) ?? [];
             const isToday = day === today;
             const parts = dayParts(day);
@@ -547,7 +548,8 @@ export default function ItineraryPageClient({
                     onDelete={deleteItem}
                     onToggleComplete={toggleComplete}
                     onStartAdd={() => startAdd(day)}
-                    onReorder={reorderDay}
+                    onReorder={requestReschedule}
+                    rescheduleId={reschedule?.item.id ?? null}
                     pending={pending}
                   />
                 </div>
@@ -650,6 +652,74 @@ export default function ItineraryPageClient({
           </p>
         )}
       </main>
+
+      {reschedule && (
+        <>
+          <button
+            type="button"
+            aria-label="Cancel rescheduling"
+            className="fixed inset-0 z-[300] bg-gray-900/30 backdrop-blur-sm"
+            onClick={() => {
+              setReschedule(null);
+              setError(null);
+            }}
+          />
+          <div className="fixed left-1/2 top-1/2 z-[310] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                New time needed
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Allocate a new time</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              You moved <span className="font-medium text-gray-700">{reschedule.item.description}</span>. Set when it now
+              happens — the day re-orders by time.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-xs font-medium text-gray-500">Date</span>
+                <input
+                  type="date"
+                  value={reschedule.date}
+                  onChange={(e) => setReschedule((cur) => (cur ? { ...cur, date: e.target.value } : cur))}
+                  className="mt-1 w-full rounded-lg bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-gray-500">Time</span>
+                <input
+                  type="time"
+                  value={reschedule.time}
+                  onChange={(e) => setReschedule((cur) => (cur ? { ...cur, time: e.target.value } : cur))}
+                  className="mt-1 w-full rounded-lg bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </label>
+            </div>
+            {error && <p className="mt-3 text-sm font-medium text-rose-600">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setReschedule(null);
+                  setError(null);
+                }}
+                disabled={pendingItemId === reschedule.item.id}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmReschedule}
+                disabled={pendingItemId === reschedule.item.id}
+                className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {pendingItemId === reschedule.item.id ? 'Saving…' : 'Save time'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -670,7 +740,8 @@ interface ItemListProps {
   onDelete: (id: number) => void;
   onToggleComplete: (item: TripItineraryItemSummary) => void;
   onStartAdd: (type?: TripItemType) => void;
-  onReorder?: (items: TripItineraryItemSummary[]) => void;
+  onReorder?: (items: TripItineraryItemSummary[], movedId: number) => void;
+  rescheduleId?: number | null;
   pending: string | null;
 }
 
@@ -690,6 +761,7 @@ function ItemList({
   onToggleComplete,
   onStartAdd,
   onReorder,
+  rescheduleId,
   pending,
 }: ItemListProps) {
   const [dragId, setDragId] = useState<number | null>(null);
@@ -697,15 +769,16 @@ function ItemList({
   const dndEnabled = canEdit && !!onReorder && items.length > 1;
 
   const handleDrop = (targetId: number) => {
-    const from = items.findIndex((i) => i.id === dragId);
+    const movedId = dragId;
+    const from = items.findIndex((i) => i.id === movedId);
     const to = items.findIndex((i) => i.id === targetId);
     setDragId(null);
     setOverId(null);
-    if (!onReorder || from < 0 || to < 0 || from === to) return;
+    if (!onReorder || movedId == null || from < 0 || to < 0 || from === to) return;
     const next = [...items];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    onReorder(next);
+    onReorder(next, movedId);
   };
 
   return (
@@ -754,7 +827,7 @@ function ItemList({
             }
             className={`rounded-xl transition ${dragId === item.id ? 'opacity-40' : ''} ${
               overId === item.id && dragId !== item.id ? 'ring-2 ring-primary/40' : ''
-            }`}
+            } ${rescheduleId === item.id ? 'ring-2 ring-amber-400' : ''}`}
           >
             {ROW_STYLE_TYPES.has(item.itemType) ? (
               <BookedRow

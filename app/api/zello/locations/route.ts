@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { userHasModule, userHasRole } from '@/lib/user';
+import { getZelloLocations } from '@/lib/zello-work';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -14,7 +15,17 @@ function canUse(user: AuthUser): boolean {
   return userHasRole(user, ADMIN_ROLE_NAME) || userHasModule(user, 'radio-zello');
 }
 
-/** Latest known position of every device that has reported on this channel. */
+/**
+ * Latest known position of every device.
+ *
+ * When a Zello Work network is configured (ZELLO_* env), this pulls the same
+ * server-stored last-known positions the Zello Work web map shows, via the
+ * `location/get` Server API — so devices appear even if they aren't transmitting
+ * on the channel right now. Those positions are persisted, then returned.
+ *
+ * Without Zello Work configured (consumer Zello), it falls back to positions
+ * captured live from the channel's `on_location` events and stored per channel.
+ */
 export async function GET(request: NextRequest) {
   const { auth, response } = await requireRequestAuth(request);
   if (response || !auth) return response;
@@ -22,15 +33,42 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const channel = (searchParams.get('channel') ?? '').trim();
-  if (!channel) return NextResponse.json({ devices: [] });
   const network = (searchParams.get('network') ?? '').trim();
 
+  // Prefer the Zello Work server's stored locations (network-wide, like the Zello map).
+  const live = await getZelloLocations();
+  if (live.configured && !live.error) {
+    const stamp = network || (process.env.ZELLO_NETWORK ?? '').trim();
+    const channelKey = channel || 'all';
+    await Promise.all(
+      live.devices.map((d) =>
+        prisma.zelloDeviceLocation.upsert({
+          where: { network_channel_device: { network: stamp, channel: channelKey, device: d.device } },
+          create: {
+            network: stamp,
+            channel: channelKey,
+            device: d.device,
+            latitude: d.latitude,
+            longitude: d.longitude,
+            accuracy: d.accuracy,
+            address: null,
+            at: new Date(d.at),
+          },
+          update: { latitude: d.latitude, longitude: d.longitude, accuracy: d.accuracy, at: new Date(d.at) },
+        }),
+      ),
+    );
+    return NextResponse.json({ devices: live.devices, source: 'zellowork', total: live.total });
+  }
+
+  // Consumer Zello / not configured: serve positions captured live on this channel.
+  if (!channel) return NextResponse.json({ devices: [], source: 'stored', error: live.error ?? undefined });
   const devices = await prisma.zelloDeviceLocation.findMany({
     where: { network, channel },
     orderBy: { at: 'desc' },
     take: 500,
   });
-  return NextResponse.json({ devices });
+  return NextResponse.json({ devices, source: 'stored', error: live.error ?? undefined });
 }
 
 /** Upsert one device's latest position. */

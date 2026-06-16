@@ -44,6 +44,18 @@ type CustomerCollectionClient = {
       createdById: number;
     };
   }) => Promise<CustomerRecord>;
+  update: (args: {
+    where: { id: number };
+    data: Partial<{
+      name: string;
+      email: string | null;
+      phone: string | null;
+      company: string | null;
+      address: string | null;
+      billingAddress: string | null;
+    }>;
+  }) => Promise<CustomerRecord>;
+  delete: (args: { where: { id: number } }) => Promise<CustomerRecord>;
 };
 
 function getCustomerClient(): CustomerCollectionClient {
@@ -100,4 +112,44 @@ export async function createCustomer(input: CreateCustomerInput) {
     },
   });
   return serializeCustomer(created);
+}
+
+export interface UpdateCustomerInput {
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  company?: string | null;
+  address?: string | null;
+  billingAddress?: string | null;
+}
+
+export async function updateCustomer(id: number, patch: UpdateCustomerInput): Promise<CustomerSummary | null> {
+  const existing = await getCustomerClient().findUnique({ where: { id } });
+  if (!existing) return null;
+
+  const data: UpdateCustomerInput = {};
+  if (patch.name !== undefined) {
+    const v = patch.name.trim();
+    if (v) data.name = v;
+  }
+  if (patch.email !== undefined) data.email = patch.email?.trim() || null;
+  if (patch.phone !== undefined) data.phone = patch.phone?.trim() || null;
+  if (patch.company !== undefined) data.company = patch.company?.trim() || null;
+  if (patch.address !== undefined) data.address = patch.address?.trim() || null;
+  if (patch.billingAddress !== undefined) data.billingAddress = patch.billingAddress?.trim() || null;
+
+  const updated = await getCustomerClient().update({ where: { id }, data });
+  return serializeCustomer(updated);
+}
+
+export async function deleteCustomer(id: number): Promise<true | { error: string }> {
+  const existing = await getCustomerClient().findUnique({ where: { id } });
+  if (!existing) return { error: 'Customer not found' };
+  try {
+    await getCustomerClient().delete({ where: { id } });
+    return true;
+  } catch {
+    // Foreign-key restriction: the customer is referenced by quotes/invoices/trips.
+    return { error: 'This customer cannot be deleted because it has related quotes, invoices, or trips.' };
+  }
 }

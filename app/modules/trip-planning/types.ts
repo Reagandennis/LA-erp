@@ -58,6 +58,7 @@ export interface TripSummary {
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
   itemCount: number;
+  assignmentCount: number;
 }
 
 export interface TripDetail extends TripSummary {

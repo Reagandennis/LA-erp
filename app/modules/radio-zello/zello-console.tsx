@@ -102,6 +102,9 @@ export default function ZelloConsole() {
   const [voice, setVoice] = useState(true);
   const [channels, setChannels] = useState<string[]>([]);
   const [devices, setDevices] = useState<MapDevice[]>([]);
+  // Device-tracking map controls: focus a single device / re-frame all of them.
+  const [mapFocus, setMapFocus] = useState<{ from: string; n: number } | null>(null);
+  const [fitNonce, setFitNonce] = useState(0);
   // null = unknown yet (not connected); true/false reported by on_channel_status.
   const [locationsSupported, setLocationsSupported] = useState<boolean | null>(null);
 
@@ -421,6 +424,15 @@ export default function ZelloConsole() {
     transmittingRef.current = false;
   };
 
+  // Keep device positions current while connected. On a Zello Work network the
+  // server returns last-known locations (like the Zello map), so polling shows
+  // devices even when they aren't actively transmitting on the channel.
+  useEffect(() => {
+    if (status !== 'online') return;
+    const id = setInterval(() => void loadDevices(config), 30_000);
+    return () => clearInterval(id);
+  }, [status, config, loadDevices]);
+
   const startPtt = useCallback(() => {
     if (status !== 'online' || !voice || transmittingRef.current) return;
     transmittingRef.current = true;
@@ -479,6 +491,8 @@ export default function ZelloConsole() {
   const isConnecting = status === 'connecting' || status === 'authenticating';
   const meta = STATUS_META[status];
   const someoneElseTalking = talking !== null && !transmitting;
+  // Stable A→Z order so the device list rows and the numbered map markers line up.
+  const sortedDevices = [...devices].sort((a, b) => a.from.localeCompare(b.from));
 
   return (
     <div className="min-h-screen bg-gray-50/50 p-4 sm:p-6 lg:p-10">
@@ -698,14 +712,26 @@ export default function ZelloConsole() {
         </div>
 
         <div className="rounded-2xl border border-gray-100 bg-white p-4">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-gray-900">Device tracking</p>
-              <p className="text-xs text-gray-500">Live positions from devices sharing location on this channel.</p>
+              <p className="text-xs text-gray-500">Live positions of every device sharing location on this network.</p>
             </div>
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-              {devices.length} {devices.length === 1 ? 'device' : 'devices'}
-            </span>
+            <div className="flex items-center gap-2">
+              {devices.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFitNonce((n) => n + 1)}
+                  className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  title="Zoom out to show every device"
+                >
+                  Fit all
+                </button>
+              )}
+              <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                {devices.length} {devices.length === 1 ? 'device' : 'devices'}
+              </span>
+            </div>
           </div>
           {isLive && locationsSupported === false && (
             <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
@@ -715,11 +741,14 @@ export default function ZelloConsole() {
           )}
           {isLive && locationsSupported && devices.length === 0 && (
             <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
-              Location sharing is enabled on this channel, but no device has reported a position yet. Devices appear here
-              once they share their location from the Zello app.
+              Location sharing is enabled, but no device has reported a position yet. Devices appear here once they share
+              their location from the Zello app.
             </div>
           )}
-          <ZelloMap devices={devices} />
+          <div className="grid gap-3 lg:grid-cols-[240px_1fr]">
+            <DeviceList devices={sortedDevices} onFocus={(from) => setMapFocus((p) => ({ from, n: (p?.n ?? 0) + 1 }))} />
+            <ZelloMap devices={sortedDevices} focus={mapFocus} fitNonce={fitNonce} />
+          </div>
         </div>
       </div>
 
@@ -773,6 +802,60 @@ export default function ZelloConsole() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function timeAgo(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+// Green = reported within 5 min, amber = within an hour, grey = older.
+function freshnessDot(at: number): string {
+  const min = (Date.now() - at) / 60000;
+  if (min <= 5) return 'bg-emerald-500';
+  if (min <= 60) return 'bg-amber-500';
+  return 'bg-gray-300';
+}
+
+/** Roster of devices sharing location; click a row to focus that device on the map. */
+function DeviceList({ devices, onFocus }: { devices: MapDevice[]; onFocus: (from: string) => void }) {
+  if (devices.length === 0) {
+    return (
+      <div className="flex items-center justify-center rounded-xl border border-dashed border-gray-200 p-3 text-center text-xs text-gray-400 lg:h-80">
+        No devices sharing location yet.
+      </div>
+    );
+  }
+  return (
+    <div className="divide-y divide-gray-50 overflow-y-auto rounded-xl border border-gray-100 lg:h-80">
+      {devices.map((d, i) => (
+        <button
+          key={d.from}
+          type="button"
+          onClick={() => onFocus(d.from)}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50"
+          title="Show on map"
+        >
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-white">
+            {i + 1}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-gray-900">{d.from}</span>
+            <span className="block truncate text-[11px] text-gray-400">
+              {timeAgo(d.at)}
+              {d.accuracy ? ` · ±${Math.round(d.accuracy)}m` : ''}
+            </span>
+          </span>
+          <span className={`h-2 w-2 shrink-0 rounded-full ${freshnessDot(d.at)}`} aria-hidden />
+        </button>
+      ))}
     </div>
   );
 }

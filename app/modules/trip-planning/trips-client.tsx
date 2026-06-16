@@ -105,6 +105,7 @@ export default function TripsClient({
         owner: trip.owner,
         sourceQuote: trip.sourceQuote,
         itemCount: 'items' in trip ? trip.items.length : trip.itemCount,
+        assignmentCount: 'assignmentCount' in trip ? trip.assignmentCount : 0,
       };
       return [summary, ...without];
     });
@@ -211,6 +212,9 @@ export default function TripsClient({
               <p className="mt-2 text-xs text-gray-400">
                 {trip.itemCount} items · {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
               </p>
+              <div className="mt-2">
+                <ResourceBadge count={trip.assignmentCount} />
+              </div>
             </button>
           ))}
           {filteredTrips.length === 0 && <EmptyState filtered={hasTrips} onCreate={() => setBuilderOpen(true)} />}
@@ -227,6 +231,7 @@ export default function TripsClient({
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Owner</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Dates</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Resources</th>
                 <th className="w-10 px-6 py-3.5" />
               </tr>
             </thead>
@@ -262,6 +267,9 @@ export default function TripsClient({
                   <td className="px-6 py-4">
                     <p className="text-sm text-gray-500">{formatDate(trip.startDate)}</p>
                     <p className="text-xs text-gray-400">→ {formatDate(trip.endDate)}</p>
+                  </td>
+                  <td className="px-6 py-4">
+                    <ResourceBadge count={trip.assignmentCount} />
                   </td>
                   <td className="px-6 py-4 text-right">
                     <svg
@@ -304,6 +312,20 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   );
+}
+
+function ResourceBadge({ count }: { count: number }) {
+  if (count > 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        </svg>
+        {count} allocated
+      </span>
+    );
+  }
+  return <span className="text-xs text-gray-300">Not allocated</span>;
 }
 
 function EmptyState({ filtered, onCreate }: { filtered: boolean; onCreate: () => void }) {

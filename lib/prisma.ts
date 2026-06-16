@@ -26,6 +26,10 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     tripItineraryItem?: unknown;
     tripSequence?: unknown;
     trackingSequence?: unknown;
+    vehicle?: unknown;
+    driver?: unknown;
+    officer?: unknown;
+    tripAssignment?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -39,7 +43,11 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.trip &&
       candidate.tripItineraryItem &&
       candidate.tripSequence &&
-      candidate.trackingSequence,
+      candidate.trackingSequence &&
+      candidate.vehicle &&
+      candidate.driver &&
+      candidate.officer &&
+      candidate.tripAssignment,
   );
 }
 

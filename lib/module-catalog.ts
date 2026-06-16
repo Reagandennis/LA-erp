@@ -287,4 +287,11 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     category: 'Operations',
     sortOrder: 40,
   },
+  {
+    slug: 'task-assignment',
+    name: 'Task Assignment',
+    description: 'Allocate cars, drivers, and close protection officers to trips.',
+    category: 'Operations',
+    sortOrder: 41,
+  },
 ];

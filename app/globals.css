@@ -45,3 +45,42 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Task-assignment dashboard: animated connector flowing from a resource into its trip. */
+@keyframes ta-flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 18px 0;
+  }
+}
+.ta-arrow-line {
+  background-image: linear-gradient(
+    90deg,
+    var(--primary) 0,
+    var(--primary) 55%,
+    transparent 55%,
+    transparent 100%
+  );
+  background-size: 18px 2px;
+  background-repeat: repeat-x;
+  animation: ta-flow 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ta-arrow-line {
+    animation: none;
+  }
+}
+.ta-pulse {
+  animation: ta-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ta-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}

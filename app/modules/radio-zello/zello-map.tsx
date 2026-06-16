@@ -28,7 +28,8 @@ function loadGoogleMaps(key: string): Promise<void> {
       resolve();
     };
     const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${cb}`;
+    // `marker` library is required for AdvancedMarkerElement.
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=marker&v=weekly&callback=${cb}`;
     s.async = true;
     s.onerror = () => {
       clearTimeout(timer);
@@ -43,13 +44,25 @@ function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
 }
 
-/** Live device-tracking map fed by Zello `on_location` reports. */
-export default function ZelloMap({ devices }: { devices: MapDevice[] }) {
+/** Live device-tracking map fed by Zello location reports. */
+export default function ZelloMap({
+  devices,
+  focus,
+  fitNonce,
+}: {
+  devices: MapDevice[];
+  /** Pan/zoom to this device and open its popup; bump `n` to re-trigger for the same device. */
+  focus?: { from: string; n: number } | null;
+  /** Bump this to re-frame the map around all current devices. */
+  fitNonce?: number;
+}) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
   const fittedRef = useRef(false);
+  const devicesRef = useRef<MapDevice[]>(devices);
+  devicesRef.current = devices;
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
 
@@ -63,9 +76,13 @@ export default function ZelloMap({ devices }: { devices: MapDevice[] }) {
       .then(() => {
         if (cancelled || !divRef.current) return;
         const g = (window as any).google;
+        // AdvancedMarkerElement requires a Map ID. Use a configured one in
+        // production; fall back to Google's DEMO_MAP_ID for local/dev.
+        const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID';
         mapRef.current = new g.maps.Map(divRef.current, {
           center: { lat: 1.2921, lng: 36.8219 }, // Nairobi
           zoom: 6,
+          mapId,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
@@ -88,9 +105,16 @@ export default function ZelloMap({ devices }: { devices: MapDevice[] }) {
     const seen = new Set<string>();
     const bounds = new g.maps.LatLngBounds();
 
-    for (const d of devices) {
+    devices.forEach((d, i) => {
       seen.add(d.from);
       const pos = { lat: d.lat, lng: d.lon };
+      // Numbered, brand-coloured pin keeps each marker correlated with its list row.
+      const pin = new g.maps.marker.PinElement({
+        glyph: String(i + 1),
+        glyphColor: '#ffffff',
+        background: '#03458f',
+        borderColor: '#022f63',
+      });
       const content =
         `<div style="font:13px system-ui;min-width:130px">` +
         `<strong>${esc(d.from)}</strong><br/>` +
@@ -100,19 +124,26 @@ export default function ZelloMap({ devices }: { devices: MapDevice[] }) {
         `</div>`;
       let m = markers.get(d.from);
       if (!m) {
-        m = new g.maps.Marker({ map, position: pos, title: d.from });
+        m = new g.maps.marker.AdvancedMarkerElement({
+          map,
+          position: pos,
+          title: d.from,
+          content: pin.element,
+          gmpClickable: true,
+        });
         m.__info = new g.maps.InfoWindow({ content });
-        m.addListener('click', () => m.__info.open(map, m));
+        m.addListener('gmp-click', () => m.__info.open({ anchor: m, map }));
         markers.set(d.from, m);
       } else {
-        m.setPosition(pos);
+        m.position = pos;
+        m.content = pin.element;
         m.__info?.setContent(content);
       }
       bounds.extend(pos);
-    }
+    });
     for (const [k, m] of markers) {
       if (!seen.has(k)) {
-        m.setMap(null);
+        m.map = null;
         markers.delete(k);
       }
     }
@@ -127,6 +158,37 @@ export default function ZelloMap({ devices }: { devices: MapDevice[] }) {
       fittedRef.current = true;
     }
   }, [devices, ready]);
+
+  // Pan/zoom to a chosen device and open its popup (triggered from the device list).
+  useEffect(() => {
+    if (!ready || !focus) return;
+    const m = markersRef.current.get(focus.from);
+    const map = mapRef.current;
+    if (m && map) {
+      if (m.position) map.panTo(m.position);
+      map.setZoom(15);
+      m.__info?.open({ anchor: m, map });
+    }
+  }, [focus, ready]);
+
+  // Re-frame around all current devices on demand ("Fit all").
+  useEffect(() => {
+    if (!ready || !fitNonce) return;
+    const g = (window as any).google;
+    const map = mapRef.current;
+    if (!g || !map) return;
+    const list = devicesRef.current;
+    if (list.length === 0) return;
+    if (list.length === 1) {
+      map.setCenter({ lat: list[0].lat, lng: list[0].lon });
+      map.setZoom(14);
+      return;
+    }
+    const bounds = new g.maps.LatLngBounds();
+    for (const d of list) bounds.extend({ lat: d.lat, lng: d.lon });
+    map.fitBounds(bounds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitNonce, ready]);
 
   if (!key || error) {
     return (

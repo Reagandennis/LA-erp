@@ -57,6 +57,10 @@ model User {
   createdScheduleShifts ScheduleShift[] @relation("ScheduleCreatedBy")
   zelloActivities       ZelloActivity[] @relation("ZelloActivityRecordedBy")
   whatsAppMessages      WhatsAppMessage[] @relation("WhatsAppMessageRecordedBy")
+  createdVehicles       Vehicle[]       @relation("VehicleCreatedBy")
+  createdDrivers        Driver[]        @relation("DriverCreatedBy")
+  createdOfficers       Officer[]       @relation("OfficerCreatedBy")
+  createdTripAssignments TripAssignment[] @relation("TripAssignmentCreatedBy")
 }
 
 model PersonalTodo {
@@ -546,6 +550,7 @@ model Trip {
   createdBy     User      @relation("TripCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   owner         User?     @relation("TripOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   items         TripItineraryItem[]
+  assignments   TripAssignment[]
 
   @@index([createdById, status])
   @@index([ownerId, status])
@@ -599,6 +604,98 @@ model TripItineraryItemNotification {
 model TripSequence {
   year       Int @id
   lastNumber Int @default(0)
+}
+
+// --- Task assignment: fleet & protection resources allocated to trips ---
+
+model Vehicle {
+  id           Int      @id @default(autoincrement())
+  registration String   @unique
+  make         String?
+  model        String?
+  type         String   @default("Sedan")
+  status       String   @default("Available")
+  capacity     Int?
+  notes        String?
+  photoName    String?
+  photoMime    String?
+  photoSize    Int?
+  photoContent Bytes?
+  createdById  Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    User     @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments  TripAssignment[]
+
+  @@index([status])
+  @@index([registration])
+}
+
+model Driver {
+  id            Int      @id @default(autoincrement())
+  name          String
+  phone         String?
+  licenseNumber String?
+  status        String   @default("Available")
+  notes         String?
+  photoName     String?
+  photoMime     String?
+  photoSize     Int?
+  photoContent  Bytes?
+  createdById   Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     User     @relation("DriverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments   TripAssignment[]
+
+  @@index([status])
+  @@index([name])
+}
+
+model Officer {
+  id          Int      @id @default(autoincrement())
+  name        String
+  callSign    String?
+  grade       String   @default("CPO")
+  phone       String?
+  status      String   @default("Available")
+  notes       String?
+  photoName    String?
+  photoMime    String?
+  photoSize    Int?
+  photoContent Bytes?
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User     @relation("OfficerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments TripAssignment[]
+
+  @@index([status])
+  @@index([name])
+}
+
+model TripAssignment {
+  id          Int      @id @default(autoincrement())
+  tripId      Int
+  vehicleId   Int?
+  driverId    Int?
+  officerId   Int?
+  status      String   @default("Planned")
+  notes       String?
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  driver      Driver?  @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  officer     Officer? @relation(fields: [officerId], references: [id], onDelete: SetNull)
+  createdBy   User     @relation("TripAssignmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tripId])
+  @@index([vehicleId])
+  @@index([driverId])
+  @@index([officerId])
+  @@index([status])
 }
 
 model TrackingSequence {
