@@ -29,13 +29,15 @@ export function signSessionToken(input: {
       email: input.email,
     },
     getJwtSecret(),
-    { expiresIn: SESSION_DURATION_SECONDS },
+    { expiresIn: SESSION_DURATION_SECONDS, algorithm: 'HS256' },
   );
 }
 
 export function verifySessionToken(token: string): SessionTokenPayload | null {
   try {
-    return jwt.verify(token, getJwtSecret()) as SessionTokenPayload;
+    return jwt.verify(token, getJwtSecret(), {
+      algorithms: ['HS256'],
+    }) as SessionTokenPayload;
   } catch {
     return null;
   }

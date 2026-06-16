@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { requireRequestAuth } from '@/lib/request-auth';
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -12,6 +14,9 @@ const parseNumber = (value: string | null) => {
 };
 
 export async function GET(request: NextRequest) {
+  const { auth, response: authResponse } = await requireRequestAuth(request);
+  if (authResponse || !auth) return authResponse;
+
   const { searchParams } = new URL(request.url);
   const lamin = parseNumber(searchParams.get('lamin'));
   const lomin = parseNumber(searchParams.get('lomin'));

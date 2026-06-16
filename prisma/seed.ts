@@ -97,7 +97,6 @@ async function seedBootstrapAdmin() {
     );
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
   const adminRole = await prisma.role.findUnique({
     where: { name: ADMIN_ROLE_NAME },
   });
@@ -106,21 +105,37 @@ async function seedBootstrapAdmin() {
     throw new Error('Admin role was not created during RBAC seeding');
   }
 
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: {
-      name,
-      passwordHash,
-      status: 'active',
-      sessionVersion: { increment: 1 },
-    },
-    create: {
-      email,
-      name,
-      passwordHash,
-      status: 'active',
-    },
-  });
+  // Idempotent & non-disruptive: the bootstrap password is only applied when the
+  // admin is FIRST created. Re-running the seed (e.g. on every deploy) keeps the
+  // name in sync but never overwrites the password or bumps sessionVersion, so
+  // existing logins are not revoked. To rotate the password, change it in .env
+  // and run the seed once with BOOTSTRAP_ADMIN_FORCE_PASSWORD=1.
+  const existing = await prisma.user.findUnique({ where: { email } });
+
+  let user;
+  if (existing) {
+    const forcePassword = process.env.BOOTSTRAP_ADMIN_FORCE_PASSWORD === '1';
+    user = await prisma.user.update({
+      where: { email },
+      data: forcePassword
+        ? {
+            name,
+            passwordHash: await bcrypt.hash(password, 12),
+            status: 'active',
+            sessionVersion: { increment: 1 },
+          }
+        : { name },
+    });
+  } else {
+    user = await prisma.user.create({
+      data: {
+        email,
+        name,
+        passwordHash: await bcrypt.hash(password, 12),
+        status: 'active',
+      },
+    });
+  }
 
   await prisma.userRole.upsert({
     where: {

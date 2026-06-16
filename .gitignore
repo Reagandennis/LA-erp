@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local env override (contains secrets — never commit)
+.local.env
+*.local.env

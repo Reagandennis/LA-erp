@@ -12,7 +12,13 @@ import { getUserByEmail } from '@/lib/user';
 import { loginSchema } from '@/lib/validation';
 
 function getRequestIp(request: NextRequest) {
-  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
+  // Caddy (our only trusted proxy, on localhost) appends the real client IP to
+  // the END of X-Forwarded-For. Read the last hop so a client-supplied XFF
+  // header can't spoof the IP used for rate limiting / audit logging.
+  const xff = request.headers.get('x-forwarded-for');
+  if (!xff) return null;
+  const hops = xff.split(',').map((part) => part.trim()).filter(Boolean);
+  return hops.length ? hops[hops.length - 1] : null;
 }
 
 export async function POST(request: NextRequest) {

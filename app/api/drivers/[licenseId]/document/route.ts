@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireRequestAuth } from '@/lib/request-auth';
 import { getDriverLicenseDocument, setDriverLicenseDocument } from '@/lib/drivers';
+import { ADMIN_ROLE_NAME } from '@/lib/rbac';
+import { userHasModule, userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10 MB
+const DRIVERS_MODULE = 'drivers-license-expiry';
 
 function parseId(value: string) {
   const n = Number(value);
@@ -20,6 +23,9 @@ export async function GET(
 ) {
   const { auth, response } = await requireRequestAuth(request);
   if (response || !auth) return response;
+  if (!userHasRole(auth.user, ADMIN_ROLE_NAME) && !userHasModule(auth.user, DRIVERS_MODULE)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { licenseId: raw } = await params;
   const id = parseId(raw);
@@ -46,6 +52,9 @@ export async function POST(
 ) {
   const { auth, response } = await requireRequestAuth(request);
   if (response || !auth) return response;
+  if (!userHasRole(auth.user, ADMIN_ROLE_NAME) && !userHasModule(auth.user, DRIVERS_MODULE)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { licenseId: raw } = await params;
   const id = parseId(raw);
