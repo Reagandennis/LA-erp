@@ -15,11 +15,11 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     sortOrder: 1,
   },
   {
-    slug: 'bulletin-board',
-    name: 'Bulletin Board',
-    description: 'Publish announcements, alerts, and operational notices.',
-    category: 'Communication',
-    sortOrder: 3,
+    slug: 'handover',
+    name: 'Handover',
+    description: 'Shift handover log — record the situation, flag what the next shift must watch, and acknowledge receipt.',
+    category: 'Operations',
+    sortOrder: 43,
   },
   {
     slug: 'calendar',
@@ -286,5 +286,12 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     description: 'Allocate cars, drivers, and close protection officers to trips.',
     category: 'Operations',
     sortOrder: 41,
+  },
+  {
+    slug: 'intel',
+    name: 'Intel',
+    description: 'AI security assessments for any location — risk report with map, sources, and recommendations.',
+    category: 'Operations',
+    sortOrder: 42,
   },
 ];

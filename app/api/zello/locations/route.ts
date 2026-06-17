@@ -12,7 +12,11 @@ export const runtime = 'nodejs';
 
 type AuthUser = Parameters<typeof userHasRole>[0];
 function canUse(user: AuthUser): boolean {
-  return userHasRole(user, ADMIN_ROLE_NAME) || userHasModule(user, 'radio-zello');
+  return (
+    userHasRole(user, ADMIN_ROLE_NAME) ||
+    userHasModule(user, 'radio-zello') ||
+    userHasModule(user, 'map')
+  );
 }
 
 /**
