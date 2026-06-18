@@ -64,6 +64,14 @@ model User {
   createdIntelAssessments IntelAssessment[] @relation("IntelAssessmentCreatedBy")
   createdHandovers      HandoverEntry[] @relation("HandoverCreatedBy")
   acknowledgedHandovers HandoverEntry[] @relation("HandoverAcknowledgedBy")
+  createdContacts       Contact[]       @relation("ContactCreatedBy")
+  createdSops           Sop[]           @relation("SopCreatedBy")
+  sopAcknowledgements   SopAcknowledgement[]
+  sopRevisions          SopRevision[]   @relation("SopRevisionChangedBy")
+  createdContracts      Contract[]      @relation("ContractCreatedBy")
+  notes                 Note[]          @relation("NoteOwner")
+  createdPersonnel      Personnel[]     @relation("PersonnelCreatedBy")
+  personnelRecord       Personnel?      @relation("PersonnelUser")
 }
 
 model PersonalTodo {
@@ -272,8 +280,35 @@ model Customer {
   quotes         Quote[]
   invoices       Invoice[]
   trips          Trip[]
+  contacts       Contact[]
 
   @@index([createdById, createdAt])
+  @@index([name])
+}
+
+model Contact {
+  id           Int      @id @default(autoincrement())
+  name         String
+  role         String?
+  category     String   @default("Client")
+  email        String?
+  phone        String?
+  location     String?
+  notes        String?
+  tags         String[] @default([])
+  customerId   Int?
+  photoName    String?
+  photoMime    String?
+  photoSize    Int?
+  photoContent Bytes?
+  createdById  Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    User      @relation("ContactCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([createdById, createdAt])
+  @@index([category])
   @@index([name])
 }
 
@@ -1054,4 +1089,133 @@ model WhatsAppMessage {
 
   @@index([contact, at])
   @@index([at])
+}
+
+// Standard Operating Procedure — a controlled compliance document.
+model Sop {
+  id            Int      @id @default(autoincrement())
+  code          String   @unique // e.g. OPS-SAF-01
+  title         String
+  category      String   @default("Operations")
+  status        String   @default("Draft") // Draft | Review | Active | Archived
+  version       String   @default("v1.0")
+  ownerName     String? // accountable owner (free text)
+  description   String?
+  steps         String[] @default([]) // numbered procedure steps
+  effectiveDate DateTime?
+  reviewDate    DateTime? // next review due
+  createdById   Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     User      @relation("SopCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  acknowledgements SopAcknowledgement[]
+  revisions     SopRevision[]
+
+  @@index([status])
+  @@index([category])
+  @@index([reviewDate])
+}
+
+// A user's confirmation that they have read & understood a specific SOP version.
+model SopAcknowledgement {
+  id             Int      @id @default(autoincrement())
+  sopId          Int
+  userId         Int
+  version        String // the version that was acknowledged
+  acknowledgedAt DateTime @default(now())
+  sop            Sop      @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sopId, userId, version])
+  @@index([sopId, version])
+  @@index([userId])
+}
+
+// An audit-trail entry recording a change to an SOP (version bump / edit summary).
+model SopRevision {
+  id          Int      @id @default(autoincrement())
+  sopId       Int
+  version     String
+  summary     String
+  changedById Int
+  createdAt   DateTime @default(now())
+  sop         Sop      @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  changedBy   User     @relation("SopRevisionChangedBy", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([sopId, createdAt])
+}
+
+// A workforce / HR record. Standalone, with an optional link to a login (User) account.
+model Personnel {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String?
+  phone        String?
+  role         String? // job title
+  department   String   @default("Operations")
+  status       String   @default("Active") // Active | On Leave | Remote | Terminated
+  location     String?
+  manager      String? // manager name (free text)
+  joinDate     DateTime?
+  skills       String[] @default([])
+  notes        String?
+  userId       Int?     @unique // optional one-to-one link to a login account
+  photoName    String?
+  photoMime    String?
+  photoSize    Int?
+  photoContent Bytes?
+  createdById  Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    User     @relation("PersonnelCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  user         User?    @relation("PersonnelUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([department])
+  @@index([status])
+  @@index([name])
+}
+
+// A personal, user-scoped quick note (sticky-board style).
+model Note {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  title     String
+  content   String   @default("")
+  category  String   @default("Work") // Personal | Work | Ideas
+  color     String   @default("yellow")
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation("NoteOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, pinned, updatedAt])
+}
+
+// A tracked agreement/contract with a renewal window (consultants, vendors, retainers).
+model Contract {
+  id               Int      @id @default(autoincrement())
+  reference        String   @unique // e.g. CTR-9901
+  counterpartyName String // consultant / vendor / supplier
+  email            String?
+  department       String?
+  type             String   @default("Fixed Term") // Fixed Term | Retainer | Project Based
+  status           String   @default("Active") // Active | In Renewal | Renewed | Cancelled
+  startDate        DateTime
+  endDate          DateTime
+  value            Int? // contract value in whole currency units
+  currency         String   @default("USD")
+  lastRenewalDate  DateTime?
+  notes            String?
+  documentName     String?
+  documentMime     String?
+  documentSize     Int?
+  documentContent  Bytes?
+  createdById      Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdBy        User     @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([endDate])
+  @@index([status])
+  @@index([counterpartyName])
 }

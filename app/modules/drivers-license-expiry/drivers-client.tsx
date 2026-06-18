@@ -29,8 +29,12 @@ type Props = {
   initialStats: Stats;
 };
 
+const BRAND = '#03458f';
 const FILTER_OPTIONS: LicenseFilter[] = ['All', 'Valid', 'Expiring Soon', 'Expired'];
 const CATEGORY_OPTIONS = ['Class A', 'Class B', 'Class C', 'Commercial', 'Special'] as const;
+
+const inputClass =
+  'w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 focus:border-[#03458f]/40';
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/);
@@ -38,20 +42,27 @@ function initials(name: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-function getAvatarColor(name: string) {
-  const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500', 'bg-indigo-500'];
+// Restrained, brand-aligned avatar tints (no off-brand emerald/pink/orange).
+const AVATAR_TINTS = ['#03458f', '#2563eb', '#0891b2', '#6366f1', '#475569', '#0284c7'];
+function avatarTint(name: string) {
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_TINTS[Math.abs(hash) % AVATAR_TINTS.length];
 }
 
 function getStatusStyle(status: LicenseStatus) {
   switch (status) {
-    case 'Valid': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
-    case 'Expiring Soon': return 'bg-amber-50 text-amber-600 border-amber-100';
-    case 'Expired': return 'bg-rose-50 text-rose-600 border-rose-100';
+    case 'Valid': return 'bg-green-50 text-green-700 border-green-100';
+    case 'Expiring Soon': return 'bg-amber-50 text-amber-700 border-amber-100';
+    case 'Expired': return 'bg-rose-50 text-rose-700 border-rose-100';
+  }
+}
+
+function statusDot(status: LicenseStatus) {
+  switch (status) {
+    case 'Valid': return 'bg-green-500';
+    case 'Expiring Soon': return 'bg-amber-500';
+    case 'Expired': return 'bg-rose-500';
   }
 }
 
@@ -241,10 +252,10 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
   };
 
   const statCards = [
-    { label: 'Total Drivers', count: stats.total, color: 'text-gray-900' },
+    { label: 'Total drivers', count: stats.total, color: 'text-gray-900' },
     { label: 'Expired', count: stats.expired, color: 'text-rose-600' },
-    { label: 'Expiring Soon', count: stats.expiringSoon, color: 'text-amber-600' },
-    { label: 'Valid Licenses', count: stats.valid, color: 'text-emerald-600' },
+    { label: 'Expiring soon', count: stats.expiringSoon, color: 'text-amber-600' },
+    { label: 'Valid licenses', count: stats.valid, color: 'text-green-700' },
   ];
 
   return (
@@ -261,69 +272,71 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
         }}
       />
 
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">License Compliance</h1>
-            <p className="text-gray-500 mt-1 font-medium">Track driver licensing expiry and renewal schedules</p>
+            <h1 className="text-2xl font-semibold text-gray-900">License Compliance</h1>
+            <p className="text-gray-500 mt-1 text-sm">Track driver licensing expiry and renewal schedules.</p>
           </div>
           <div className="flex gap-3">
             <button
               onClick={handleHeaderUploadClick}
-              className="px-6 py-3 bg-white border border-gray-200 text-gray-700 rounded-2xl font-bold text-sm hover:bg-gray-50 transition-all shadow-sm flex items-center justify-center gap-2"
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-50 transition-colors"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
-              Upload Doc
+              Upload doc
             </button>
             {isAdmin && (
               <button
                 onClick={() => setIsAddOpen(true)}
-                className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-95"
+                style={{ backgroundColor: BRAND }}
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                Add Driver
+                Add driver
               </button>
             )}
           </div>
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           {statCards.map((stat, i) => (
-            <div key={i} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{stat.label}</p>
-              <p className={`text-2xl font-black ${stat.color}`}>{stat.count}</p>
+            <div key={i} className="bg-white p-4 rounded-2xl border border-gray-100">
+              <p className="text-xs text-gray-400 mb-1">{stat.label}</p>
+              <p className={`text-xl font-semibold ${stat.color}`}>{stat.count}</p>
             </div>
           ))}
         </div>
 
         {/* Toolbar */}
-        <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm mb-8 flex flex-col lg:flex-row lg:items-center gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-5">
           <div className="relative flex-1">
-            <svg className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
-              placeholder="Search driver name or license number..."
+              placeholder="Search driver name or license number…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
+              className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 text-sm"
             />
           </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl p-1 overflow-x-auto">
             {FILTER_OPTIONS.map((status) => (
               <button
                 key={status}
                 onClick={() => setActiveFilter(status)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                  activeFilter === status ? 'bg-emerald-50 text-emerald-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                  activeFilter === status ? 'text-white' : 'text-gray-500 hover:bg-gray-50'
                 }`}
+                style={activeFilter === status ? { backgroundColor: BRAND } : undefined}
               >
                 {status}
               </button>
@@ -332,69 +345,59 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
         </div>
 
         {/* License Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((lic) => (
-            <div
+            <button
               key={lic.id}
               onClick={() => setSelectedId(lic.id)}
-              className="group bg-white rounded-[2.5rem] p-8 border border-gray-100 hover:border-emerald-300 hover:shadow-2xl hover:shadow-emerald-500/5 transition-all duration-300 cursor-pointer relative overflow-hidden"
+              className="text-left bg-white rounded-2xl p-5 border border-gray-100 hover:border-[#03458f]/40 hover:shadow-sm transition-all"
             >
-              <div className="flex items-start justify-between mb-6">
-                <div className="flex items-center gap-4">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg transition-transform group-hover:scale-105 ${getAvatarColor(lic.driverName)}`}>
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-semibold shrink-0"
+                    style={{ backgroundColor: avatarTint(lic.driverName) }}
+                  >
                     {initials(lic.driverName)}
                   </div>
-                  <div>
-                    <h3 className="text-lg font-black text-gray-900 leading-tight">{lic.driverName}</h3>
-                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-1">{lic.category}</p>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-gray-900 leading-tight truncate">{lic.driverName}</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">{lic.category}</p>
                   </div>
                 </div>
-                <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getStatusStyle(lic.status)}`}>
+                <span className={`px-2 py-0.5 rounded-md text-xs font-medium border shrink-0 ${getStatusStyle(lic.status)}`}>
                   {lic.status}
+                </span>
+              </div>
+
+              <div className="space-y-2 mb-4">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-xs text-gray-400">License no.</span>
+                  <span className="font-medium text-gray-900">{lic.licenseNumber}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-xs text-gray-400">Expiry date</span>
+                  <span className={`font-medium ${lic.status === 'Expired' ? 'text-rose-600' : 'text-gray-900'}`}>{formatDate(lic.expiryDate)}</span>
                 </div>
               </div>
 
-              <div className="space-y-4 mb-8">
-                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-2xl">
-                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">License No</span>
-                  <span className="text-sm font-bold text-gray-900">{lic.licenseNumber}</span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-2xl">
-                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Expiry Date</span>
-                  <span className={`text-sm font-bold ${lic.status === 'Expired' ? 'text-rose-600' : 'text-gray-900'}`}>{formatDate(lic.expiryDate)}</span>
-                </div>
+              <div className="pt-3 border-t border-gray-50">
+                <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${
+                  lic.daysRemaining < 0 ? 'text-rose-600' : lic.daysRemaining < 30 ? 'text-amber-600' : 'text-green-700'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${statusDot(lic.status)}`} />
+                  {lic.daysRemaining < 0 ? `Expired ${Math.abs(lic.daysRemaining)} days ago` : `${lic.daysRemaining} days left`}
+                </span>
               </div>
-
-              <div className="flex items-center justify-between pt-6 border-t border-gray-50">
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Time Remaining</span>
-                  <span className={`text-sm font-black ${
-                    lic.daysRemaining < 0 ? 'text-rose-600' : lic.daysRemaining < 30 ? 'text-amber-600' : 'text-emerald-600'
-                  }`}>
-                    {lic.daysRemaining < 0 ? `Expired ${Math.abs(lic.daysRemaining)} days ago` : `${lic.daysRemaining} Days Left`}
-                  </span>
-                </div>
-                <div className="p-3 bg-gray-900 text-white rounded-xl shadow-lg shadow-gray-200">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                </div>
-              </div>
-            </div>
+            </button>
           ))}
         </div>
 
         {/* Empty State */}
         {filtered.length === 0 && (
-          <div className="text-center py-20 bg-white rounded-[3rem] border border-dashed border-gray-200">
-            <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold text-gray-900">{items.length === 0 ? 'No drivers yet' : 'No matching records'}</h3>
-            <p className="text-gray-500 mt-1">
+          <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
+            <h3 className="text-gray-900 font-medium">{items.length === 0 ? 'No drivers yet' : 'No matching records'}</h3>
+            <p className="text-gray-500 text-sm mt-1">
               {items.length === 0
                 ? isAdmin
                   ? 'Add a driver to start tracking license compliance.'
@@ -408,97 +411,92 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
       {/* Detail Viewer Drawer */}
       {selected && (
         <>
-          <div className="fixed inset-0 bg-gray-900/10 backdrop-blur-sm z-40 transition-opacity" onClick={() => setSelectedId(null)} />
-          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-500 ease-out flex flex-col">
-            <div className="p-8 pb-0">
-              <div className="flex justify-end mb-4">
-                <button onClick={() => setSelectedId(null)} className="p-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-gray-400 hover:text-gray-600 transition-all">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="flex flex-col items-center text-center">
-                <div className="relative mb-6">
-                  <div className={`w-32 h-32 rounded-[2.5rem] flex items-center justify-center text-white font-bold text-4xl shadow-2xl ${getAvatarColor(selected.driverName)}`}>
-                    {initials(selected.driverName)}
-                  </div>
-                  <div className={`absolute bottom-2 right-2 w-8 h-8 rounded-full border-4 border-white ${
-                    selected.status === 'Valid' ? 'bg-emerald-500' : selected.status === 'Expiring Soon' ? 'bg-amber-500' : 'bg-rose-500'
-                  }`} />
-                </div>
-                <h2 className="text-3xl font-black text-gray-900 mb-1">{selected.driverName}</h2>
-                <p className="text-emerald-600 font-black uppercase tracking-[0.2em] text-xs mb-8">{selected.category} Operator</p>
-              </div>
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40" onClick={() => setSelectedId(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+              <h2 className="text-lg font-semibold text-gray-900">Driver details</h2>
+              <button onClick={() => setSelectedId(null)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
 
-            <div className="p-8 flex-1 space-y-8">
+            <div className="p-6 flex-1 space-y-7">
+              {/* Identity */}
+              <div className="flex items-center gap-4">
+                <div className="relative shrink-0">
+                  <div
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-semibold text-xl"
+                    style={{ backgroundColor: avatarTint(selected.driverName) }}
+                  >
+                    {initials(selected.driverName)}
+                  </div>
+                  <span className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white ${statusDot(selected.status)}`} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-xl font-semibold text-gray-900 truncate">{selected.driverName}</h3>
+                  <p className="text-sm text-gray-500">{selected.category} operator</p>
+                </div>
+              </div>
+
               {/* Detailed Specs */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-50 p-5 rounded-3xl border border-gray-100">
-                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 block">License Number</label>
-                  <p className="text-sm font-bold text-gray-900">{selected.licenseNumber}</p>
-                </div>
-                <div className="bg-gray-50 p-5 rounded-3xl border border-gray-100">
-                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Expiration</label>
-                  <p className="text-sm font-bold text-gray-900">{formatDate(selected.expiryDate)}</p>
-                </div>
-                <div className="bg-gray-50 p-5 rounded-3xl border border-gray-100">
-                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Last Verified</label>
-                  <p className="text-sm font-bold text-gray-900">{formatDate(selected.lastVerified)}</p>
-                </div>
-                <div className="bg-gray-50 p-5 rounded-3xl border border-gray-100">
-                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Compliance</label>
-                  <p className={`text-sm font-bold ${selected.status === 'Valid' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {selected.status === 'Valid' ? 'In Order' : 'Requires Action'}
-                  </p>
-                </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Meta label="License number" value={selected.licenseNumber} />
+                <Meta label="Expiration" value={formatDate(selected.expiryDate)} warn={selected.status === 'Expired'} />
+                <Meta label="Last verified" value={formatDate(selected.lastVerified)} />
+                <Meta
+                  label="Compliance"
+                  value={selected.status === 'Valid' ? 'In order' : 'Requires action'}
+                  warn={selected.status !== 'Valid'}
+                  good={selected.status === 'Valid'}
+                />
               </div>
 
               {/* Notes (editable) */}
               <div>
-                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">Admin Notes</h4>
+                <h4 className="text-sm font-semibold text-gray-900 mb-2">Admin notes</h4>
                 <textarea
                   value={notesDraft}
                   onChange={(e) => setNotesDraft(e.target.value)}
                   rows={3}
-                  placeholder="Add administrative notes for this driver's license..."
-                  className="w-full p-5 bg-amber-50/50 rounded-2xl border border-amber-100 text-sm text-amber-900 font-medium leading-relaxed focus:ring-2 focus:ring-amber-400 resize-none"
+                  placeholder="Add administrative notes for this driver's license…"
+                  className={`${inputClass} resize-none`}
                 />
                 {notesDraft !== (selected.notes ?? '') && (
                   <button
                     onClick={handleSaveNotes}
                     disabled={savingNotes}
-                    className="mt-2 px-4 py-2 bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-amber-600 transition-all disabled:opacity-60"
+                    className="mt-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-colors disabled:opacity-60"
+                    style={{ backgroundColor: BRAND }}
                   >
-                    {savingNotes ? 'Saving...' : 'Save Notes'}
+                    {savingNotes ? 'Saving…' : 'Save notes'}
                   </button>
                 )}
               </div>
 
               {/* Document */}
               <div>
-                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">License Document</h4>
+                <h4 className="text-sm font-semibold text-gray-900 mb-2">License document</h4>
                 {selected.hasDocument ? (
-                  <div className="p-6 border-2 border-gray-100 rounded-[2rem] flex flex-col items-center justify-center text-center bg-gray-50/50">
-                    <svg className="w-12 h-12 text-emerald-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  <div className="p-5 border border-gray-100 rounded-2xl flex flex-col items-center justify-center text-center bg-gray-50">
+                    <svg className="w-10 h-10 mb-2" style={{ color: BRAND }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    <p className="text-xs font-bold text-gray-600 break-all px-2">{selected.document?.name}</p>
-                    <div className="flex items-center gap-4 mt-4">
+                    <p className="text-xs font-medium text-gray-600 break-all px-2">{selected.document?.name}</p>
+                    <div className="flex items-center gap-4 mt-3">
                       <a
                         href={`/api/drivers/${selected.id}/document`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs font-black text-emerald-600 uppercase tracking-widest hover:text-emerald-700"
+                        className="text-xs font-semibold text-[#03458f] hover:underline"
                       >
-                        View Document
+                        View document
                       </a>
                       <button
                         onClick={() => drawerFileRef.current?.click()}
                         disabled={busy}
-                        className="text-xs font-black text-gray-400 uppercase tracking-widest hover:text-gray-600 disabled:opacity-60"
+                        className="text-xs font-semibold text-gray-400 hover:text-gray-600 disabled:opacity-60"
                       >
                         Replace
                       </button>
@@ -508,35 +506,36 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
                   <button
                     onClick={() => drawerFileRef.current?.click()}
                     disabled={busy}
-                    className="w-full p-8 border-2 border-dashed border-gray-200 rounded-[2rem] flex flex-col items-center justify-center text-center hover:border-emerald-300 transition-all disabled:opacity-60"
+                    className="w-full p-6 border border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center text-center hover:border-[#03458f]/50 transition-colors disabled:opacity-60"
                   >
-                    <svg className="w-12 h-12 text-gray-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    <svg className="w-9 h-9 text-gray-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                     </svg>
-                    <p className="text-xs font-bold text-gray-400">{busy ? 'Uploading...' : 'Upload license scan (PDF / image)'}</p>
+                    <p className="text-xs font-medium text-gray-400">{busy ? 'Uploading…' : 'Upload license scan (PDF / image)'}</p>
                   </button>
                 )}
               </div>
 
               {/* Renewal editor */}
               {isRenewOpen && (
-                <div className="p-5 bg-emerald-50/50 rounded-2xl border border-emerald-100">
-                  <label className="text-[9px] font-black text-emerald-700 uppercase tracking-widest mb-2 block">New Expiry Date</label>
+                <div className="p-5 bg-gray-50 rounded-2xl border border-gray-100">
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">New expiry date</label>
                   <input
                     type="date"
                     value={renewDate}
                     onChange={(e) => setRenewDate(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-emerald-200 rounded-xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold mb-3"
+                    className={`${inputClass} mb-3 bg-white`}
                   />
                   <div className="flex gap-2">
                     <button
                       onClick={handleRenew}
                       disabled={busy || !renewDate}
-                      className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-60"
+                      className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-white transition-colors disabled:opacity-60"
+                      style={{ backgroundColor: BRAND }}
                     >
-                      {busy ? 'Saving...' : 'Confirm Renewal'}
+                      {busy ? 'Saving…' : 'Confirm renewal'}
                     </button>
-                    <button onClick={() => setIsRenewOpen(false)} className="px-4 py-2.5 text-gray-500 text-xs font-black uppercase tracking-widest hover:text-gray-700">
+                    <button onClick={() => setIsRenewOpen(false)} className="px-4 py-2.5 text-gray-500 text-xs font-semibold hover:text-gray-700">
                       Cancel
                     </button>
                   </div>
@@ -545,16 +544,17 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
             </div>
 
             {/* Actions */}
-            <div className="p-8 pt-4 bg-white border-t border-gray-50 sticky bottom-0 flex flex-col gap-3">
+            <div className="p-6 border-t border-gray-100 sticky bottom-0 bg-white flex flex-col gap-2">
               <button
                 onClick={() => setIsRenewOpen((v) => !v)}
-                className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100"
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors"
+                style={{ backgroundColor: BRAND }}
               >
-                Update Renewal
+                Update renewal
               </button>
               {isAdmin && (
-                <button onClick={handleDelete} disabled={busy} className="w-full py-3 text-rose-400 font-bold text-sm hover:text-rose-600 transition-all disabled:opacity-60">
-                  Remove Driver
+                <button onClick={handleDelete} disabled={busy} className="w-full py-2.5 text-rose-500 font-semibold text-sm hover:text-rose-600 transition-colors disabled:opacity-60">
+                  Remove driver
                 </button>
               )}
             </div>
@@ -564,45 +564,44 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
 
       {/* Add Driver Modal */}
       {isAddOpen && (
-        <>
-          <button type="button" className="fixed inset-0 z-[300] bg-gray-900/20 backdrop-blur-sm" onClick={() => setIsAddOpen(false)} aria-label="Close" />
-          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[310] w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-            <div className="p-8 pb-4 flex items-center justify-between">
-              <h2 className="text-2xl font-black text-gray-900">Add Driver</h2>
-              <button onClick={() => setIsAddOpen(false)} className="p-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-gray-400 hover:text-gray-600">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
+              <h2 className="text-lg font-semibold text-gray-900">Add driver</h2>
+              <button onClick={() => setIsAddOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <div className="px-8 pb-8 space-y-4">
+            <div className="p-6 space-y-4">
               <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Driver Name</label>
+                <Label>Driver name</Label>
                 <input
                   type="text"
                   value={form.driverName}
                   onChange={(e) => setForm({ ...form, driverName: e.target.value })}
                   placeholder="Full name"
-                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                  className={inputClass}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">License Number</label>
+                  <Label>License number</Label>
                   <input
                     type="text"
                     value={form.licenseNumber}
                     onChange={(e) => setForm({ ...form, licenseNumber: e.target.value })}
                     placeholder="DL-00000-XX"
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label>
+                  <Label>Category</Label>
                   <select
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-gray-600"
+                    className={inputClass}
                   >
                     {CATEGORY_OPTIONS.map((c) => (
                       <option key={c} value={c}>{c}</option>
@@ -610,57 +609,80 @@ export default function DriversClient({ isAdmin, initialItems, initialStats }: P
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Expiry Date</label>
+                  <Label>Expiry date</Label>
                   <input
                     type="date"
                     value={form.expiryDate}
                     onChange={(e) => setForm({ ...form, expiryDate: e.target.value })}
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Last Verified</label>
+                  <Label>Last verified</Label>
                   <input
                     type="date"
                     value={form.lastVerified}
                     onChange={(e) => setForm({ ...form, lastVerified: e.target.value })}
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                    className={inputClass}
                   />
                 </div>
               </div>
               <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Notes (optional)</label>
+                <Label>Notes (optional)</Label>
                 <textarea
                   value={form.notes}
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
                   rows={2}
-                  placeholder="Any relevant notes..."
-                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-medium resize-none"
+                  placeholder="Any relevant notes…"
+                  className={`${inputClass} resize-none`}
                 />
               </div>
               <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">License Document (optional)</label>
+                <Label>License document (optional)</Label>
                 <input
                   type="file"
                   onChange={(e) => setAddFile(e.target.files?.[0] ?? null)}
-                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:uppercase file:tracking-widest file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-[#03458f] hover:file:bg-blue-100"
                 />
-                {addFile && <p className="text-[11px] text-gray-400 mt-1 font-medium">{addFile.name}</p>}
+                {addFile && <p className="text-xs text-gray-400 mt-1">{addFile.name}</p>}
               </div>
-              {addError && <p className="text-xs font-bold text-rose-500">{addError}</p>}
-              <button
-                onClick={handleAdd}
-                disabled={adding}
-                className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 disabled:opacity-60"
-              >
-                {adding ? 'Adding...' : 'Add Driver'}
-              </button>
+              {addError && <p className="text-xs text-rose-600">{addError}</p>}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setIsAddOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAdd}
+                  disabled={adding}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60"
+                  style={{ backgroundColor: BRAND }}
+                >
+                  {adding ? 'Adding…' : 'Add driver'}
+                </button>
+              </div>
             </div>
           </div>
-        </>
+        </div>
       )}
+    </div>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return <label className="text-xs font-medium text-gray-500 mb-1.5 block">{children}</label>;
+}
+
+function Meta({ label, value, warn, good }: { label: string; value: string; warn?: boolean; good?: boolean }) {
+  const color = warn ? 'text-rose-600' : good ? 'text-green-700' : 'text-gray-900';
+  return (
+    <div className="bg-gray-50 rounded-xl border border-gray-100 p-3.5">
+      <p className="text-xs text-gray-400 mb-1">{label}</p>
+      <p className={`text-sm font-medium ${color}`}>{value}</p>
     </div>
   );
 }

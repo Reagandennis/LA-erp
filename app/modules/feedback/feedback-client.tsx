@@ -44,6 +44,10 @@ const FILTER_OPTIONS: FeedbackFilter[] = ['All', 'Bug Report', 'Feature Idea', '
 const CATEGORY_OPTIONS: FeedbackCategory[] = ['Improvement', 'Feature Idea', 'Bug Report', 'Technical Support'];
 const STATUS_OPTIONS = ['New', 'Under Review', 'Planned', 'Implemented', 'Declined'] as const;
 
+const BRAND = '#03458f';
+const inputClass =
+  'w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 focus:border-[#03458f]/40';
+
 function computeStats(items: FeedbackItem[]): FeedbackStats {
   return {
     total: items.length,
@@ -77,10 +81,10 @@ function timeAgo(iso: string) {
 
 function getStatusStyle(status: string) {
   switch (status) {
-    case 'New': return 'bg-blue-50 text-blue-600 border-blue-100';
-    case 'Under Review': return 'bg-amber-50 text-amber-600 border-amber-100';
-    case 'Planned': return 'bg-purple-50 text-purple-600 border-purple-100';
-    case 'Implemented': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+    case 'New': return 'bg-blue-50 text-blue-700 border-blue-100';
+    case 'Under Review': return 'bg-amber-50 text-amber-700 border-amber-100';
+    case 'Planned': return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+    case 'Implemented': return 'bg-green-50 text-green-700 border-green-100';
     case 'Declined': return 'bg-gray-50 text-gray-500 border-gray-100';
     default: return 'bg-gray-50 text-gray-500 border-gray-100';
   }
@@ -254,56 +258,56 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
   };
 
   const statCards = [
-    { label: 'Total Ideas', count: stats.total, color: 'text-gray-900' },
-    { label: 'Implemented', count: stats.implemented, color: 'text-emerald-600' },
-    { label: 'Planned', count: stats.planned, color: 'text-purple-600' },
-    { label: 'Under Review', count: stats.underReview, color: 'text-amber-600' },
+    { label: 'Total ideas', count: stats.total },
+    { label: 'Implemented', count: stats.implemented },
+    { label: 'Planned', count: stats.planned },
+    { label: 'Under review', count: stats.underReview },
   ];
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 lg:p-10">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Feedback &amp; Ideas</h1>
-            <p className="text-gray-500 mt-1 font-medium">Help us improve the platform with your suggestions</p>
+            <h1 className="text-2xl font-semibold text-gray-900">Feedback &amp; Ideas</h1>
+            <p className="text-gray-500 mt-1 text-sm">Help us improve the platform with your suggestions.</p>
           </div>
           <button
             onClick={() => setIsFormOpen(!isFormOpen)}
-            className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
+            className="self-start md:self-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-95"
+            style={{ backgroundColor: BRAND }}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Submit Feedback
+            Submit feedback
           </button>
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           {statCards.map((stat, i) => (
-            <div key={i} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{stat.label}</p>
-              <p className={`text-2xl font-black ${stat.color}`}>{stat.count}</p>
+            <div key={i} className="bg-white p-4 rounded-2xl border border-gray-100">
+              <p className="text-xs text-gray-400 mb-1">{stat.label}</p>
+              <p className="text-xl font-semibold text-gray-900">{stat.count}</p>
             </div>
           ))}
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-8">
+        <div className="grid lg:grid-cols-3 gap-6">
           {/* Main Feed */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-5">
             {/* Filter Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl p-1 overflow-x-auto">
               {FILTER_OPTIONS.map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setActiveFilter(cat)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                    activeFilter === cat
-                      ? 'bg-gray-900 text-white shadow-md'
-                      : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                    activeFilter === cat ? 'text-white' : 'text-gray-500 hover:bg-gray-50'
                   }`}
+                  style={activeFilter === cat ? { backgroundColor: BRAND } : undefined}
                 >
                   {cat}
                 </button>
@@ -313,27 +317,30 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
             {/* Feedback List */}
             <div className="space-y-4">
               {filteredItems.length === 0 ? (
-                <div className="bg-white rounded-3xl p-10 border border-gray-100 shadow-sm text-center">
-                  <p className="text-sm font-bold text-gray-400">No feedback here yet. Be the first to share an idea.</p>
+                <div className="bg-white rounded-2xl p-10 border border-dashed border-gray-200 text-center">
+                  <p className="text-sm text-gray-500">No feedback here yet. Be the first to share an idea.</p>
                 </div>
               ) : (
                 filteredItems.map((item) => (
-                  <div key={item.id} className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm hover:border-emerald-200 transition-all group">
-                    <div className="flex gap-6">
+                  <div key={item.id} className="bg-white rounded-2xl p-5 border border-gray-100 hover:border-[#03458f]/40 hover:shadow-sm transition-all">
+                    <div className="flex gap-4">
                       {/* Upvote Column */}
                       <div className="flex flex-col items-center gap-1">
                         <button
                           onClick={() => handleUpvote(item)}
-                          className={`w-12 h-12 rounded-2xl flex flex-col items-center justify-center transition-all ${
-                            item.isUpvoted ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100' : 'bg-gray-50 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600'
+                          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-colors border ${
+                            item.isUpvoted
+                              ? 'text-white border-transparent'
+                              : 'bg-gray-50 text-gray-400 border-gray-100 hover:text-[#03458f] hover:border-[#03458f]/30'
                           }`}
+                          style={item.isUpvoted ? { backgroundColor: BRAND } : undefined}
                           aria-pressed={item.isUpvoted}
                           aria-label={item.isUpvoted ? 'Remove upvote' : 'Upvote'}
                         >
-                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M12 4l-8 8h16l-8-8z" />
                           </svg>
-                          <span className="text-xs font-black">{item.upvotes}</span>
+                          <span className="text-xs font-semibold">{item.upvotes}</span>
                         </button>
                       </div>
 
@@ -344,7 +351,7 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
                             <select
                               value={item.status}
                               onChange={(e) => handleStatusChange(item, e.target.value)}
-                              className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border cursor-pointer focus:ring-2 focus:ring-emerald-500 ${getStatusStyle(item.status)}`}
+                              className={`px-2 py-0.5 rounded-md text-xs font-medium border cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 ${getStatusStyle(item.status)}`}
                               aria-label="Change status"
                             >
                               {STATUS_OPTIONS.map((s) => (
@@ -352,32 +359,32 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
                               ))}
                             </select>
                           ) : (
-                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusStyle(item.status)}`}>
+                            <span className={`px-2 py-0.5 rounded-md text-xs font-medium border ${getStatusStyle(item.status)}`}>
                               {item.status}
                             </span>
                           )}
-                          <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">{item.category}</span>
+                          <span className="text-xs text-gray-400">{item.category}</span>
                         </div>
-                        <h3 className="text-lg font-black text-gray-900 mb-2 group-hover:text-emerald-700 transition-colors">
+                        <h3 className="text-base font-semibold text-gray-900 mb-1.5">
                           {item.title}
                         </h3>
-                        <p className="text-gray-500 text-sm font-medium leading-relaxed mb-4 whitespace-pre-wrap">
+                        <p className="text-gray-500 text-sm leading-relaxed mb-4 whitespace-pre-wrap">
                           {item.description}
                         </p>
 
                         <div className="flex items-center justify-between pt-4 border-t border-gray-50">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-[10px]">
+                            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-semibold text-[10px]">
                               {initials(item.author.name)}
                             </div>
-                            <p className="text-xs font-bold text-gray-400">
-                              By <span className="text-gray-900">{item.author.id === currentUser.id ? 'You' : item.author.name}</span> • {timeAgo(item.createdAt)}
+                            <p className="text-xs text-gray-400">
+                              By <span className="text-gray-700 font-medium">{item.author.id === currentUser.id ? 'You' : item.author.name}</span> • {timeAgo(item.createdAt)}
                             </p>
                           </div>
                           <div className="flex items-center gap-4 text-gray-400">
                             <button
                               onClick={() => toggleComments(item.id)}
-                              className={`flex items-center gap-1.5 text-xs font-bold transition-colors ${expandedId === item.id ? 'text-emerald-600' : 'hover:text-emerald-600'}`}
+                              className={`flex items-center gap-1.5 text-xs font-medium transition-colors ${expandedId === item.id ? 'text-[#03458f]' : 'hover:text-[#03458f]'}`}
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -391,19 +398,19 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
                         {expandedId === item.id && (
                           <div className="mt-4 pt-4 border-t border-gray-50 space-y-3">
                             {(commentsByFeedback[item.id] ?? []).length === 0 ? (
-                              <p className="text-xs font-medium text-gray-400">No comments yet. Start the discussion.</p>
+                              <p className="text-xs text-gray-400">No comments yet. Start the discussion.</p>
                             ) : (
                               (commentsByFeedback[item.id] ?? []).map((comment) => (
                                 <div key={comment.id} className="flex gap-3">
-                                  <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-[9px] shrink-0">
+                                  <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-semibold text-[9px] shrink-0">
                                     {initials(comment.author.name)}
                                   </div>
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-bold text-gray-900">
+                                    <p className="text-xs font-medium text-gray-900">
                                       {comment.author.id === currentUser.id ? 'You' : comment.author.name}
-                                      <span className="text-gray-400 font-medium"> • {timeAgo(comment.createdAt)}</span>
+                                      <span className="text-gray-400 font-normal"> • {timeAgo(comment.createdAt)}</span>
                                     </p>
-                                    <p className="text-sm text-gray-600 font-medium whitespace-pre-wrap break-words">{comment.body}</p>
+                                    <p className="text-sm text-gray-600 whitespace-pre-wrap break-words">{comment.body}</p>
                                   </div>
                                 </div>
                               ))
@@ -421,14 +428,13 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
                                   }
                                 }}
                                 placeholder="Write a comment..."
-                                className="flex-1 px-3 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
+                                className="flex-1 px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 text-sm"
                               />
                               <button
                                 onClick={() => handleAddComment(item.id)}
                                 disabled={!commentInput.trim() || commentSubmitting}
-                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                                  commentInput.trim() && !commentSubmitting ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                }`}
+                                className="px-4 py-2 rounded-xl text-xs font-semibold text-white transition-colors disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                style={commentInput.trim() && !commentSubmitting ? { backgroundColor: BRAND } : undefined}
                               >
                                 Post
                               </button>
@@ -444,26 +450,26 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
           </div>
 
           {/* Sidebar / Submission Form */}
-          <div className="space-y-8">
-            <div className={`bg-white rounded-[2.5rem] p-8 border-2 transition-all duration-300 ${isFormOpen ? 'border-emerald-500 shadow-2xl shadow-emerald-500/10' : 'border-transparent shadow-sm'}`}>
-              <h3 className="text-xl font-black text-gray-900 mb-6">New Suggestion</h3>
+          <div className="space-y-6">
+            <div className={`bg-white rounded-2xl p-6 border transition-colors ${isFormOpen ? 'border-[#03458f]/40 shadow-sm' : 'border-gray-100'}`}>
+              <h3 className="text-base font-semibold text-gray-900 mb-5">New suggestion</h3>
               <div className="space-y-4">
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Idea Title</label>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Idea title</label>
                   <input
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Briefly describe your idea..."
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Category</label>
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value as FeedbackCategory)}
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-gray-600"
+                    className={inputClass}
                   >
                     {CATEGORY_OPTIONS.map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -471,29 +477,30 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Description</label>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Description</label>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Tell us more about it..."
                     rows={4}
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
+                    className={inputClass}
                   />
                 </div>
-                {formError && <p className="text-xs font-bold text-rose-500">{formError}</p>}
+                {formError && <p className="text-xs text-rose-600">{formError}</p>}
                 <button
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold hover:bg-black transition-all shadow-xl shadow-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: BRAND }}
                 >
-                  {submitting ? 'Submitting...' : 'Submit to Board'}
+                  {submitting ? 'Submitting...' : 'Submit to board'}
                 </button>
               </div>
             </div>
 
             {/* Guidelines */}
-            <div className="bg-emerald-600 rounded-[2.5rem] p-8 text-white shadow-xl shadow-emerald-200">
-              <h3 className="text-xl font-black mb-4">Submission Guide</h3>
+            <div className="bg-white rounded-2xl p-6 border border-gray-100">
+              <h3 className="text-base font-semibold text-gray-900 mb-4">Submission guide</h3>
               <ul className="space-y-3">
                 {[
                   'Check for duplicate ideas first',
@@ -501,8 +508,8 @@ export default function FeedbackClient({ currentUser, isAdmin, initialItems, ini
                   'Explain the expected benefit',
                   'Keep it professional and concise',
                 ].map((tip, i) => (
-                  <li key={i} className="flex gap-3 text-sm font-medium text-white/80">
-                    <svg className="w-5 h-5 shrink-0 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <li key={i} className="flex gap-3 text-sm text-gray-600">
+                    <svg className="w-5 h-5 shrink-0" style={{ color: BRAND }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     {tip}

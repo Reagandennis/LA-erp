@@ -23,21 +23,12 @@ export default async function TemplatesPage() {
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-10">
       <div className="max-w-5xl mx-auto">
         <div className="mb-8">
-          <Link
-            href="/modules/quotes"
-            className="text-[10px] font-black text-gray-400 uppercase tracking-widest hover:text-gray-700"
-          >
+          <Link href="/modules/quotes" className="text-xs font-medium text-gray-400 hover:text-gray-700">
             ← Back to quotes
           </Link>
-          <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight mt-1">
-            Quote templates
-          </h1>
-          <p className="text-gray-500 mt-1 font-bold text-[10px] sm:text-xs uppercase tracking-widest">
-            Reusable starting points for quotations
-          </p>
-          <p className="text-sm text-gray-600 mt-3">
-            Templates are created from the builder via &quot;Save current setup as a template.&quot; This page
-            lets you review and remove existing ones.
+          <h1 className="text-2xl font-semibold text-gray-900 mt-1">Quote templates</h1>
+          <p className="text-gray-500 mt-1 text-sm">
+            Reusable starting points for quotations — build one here, or save one from the quote builder.
           </p>
         </div>
         <TemplatesClient initialTemplates={templates} />
