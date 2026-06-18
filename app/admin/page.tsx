@@ -1,20 +1,21 @@
 import { redirect } from 'next/navigation';
 
 import AdminClient, {
-  type AdminAuditLog,
   type AdminModule,
   type AdminRole,
   type AdminUser,
 } from './admin-client';
 import { getServerAuth } from '@/lib/auth';
+import { queryAuditLogs } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import {
-  getRecentAuditLogs,
   listAllModules,
   listManagedUsers,
   listRolesWithPermissions,
   userHasRole,
 } from '@/lib/user';
+
+export const dynamic = 'force-dynamic';
 
 export default async function AdminPage() {
   const auth = await getServerAuth();
@@ -27,11 +28,11 @@ export default async function AdminPage() {
     redirect('/dashboard');
   }
 
-  const [users, roles, modules, logs] = await Promise.all([
+  const [users, roles, modules, audit] = await Promise.all([
     listManagedUsers(),
     listRolesWithPermissions(),
     listAllModules(),
-    getRecentAuditLogs(30),
+    queryAuditLogs({ page: 1, pageSize: 25 }),
   ]);
 
   return (
@@ -40,7 +41,7 @@ export default async function AdminPage() {
       initialUsers={users as AdminUser[]}
       initialRoles={roles as AdminRole[]}
       initialModules={modules as AdminModule[]}
-      initialLogs={logs as AdminAuditLog[]}
+      initialAudit={audit}
     />
   );
 }
