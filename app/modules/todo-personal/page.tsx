@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import CalendarClient, { type CalendarExtraEvent } from '@/app/modules/calendar/calendar-client';
+import KanbanBoard from './kanban-board';
 
 
 const DEFAULT_KANBAN_COLUMNS = ['Backlog', 'In progress', 'In review'];
@@ -683,7 +684,6 @@ export default function TodoPersonalPage() {
   const [description, setDescription] = useState<string>('');
   const [dueTime, setDueTime] = useState<string>('');
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string>('');
   const [showMentions, setShowMentions] = useState(false);
@@ -715,6 +715,7 @@ export default function TodoPersonalPage() {
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
   const [columnColors, setColumnColors] = useState<Record<string, string>>(DEFAULT_COLUMN_COLORS);
   const [showAddColumn, setShowAddColumn] = useState(false);
+  const [taskOrder, setTaskOrder] = useState<string[]>([]);
   const kanbanSyncReady = useRef(false);
   useEffect(() => {
     let isActive = true;
@@ -763,7 +764,13 @@ export default function TodoPersonalPage() {
           return;
         }
         const data = (await response.json().catch(() => null)) as
-          | { board?: { columns?: string[]; columnColors?: Record<string, string> | null } | null }
+          | {
+              board?: {
+                columns?: string[];
+                columnColors?: Record<string, string> | null;
+                taskOrder?: string[] | null;
+              } | null;
+            }
           | null;
         if (!isActive) {
           return;
@@ -773,6 +780,9 @@ export default function TodoPersonalPage() {
         }
         if (data?.board?.columnColors) {
           setColumnColors(data.board.columnColors);
+        }
+        if (Array.isArray(data?.board?.taskOrder)) {
+          setTaskOrder(data.board.taskOrder);
         }
       } catch {
         // ignore
@@ -807,6 +817,7 @@ export default function TodoPersonalPage() {
           body: JSON.stringify({
             columns: kanbanColumns,
             columnColors,
+            taskOrder,
           }),
         });
       } catch {
@@ -819,7 +830,7 @@ export default function TodoPersonalPage() {
     return () => {
       controller.abort();
     };
-  }, [kanbanColumns, columnColors]);
+  }, [kanbanColumns, columnColors, taskOrder]);
 
   useEffect(() => {
     if (!selectedTask) {
@@ -1006,37 +1017,6 @@ export default function TodoPersonalPage() {
     }
   };
 
-  const handleKanbanDragOver = (event: React.DragEvent<HTMLUListElement>) => {
-    event.preventDefault();
-    const status = event.currentTarget.dataset.status ?? null;
-    if (status && status !== dragOverColumn) {
-      setDragOverColumn(status);
-    }
-  };
-  const handleKanbanDrop = (event: React.DragEvent<HTMLUListElement>) => {
-    event.preventDefault();
-    const nextStatus = event.currentTarget.dataset.status;
-    setDragOverColumn(null);
-    if (draggedTask && nextStatus && draggedTask.status !== nextStatus) {
-      updateTaskStatus(draggedTask, nextStatus);
-    }
-    setDraggedTask(null);
-  };
-  const handleKanbanDragStart = (event: React.DragEvent<HTMLButtonElement>) => {
-    const taskId = event.currentTarget.dataset.taskId;
-    if (!taskId) {
-      return;
-    }
-    const task = tasks.find((item) => item.id === taskId);
-    if (task) {
-      setDraggedTask(task);
-    }
-  };
-  const handleKanbanDragEnd = () => {
-    setDraggedTask(null);
-    setDragOverColumn(null);
-  };
-
   const DONE_COLUMN_RE = /done|complete|closed|review|shipped/i;
   const isTaskOverdue = (task: Task) => {
     if (DONE_COLUMN_RE.test(task.status)) return false;
@@ -1048,17 +1028,6 @@ export default function TodoPersonalPage() {
     startOfToday.setHours(0, 0, 0, 0);
     return due < startOfToday;
   };
-  const handleKanbanTaskOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
-    const taskId = event.currentTarget.dataset.taskId;
-    if (!taskId) {
-      return;
-    }
-    const task = tasks.find((item) => item.id === taskId);
-    if (task) {
-      openTaskDrawer(task);
-    }
-  };
-
   const handleGanttTaskOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
     const taskId = event.currentTarget.dataset.taskId;
     if (!taskId) return;
@@ -1209,10 +1178,6 @@ export default function TodoPersonalPage() {
     }));
   };
 
-  const getTasksByStatus = (status: string) => {
-    return tasks.filter(task => task.status === status);
-  };
-
   const renderAssignees = (count: number) => {
     const colors = ['#FF6B9D', '#4ECDC4', '#95E1D3', '#F38181', '#AA96DA'];
     return (
@@ -1255,253 +1220,47 @@ export default function TodoPersonalPage() {
     setShowCreateDrawer(true);
   };
 
-  const getPriorityStyle = (priority: Task['priority']) => {
-    if (priority === 'High') return { bg: 'bg-rose-50', text: 'text-rose-600', dot: '#f43f5e' };
-    if (priority === 'Medium') return { bg: 'bg-amber-50', text: 'text-amber-600', dot: '#f59e0b' };
-    return { bg: 'bg-primary/5', text: 'text-primary', dot: '#10b981' };
+  // Manual board order, applied on top of the server's due-date ordering.
+  const orderedKanbanTasks = (list: Task[]) => {
+    if (taskOrder.length === 0) return list;
+    const rank = new Map(taskOrder.map((id, index) => [id, index]));
+    return [...list].sort(
+      (a, b) =>
+        (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+        (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
   };
 
-  const renderKanbanView = (tasks: Task[]) => (
-    <div className="flex flex-col gap-6">
-      {/* Board */}
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {kanbanColumns.map((status) => {
-          const statusTasks = getTasksByStatus(status);
-          const accentColor = columnColors[status] ?? '#6366f1';
-          const total = tasks.length;
-          const sharePct = total > 0 ? Math.round((statusTasks.length / total) * 100) : 0;
-          const isDropTarget = dragOverColumn === status;
-
-          return (
-            <div
-              key={status}
-              className={`flex min-w-68 flex-1 flex-col overflow-hidden rounded-2xl border bg-white transition-shadow ${
-                isDropTarget ? 'border-transparent shadow-lg' : 'border-slate-200 shadow-sm'
-              }`}
-              style={isDropTarget ? { boxShadow: `0 0 0 2px ${accentColor}` } : undefined}
-            >
-              {/* Column Header (tinted accent band) */}
-              <div className="px-4 pt-4 pb-3" style={{ backgroundColor: `${accentColor}14` }}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: accentColor }} />
-                    {status in renameDrafts ? (
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          autoFocus
-                          value={renameDrafts[status]}
-                          onChange={(e) => updateRenameDraft(status, e.target.value)}
-                          onBlur={() => renameKanbanColumn(status)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') { void renameKanbanColumn(status); }
-                            if (e.key === 'Escape') { clearRenameDraft(status); }
-                          }}
-                          className="w-28 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => renameKanbanColumn(status)}
-                          className="text-[11px] font-semibold text-primary hover:text-primary"
-                        >
-                          Save
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-sm font-bold text-slate-800 hover:text-slate-900"
-                        onClick={() => updateRenameDraft(status, status)}
-                        title="Click to rename"
-                      >
-                        {status}
-                      </button>
-                    )}
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
-                      {statusTasks.length}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="color"
-                      value={accentColor}
-                      onChange={(e) => updateColumnColor(status, e.target.value)}
-                      className="h-5 w-5 cursor-pointer rounded border-0 bg-transparent p-0"
-                      title="Column colour"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeKanbanColumn(status)}
-                      className="rounded p-0.5 text-slate-400 hover:text-rose-500"
-                      title="Remove column"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Column progress / share bar */}
-                <div className="mt-3 flex items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
-                    <div className="h-full rounded-full transition-all" style={{ width: `${sharePct}%`, backgroundColor: accentColor }} />
-                  </div>
-                  <span className="text-[10px] font-bold text-slate-500" title="Share of all tasks">{sharePct}%</span>
-                </div>
-              </div>
-
-              {/* Task Cards */}
-              <ul
-                className="flex-1 space-y-2.5 overflow-y-auto px-3 pb-3 pt-3 transition-colors"
-                style={{ minHeight: '22rem', backgroundColor: isDropTarget ? `${accentColor}0d` : undefined }}
-                data-status={status}
-                onDragOver={handleKanbanDragOver}
-                onDrop={handleKanbanDrop}
-                aria-label={`${status} tasks`}
-              >
-                {statusTasks.length > 0 ? (
-                  statusTasks.map((task) => {
-                    const pr = getPriorityStyle(task.priority);
-                    const overdue = isTaskOverdue(task);
-                    return (
-                      <li key={task.id}>
-                        <button
-                          draggable
-                          data-task-id={task.id}
-                          onDragStart={handleKanbanDragStart}
-                          onDragEnd={handleKanbanDragEnd}
-                          onClick={handleKanbanTaskOpen}
-                          type="button"
-                          style={{ borderLeftColor: pr.dot, borderLeftWidth: '4px' }}
-                          className={`w-full cursor-grab rounded-xl border border-slate-200/80 bg-white p-4 text-left shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all duration-150 active:cursor-grabbing hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(15,23,42,0.12)] ${
-                            draggedTask?.id === task.id ? 'opacity-50' : ''
-                          }`}
-                        >
-                          {/* Top row: id + 3-dot */}
-                          <div className="mb-2 flex items-center justify-between">
-                            <span className="text-[10px] font-medium text-slate-400">{task.id}</span>
-                            <svg className="h-4 w-4 text-slate-300" fill="currentColor" viewBox="0 0 24 24">
-                              <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
-                            </svg>
-                          </div>
-
-                          {/* Title */}
-                          <p className="text-[13.5px] font-semibold leading-snug text-slate-900">{task.title}</p>
-
-                          {/* Tags row */}
-                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pr.bg} ${pr.text}`}>
-                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: pr.dot }} />
-                              {task.priority}
-                            </span>
-                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                              {task.list}
-                            </span>
-                          </div>
-
-                          {/* Footer: due date + assignees */}
-                          <div className="mt-3 flex items-center justify-between">
-                            {task.dueDate ? (
-                              <div
-                                className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                  overdue ? 'bg-rose-50 text-rose-600' : 'text-slate-400'
-                                }`}
-                              >
-                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  {overdue ? (
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                                  ) : (
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                  )}
-                                </svg>
-                                {task.dueDate}
-                                {overdue && <span className="ml-0.5">· Overdue</span>}
-                              </div>
-                            ) : <span />}
-                            {task.assignees > 0 && renderAssignees(task.assignees)}
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })
-                ) : (
-                  <li
-                    className={`flex h-24 items-center justify-center rounded-xl border border-dashed text-[13px] transition-colors ${
-                      isDropTarget ? 'border-transparent text-slate-500' : 'border-slate-200 text-slate-400'
-                    }`}
-                  >
-                    {isDropTarget ? 'Drop here' : 'No tasks yet'}
-                  </li>
-                )}
-              </ul>
-
-              {/* Add task inline button */}
-              <button
-                type="button"
-                onClick={() => openNewTaskInColumn(status)}
-                className="mx-3 mb-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                New task
-              </button>
-            </div>
-          );
-        })}
-
-        {/* Add column */}
-        <div className="min-w-68 flex-1">
-          {showAddColumn ? (
-            <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4">
-              <p className="text-xs font-semibold text-slate-600">New column</p>
-              <input
-                id="kanban-inline-column-name"
-                value={newColumnName}
-                onChange={(e) => setNewColumnName(e.target.value)}
-                placeholder="Column name…"
-                autoFocus
-                onKeyDown={(e) => { if (e.key === 'Enter') addKanbanColumn(); }}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <div className="flex items-center gap-2">
-                <label htmlFor="kanban-inline-column-color" className="text-xs font-medium text-slate-500">Colour</label>
-                <input
-                  id="kanban-inline-column-color"
-                  type="color"
-                  value={newColumnColor}
-                  onChange={(e) => setNewColumnColor(e.target.value)}
-                  className="h-8 w-10 cursor-pointer rounded border border-slate-200"
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setShowAddColumn(false); setNewColumnName(''); }}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                >Cancel</button>
-                <button
-                  type="button"
-                  onClick={addKanbanColumn}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
-                >Add column</button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowAddColumn(true)}
-              className="flex h-full min-h-56 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-transparent text-[13px] font-medium text-slate-500 transition-colors hover:border-primary/40 hover:bg-white hover:text-primary"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add list
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+  const renderKanbanView = (visibleTasks: Task[]) => (
+    <KanbanBoard
+      tasks={orderedKanbanTasks(visibleTasks)}
+      columns={kanbanColumns}
+      columnColors={columnColors}
+      renameDrafts={renameDrafts}
+      showAddColumn={showAddColumn}
+      newColumnName={newColumnName}
+      newColumnColor={newColumnColor}
+      isTaskOverdue={(task) => isTaskOverdue(task as Task)}
+      onOpenTask={(taskId) => {
+        const task = tasks.find((item) => item.id === taskId);
+        if (task) openTaskDrawer(task);
+      }}
+      onMoveTask={(taskId, status) => {
+        const task = tasks.find((item) => item.id === taskId);
+        if (task && task.status !== status) void updateTaskStatus(task, status);
+      }}
+      onOrderChange={setTaskOrder}
+      onNewTaskInColumn={openNewTaskInColumn}
+      onRenameDraftChange={updateRenameDraft}
+      onRenameCommit={(column) => void renameKanbanColumn(column)}
+      onRenameCancel={clearRenameDraft}
+      onColumnColorChange={updateColumnColor}
+      onRemoveColumn={(column) => void removeKanbanColumn(column)}
+      onAddColumn={addKanbanColumn}
+      onShowAddColumnChange={setShowAddColumn}
+      onNewColumnNameChange={setNewColumnName}
+      onNewColumnColorChange={setNewColumnColor}
+    />
   );
 
   const renderListView = (tasks: Task[]) => (

@@ -335,7 +335,7 @@ export default function NotificationsBell() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed top-12 right-6 z-120 flex items-center justify-center w-11 h-11 rounded-full bg-white shadow-lg border border-gray-200 text-gray-700 hover:text-emerald-600"
+        className="fixed top-14 right-6 z-120 flex items-center justify-center w-11 h-11 rounded-full bg-white shadow-lg border border-gray-200 text-gray-700 hover:text-emerald-600"
         aria-label="Open notifications"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

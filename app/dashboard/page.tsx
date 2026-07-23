@@ -1,8 +1,16 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getServerAuth } from '@/lib/auth';
+import {
+  HIGHLIGHT_SLOT_COUNT,
+  listAvailableHighlights,
+  loadHighlightValues,
+  resolveHighlightKeys,
+} from '@/lib/dashboard-highlights';
+import { prisma } from '@/lib/prisma';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { getAccessibleModulesForUser, userHasRole } from '@/lib/user';
+import { DashboardHighlights } from '@/app/ui/dashboard-highlights';
 
 export default async function DashboardPage() {
   const auth = await getServerAuth();
@@ -14,12 +22,23 @@ export default async function DashboardPage() {
   const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
   const accessibleModules = await getAccessibleModulesForUser(auth.user);
 
+  const preferences = await prisma.user.findUnique({
+    where: { id: auth.user.id },
+    select: { dashboardHighlights: true },
+  });
+  const selectedHighlightKeys = resolveHighlightKeys(
+    auth.user,
+    preferences?.dashboardHighlights ?? [],
+  );
+  const highlights = await loadHighlightValues(auth.user, selectedHighlightKeys);
+
   return (
     <main className="p-8 lg:p-12 space-y-12 bg-gray-50/50 min-h-full">
       {/* Welcome Section */}
       <section className="relative overflow-hidden bg-primary rounded-3xl p-10 lg:p-16 text-white shadow-2xl">
-        <div className="relative z-10 max-w-2xl">
-          <h2 className="text-4xl lg:text-6xl font-bold mb-4 tracking-tight leading-tight">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center gap-12 lg:gap-16">
+        <div className="max-w-2xl lg:flex-1">
+          <h2 className="text-4xl lg:text-5xl font-bold mb-4 tracking-tight leading-tight">
             Welcome back, <br />
             <span className="text-secondary">{auth.user.name}</span>
           </h2>
@@ -42,7 +61,15 @@ export default async function DashboardPage() {
             </div>
           </div>
         </div>
-        
+
+        <DashboardHighlights
+          initialHighlights={highlights}
+          available={listAvailableHighlights(auth.user)}
+          initialSelected={selectedHighlightKeys}
+          slots={HIGHLIGHT_SLOT_COUNT}
+        />
+        </div>
+
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-white/5 to-transparent -skew-x-12 transform translate-x-1/4" />
         <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-secondary/10 rounded-full blur-3xl" />

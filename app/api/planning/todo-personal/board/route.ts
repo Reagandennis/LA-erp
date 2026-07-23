@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
     board: {
       columns: board.columns,
       columnColors: board.columnColors ?? null,
+      taskOrder: board.taskOrder ?? null,
     },
   });
 }
@@ -47,18 +48,20 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  const { columns, columnColors } = validation.data;
+  const { columns, columnColors, taskOrder } = validation.data;
 
   const board = await prisma.personalTodoBoard.upsert({
     where: { userId: auth.user.id },
     update: {
       columns,
       columnColors: columnColors ?? undefined,
+      taskOrder: taskOrder ?? undefined,
     },
     create: {
       userId: auth.user.id,
       columns,
       columnColors: columnColors ?? {},
+      taskOrder: taskOrder ?? [],
     },
   });
 
@@ -67,6 +70,7 @@ export async function PUT(request: NextRequest) {
     board: {
       columns: board.columns,
       columnColors: board.columnColors ?? null,
+      taskOrder: board.taskOrder ?? null,
     },
   });
 }

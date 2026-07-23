@@ -1,8 +1,10 @@
 'use client';
 
-import { ChangeEvent, FormEvent, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+
+import { GoogleSignInButton } from '@/app/ui/google-sign-in-button';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,6 +12,16 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleGoogleError = useCallback((message: string) => {
+    setError(message);
+    setIsLoading(false);
+  }, []);
+
+  const handleGoogleStart = useCallback(() => {
+    setError('');
+    setIsLoading(true);
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -102,6 +114,8 @@ export default function LoginPage() {
             {isLoading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
+
+        <GoogleSignInButton onError={handleGoogleError} onStart={handleGoogleStart} />
 
         <p style={{ textAlign: 'center', fontSize: '12px', marginTop: '16px', color: '#666' }}>
           <Link href="/" style={{ color: '#666', textDecoration: 'underline' }}>

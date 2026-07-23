@@ -96,6 +96,9 @@ export const personalTodoBoardSchema = z.object({
     .min(1, 'At least one column is required')
     .max(20, 'Too many columns'),
   columnColors: z.record(z.string().trim()).optional(),
+  // Board-order of task ids across every column; ids missing from the list keep
+  // their server-side ordering and sort after the ones listed here.
+  taskOrder: z.array(z.string().trim().min(1)).max(2000).optional(),
 });
 
 export const customerCreateSchema = z.object({
