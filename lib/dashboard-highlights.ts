@@ -66,8 +66,8 @@ const HIGHLIGHTS: Array<HighlightDefinition & { load: Loader }> = [
     key: 'due-overdue',
     label: 'Overdue',
     description: 'Invoices, licences, contracts, SOP reviews and trips past their date.',
-    moduleSlug: 'upcoming-due-dates',
-    href: '/modules/upcoming-due-dates',
+    moduleSlug: 'notification-center',
+    href: '/modules/notification-center',
     load: async ({ dueDateBuckets }) => {
       const buckets = await dueDateBuckets();
       return {
@@ -81,8 +81,8 @@ const HIGHLIGHTS: Array<HighlightDefinition & { load: Loader }> = [
     key: 'due-this-week',
     label: 'Due this week',
     description: 'Everything falling due in the next seven days.',
-    moduleSlug: 'upcoming-due-dates',
-    href: '/modules/upcoming-due-dates',
+    moduleSlug: 'notification-center',
+    href: '/modules/notification-center',
     load: async ({ dueDateBuckets }) => {
       const buckets = await dueDateBuckets();
       return {

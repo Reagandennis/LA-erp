@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AvatarStatus, StatusDot, presenceOf, usePresence } from '@/app/ui/status-dot';
+
 // --- Types (mirror lib/communication.ts) ---
 type CurrentUser = { id: number; name: string; email: string };
 
@@ -25,7 +27,57 @@ type Message = {
   senderName: string;
   body: string;
   createdAt: string;
+  readBy: number[];
+  recipientCount: number;
 };
+
+type ReadReceipt = {
+  conversationId: number;
+  userId: number;
+  lastReadAt: string;
+};
+
+/**
+ * WhatsApp-style receipt: one tick once the message is sent, two once every
+ * recipient has read it. Read ticks are brand yellow against the sent bubble.
+ */
+function MessageTicks({ message }: Readonly<{ message: Message }>) {
+  // Nothing to report in a conversation with no other members.
+  if (message.recipientCount === 0) return null;
+
+  const read = message.readBy.length >= message.recipientCount;
+  const label = read
+    ? message.recipientCount > 1
+      ? `Read by all ${message.recipientCount}`
+      : 'Read'
+    : message.recipientCount > 1 && message.readBy.length > 0
+      ? `Read by ${message.readBy.length} of ${message.recipientCount}`
+      : 'Sent';
+
+  return (
+    <span
+      className="inline-flex items-center"
+      title={label}
+      aria-label={label}
+      role="img"
+    >
+      <svg
+        viewBox="0 0 20 12"
+        className={`h-3.5 w-4 ${read ? 'text-secondary' : 'text-gray-400'}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {/* Trailing tick, drawn only once the message has been read. */}
+        {read && <path d="M11 7.5 14 10.5 19 2.5" />}
+        <path d="M1 7.5 4 10.5 9 2.5" />
+      </svg>
+    </span>
+  );
+}
 
 type MessageableUser = { id: number; name: string; email: string };
 
@@ -87,6 +139,13 @@ export default function CommunicationClient({ currentUser, initialConversations,
     () => conversations.find((c) => c.id === activeConvId) ?? null,
     [conversations, activeConvId],
   );
+
+  // Everyone visible on this screen, so one poll covers the list and the roster.
+  const presenceIds = useMemo(
+    () => [...new Set(conversations.flatMap((c) => c.members.map((m) => m.id)))],
+    [conversations],
+  );
+  const presence = usePresence(presenceIds);
 
   const conversationName = useCallback(
     (conv: Conversation) => {
@@ -173,6 +232,28 @@ export default function CommunicationClient({ currentUser, initialConversations,
       }
       // Refresh the sidebar previews + unread counts.
       void loadConversations();
+    });
+
+    // Someone caught up — flip our sent-message ticks without a refetch.
+    source.addEventListener('read', (event) => {
+      let receipt: ReadReceipt;
+      try {
+        receipt = JSON.parse((event as MessageEvent).data) as ReadReceipt;
+      } catch {
+        return;
+      }
+      if (receipt.conversationId !== activeConvIdRef.current) return;
+
+      const readThrough = new Date(receipt.lastReadAt).getTime();
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.senderId === currentUser.id &&
+          new Date(m.createdAt).getTime() <= readThrough &&
+          !m.readBy.includes(receipt.userId)
+            ? { ...m, readBy: [...m.readBy, receipt.userId] }
+            : m,
+        ),
+      );
     });
 
     return () => {
@@ -294,9 +375,25 @@ export default function CommunicationClient({ currentUser, initialConversations,
                     activeConvId === conv.id ? 'bg-emerald-50 border-l-4 border-l-emerald-600' : ''
                   }`}
                 >
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold shrink-0 ${getAvatarColor(name)}`}>
-                    {initials(name)}
-                  </div>
+                  {(() => {
+                    const partner =
+                      conv.type === 'direct'
+                        ? conv.members.find((m) => m.id !== currentUser.id)
+                        : null;
+                    const avatar = (
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold shrink-0 ${getAvatarColor(name)}`}>
+                        {initials(name)}
+                      </div>
+                    );
+                    // Group chats have no single presence to report.
+                    return partner ? (
+                      <AvatarStatus variant={presenceOf(presence, partner.id)}>
+                        {avatar}
+                      </AvatarStatus>
+                    ) : (
+                      avatar
+                    );
+                  })()}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <h3 className={`text-sm font-semibold truncate ${activeConvId === conv.id ? 'text-emerald-900' : 'text-gray-900'}`}>
@@ -377,7 +474,10 @@ export default function CommunicationClient({ currentUser, initialConversations,
                           }`}>
                             <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                           </div>
-                          <span className={`text-[10px] text-gray-400 mt-1 ${isMe ? 'text-right mr-1' : 'ml-1'}`}>{formatTime(msg.createdAt)}</span>
+                          <span className={`mt-1 flex items-center gap-1 text-[10px] text-gray-400 ${isMe ? 'justify-end mr-1' : 'ml-1'}`}>
+                            {formatTime(msg.createdAt)}
+                            {isMe && <MessageTicks message={msg} />}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -465,15 +565,22 @@ export default function CommunicationClient({ currentUser, initialConversations,
               <div className="space-y-3">
                 {activeConv.members.map((member) => (
                   <div key={member.id} className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getAvatarColor(member.name)}`}>
-                      {initials(member.name)}
-                    </div>
+                    <AvatarStatus variant={presenceOf(presence, member.id)} size="sm">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getAvatarColor(member.name)}`}>
+                        {initials(member.name)}
+                      </div>
+                    </AvatarStatus>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">
                         {member.name}{member.id === currentUser.id ? ' (You)' : ''}
                       </p>
                       <p className="text-[10px] text-gray-500 truncate">{member.email}</p>
                     </div>
+                    <StatusDot
+                      variant={presenceOf(presence, member.id)}
+                      size="sm"
+                      showLabel
+                    />
                   </div>
                 ))}
               </div>

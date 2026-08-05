@@ -4,6 +4,8 @@ import React, { useMemo, useRef, useState } from 'react';
 
 import type { ContactSummary, CustomerOption } from '@/lib/contacts';
 
+import GoogleImportButton from './google-import-button';
+
 const BRAND = '#03458f';
 const ACCENT = '#f9b232';
 
@@ -264,16 +266,19 @@ export default function ContactsClient({
               Operational contacts, teams, and external relationships.
             </p>
           </div>
-          <button
-            onClick={openCreate}
-            className="self-start md:self-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-95"
-            style={{ backgroundColor: BRAND }}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add contact
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+            <GoogleImportButton onImported={setContacts} />
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-95"
+              style={{ backgroundColor: BRAND }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add contact
+            </button>
+          </div>
         </div>
 
         {/* Stats */}

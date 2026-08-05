@@ -310,7 +310,7 @@ function FinanceTab({
         </SectionCard>
       </div>
 
-      <SectionCard title="Top accounts by balance" action={{ href: '/modules/accounts', label: 'Open accounts →' }}>
+      <SectionCard title="Top customers by balance" action={{ href: '/modules/customers', label: 'Open customers →' }}>
         <SimpleTable
           headers={['Customer', 'Open balance', 'Overdue']}
           align={['left', 'right', 'right']}

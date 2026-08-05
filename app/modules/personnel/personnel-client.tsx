@@ -3,6 +3,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 
 import type { PersonnelSummary, UserOption } from '@/lib/personnel';
+import { AvatarStatus, StatusDot, presenceOf, usePresence } from '@/app/ui/status-dot';
 
 const BRAND = '#03458f';
 
@@ -92,6 +93,13 @@ export default function PersonnelClient({ isAdmin, initialItems, initialUsers }:
       /* ignore */
     }
   };
+
+  // Only records linked to a login account have presence to report.
+  const presenceIds = useMemo(
+    () => items.flatMap((p) => (p.user ? [p.user.id] : [])),
+    [items],
+  );
+  const presence = usePresence(presenceIds);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -296,7 +304,13 @@ export default function PersonnelClient({ isAdmin, initialItems, initialUsers }:
             {filtered.map((p) => (
               <button key={p.id} onClick={() => setSelectedId(p.id)} className="text-left bg-white rounded-2xl p-5 border border-gray-100 hover:border-[#03458f]/40 hover:shadow-sm transition-all">
                 <div className="flex items-start gap-4">
-                  <Avatar person={p} src={p.hasPhoto ? photoUrl(p) : null} size={48} />
+                  {p.user ? (
+                    <AvatarStatus variant={presenceOf(presence, p.user.id)}>
+                      <Avatar person={p} src={p.hasPhoto ? photoUrl(p) : null} size={48} />
+                    </AvatarStatus>
+                  ) : (
+                    <Avatar person={p} src={p.hasPhoto ? photoUrl(p) : null} size={48} />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-semibold text-gray-900 truncate">{p.name}</p>
@@ -308,7 +322,13 @@ export default function PersonnelClient({ isAdmin, initialItems, initialUsers }:
                     <p className="text-sm text-gray-500 truncate mt-0.5">{p.role || '—'}</p>
                     <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
                       <span className="px-2 py-0.5 bg-gray-50 rounded-md border border-gray-100">{p.department}</span>
-                      {p.user && <span className="text-[#03458f]">· has login</span>}
+                      {p.user && (
+                        <StatusDot
+                          variant={presenceOf(presence, p.user.id)}
+                          size="sm"
+                          showLabel
+                        />
+                      )}
                     </div>
                     {p.skills.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-3">

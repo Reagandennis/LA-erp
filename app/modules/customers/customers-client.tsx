@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 
 import type { AccountStatus, CustomerAccount } from '@/lib/accounts';
 
-interface AccountsClientProps {
+interface CustomersClientProps {
   initialAccounts: CustomerAccount[];
   currency: string;
 }
@@ -49,7 +49,7 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-export default function AccountsClient({ initialAccounts, currency }: AccountsClientProps) {
+export default function CustomersClient({ initialAccounts, currency }: CustomersClientProps) {
   const [accounts, setAccounts] = useState<CustomerAccount[]>(initialAccounts);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
@@ -87,7 +87,7 @@ export default function AccountsClient({ initialAccounts, currency }: AccountsCl
       <div className="mx-auto max-w-7xl space-y-6 lg:space-y-8">
         <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">Accounts</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">Customers</h1>
             <p className="mt-1 text-sm text-gray-500">
               Your customers and what they owe, drawn straight from invoices.
             </p>

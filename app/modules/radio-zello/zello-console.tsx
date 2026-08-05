@@ -12,17 +12,21 @@ import {
   type ZelloVoiceClip,
 } from './zello-channel';
 import ZelloMap, { type MapDevice } from './zello-map';
+import { StatusDot, type StatusVariant } from '@/app/ui/status-dot';
 
 const STORAGE_KEY = 'la-erp.zello.config';
 const BLANK: ZelloConfig = { network: '', channel: '', username: '', password: '', authToken: '' };
 
-const STATUS_META: Record<ZelloStatus, { label: string; dot: string; text: string }> = {
-  idle: { label: 'Offline', dot: 'bg-gray-300', text: 'text-gray-500' },
-  connecting: { label: 'Connecting…', dot: 'bg-amber-400 animate-pulse', text: 'text-amber-600' },
-  authenticating: { label: 'Signing in…', dot: 'bg-amber-400 animate-pulse', text: 'text-amber-600' },
-  online: { label: 'On air', dot: 'bg-emerald-500', text: 'text-emerald-600' },
-  error: { label: 'Error', dot: 'bg-rose-500', text: 'text-rose-600' },
-  closed: { label: 'Disconnected', dot: 'bg-gray-300', text: 'text-gray-500' },
+const STATUS_META: Record<
+  ZelloStatus,
+  { label: string; variant: StatusVariant; text: string }
+> = {
+  idle: { label: 'Offline', variant: 'offline', text: 'text-gray-500' },
+  connecting: { label: 'Connecting…', variant: 'warning', text: 'text-amber-600' },
+  authenticating: { label: 'Signing in…', variant: 'warning', text: 'text-amber-600' },
+  online: { label: 'On air', variant: 'online', text: 'text-emerald-600' },
+  error: { label: 'Error', variant: 'danger', text: 'text-rose-600' },
+  closed: { label: 'Disconnected', variant: 'offline', text: 'text-gray-500' },
 };
 
 const inputClass =
@@ -504,7 +508,11 @@ export default function ZelloConsole() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium">
-              <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
+              <StatusDot
+                variant={meta.variant}
+                label={meta.label}
+                pulse={meta.variant === 'online'}
+              />
               <span className={meta.text}>{meta.label}</span>
             </span>
             <button

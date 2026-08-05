@@ -304,6 +304,11 @@ model Contact {
   photoMime    String?
   photoSize    Int?
   photoContent Bytes?
+  // Provenance: "manual" or "google". Google rows carry the People API resource
+  // name so a re-sync updates the same row instead of creating a duplicate.
+  source             String    @default("manual")
+  googleResourceName String?   @unique
+  syncedAt           DateTime?
   createdById  Int
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -313,6 +318,7 @@ model Contact {
   @@index([createdById, createdAt])
   @@index([category])
   @@index([name])
+  @@index([source])
 }
 
 model Quote {
@@ -935,6 +941,7 @@ model StoredFile {
   id           Int      @id @default(autoincrement())
   name         String
   description  String?
+  tags         String[] @default([])
   mimeType     String
   size         Int
   content      Bytes

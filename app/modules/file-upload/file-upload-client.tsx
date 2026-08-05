@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 // --- Types (mirror lib/files.ts) ---
 type ShareTarget = { id: number; name: string };
@@ -9,6 +9,7 @@ type StoredFile = {
   id: number;
   name: string;
   description: string | null;
+  tags: string[];
   mimeType: string;
   size: number;
   uploadedBy: { id: number; name: string };
@@ -101,6 +102,10 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
   const [isRenaming, setIsRenaming] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Tags
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [tagDraft, setTagDraft] = useState('');
+
   // Share modal
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [shareSearch, setShareSearch] = useState('');
@@ -110,6 +115,24 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selected = useMemo(() => items.find((f) => f.id === selectedId) ?? null, [items, selectedId]);
+
+  // Every tag in use, deduped case-insensitively (first casing wins), sorted.
+  const allTags = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const file of items) {
+      for (const tag of file.tags) {
+        const key = tag.toLowerCase();
+        if (!byKey.has(key)) byKey.set(key, tag);
+      }
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  useEffect(() => {
+    if (activeTag && !allTags.some((t) => t.toLowerCase() === activeTag.toLowerCase())) {
+      setActiveTag(null);
+    }
+  }, [activeTag, allTags]);
 
   const reload = async () => {
     try {
@@ -229,8 +252,46 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
     setShareSelection((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
+  const handleUpdateTags = async (next: string[]) => {
+    if (!selected || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/files/${selected.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: next }),
+      });
+      if (res.ok) await reload();
+    } catch {
+      // ignore
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAddTags = async () => {
+    if (!selected) return;
+    const additions = tagDraft
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (additions.length === 0) return;
+    setTagDraft('');
+    await handleUpdateTags([...selected.tags, ...additions]);
+  };
+
+  const handleRemoveTag = async (tag: string) => {
+    if (!selected) return;
+    await handleUpdateTags(selected.tags.filter((t) => t !== tag));
+  };
+
+  const search = searchQuery.toLowerCase();
   const filtered = items.filter(
-    (f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()) && matchesFilter(f, activeFilter),
+    (f) =>
+      (f.name.toLowerCase().includes(search) || f.tags.some((t) => t.toLowerCase().includes(search))) &&
+      matchesFilter(f, activeFilter) &&
+      (!activeTag || f.tags.some((t) => t.toLowerCase() === activeTag.toLowerCase())),
   );
 
   const sharedWithIds = new Set(selected?.sharedWith.map((s) => s.id) ?? []);
@@ -324,7 +385,7 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
             </svg>
             <input
               type="text"
-              placeholder="Search files by name..."
+              placeholder="Search files by name or tag..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
@@ -344,6 +405,34 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
             ))}
           </div>
         </div>
+
+        {/* Tag filter */}
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-8 -mt-4">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mr-1">Tags</span>
+            {allTags.map((tag) => {
+              const active = activeTag?.toLowerCase() === tag.toLowerCase();
+              return (
+                <button
+                  key={tag.toLowerCase()}
+                  onClick={() => setActiveTag(active ? null : tag)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                    active
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-emerald-300 hover:text-emerald-700'
+                  }`}
+                >
+                  #{tag}
+                </button>
+              );
+            })}
+            {activeTag && (
+              <button onClick={() => setActiveTag(null)} className="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-gray-600 ml-1">
+                Clear
+              </button>
+            )}
+          </div>
+        )}
 
         {/* File Grid */}
         {filtered.length === 0 ? (
@@ -383,6 +472,18 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
                   <p className="text-sm font-bold text-gray-900 truncate group-hover:text-emerald-700 transition-colors" title={file.name}>
                     {file.name}
                   </p>
+                  {file.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {file.tags.slice(0, 3).map((tag) => (
+                        <span key={tag} className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-emerald-50 text-emerald-700 truncate max-w-24">
+                          #{tag}
+                        </span>
+                      ))}
+                      {file.tags.length > 3 && (
+                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-gray-50 text-gray-400">+{file.tags.length - 3}</span>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mt-2">
                     <span className="text-[10px] font-bold text-gray-400">{formatBytes(file.size)}</span>
                     <span className="text-[10px] font-medium text-gray-400">{formatDate(file.createdAt)}</span>
@@ -482,6 +583,58 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
                     {selected.uploadedBy.id === viewer.id ? 'You' : selected.uploadedBy.name}
                   </p>
                 </div>
+              </div>
+
+              {/* Tags */}
+              <div>
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-3 block">Tags</label>
+                {selected.tags.length === 0 && !selected.isOwner ? (
+                  <p className="text-xs font-medium text-gray-400">No tags.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {selected.tags.map((tag) => (
+                      <span key={tag} className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 bg-emerald-50 border border-emerald-100 rounded-full">
+                        <span className="text-xs font-bold text-emerald-700">#{tag}</span>
+                        {selected.isOwner ? (
+                          <button
+                            onClick={() => void handleRemoveTag(tag)}
+                            disabled={busy}
+                            className="w-5 h-5 rounded-full text-emerald-400 hover:text-rose-500 hover:bg-rose-50 flex items-center justify-center disabled:opacity-60"
+                            aria-label={`Remove tag ${tag}`}
+                          >
+                            ✕
+                          </button>
+                        ) : (
+                          <span className="w-1" />
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {selected.isOwner && (
+                  <div className="flex items-center gap-2 mt-3">
+                    <input
+                      type="text"
+                      value={tagDraft}
+                      onChange={(e) => setTagDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleAddTags();
+                        }
+                      }}
+                      placeholder="Add tags (comma-separated)…"
+                      className="flex-1 px-3 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
+                    />
+                    <button
+                      onClick={() => void handleAddTags()}
+                      disabled={busy || !tagDraft.trim()}
+                      className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-black uppercase disabled:opacity-60"
+                    >
+                      Add
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Sharing (owner only) */}

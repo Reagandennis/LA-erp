@@ -56,10 +56,13 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const patch: { name?: string; description?: string | null } = {};
+  const patch: { name?: string; description?: string | null; tags?: string[] } = {};
   if (typeof body.name === 'string') patch.name = body.name;
   if (typeof body.description === 'string' || body.description === null) {
     patch.description = body.description;
+  }
+  if (Array.isArray(body.tags) && body.tags.every((tag: unknown) => typeof tag === 'string')) {
+    patch.tags = body.tags;
   }
 
   const result = await updateFile(id, auth.user.id, patch);

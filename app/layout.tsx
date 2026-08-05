@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/app/ui/sidebar";
+import { BannerProvider } from "@/app/ui/banner";
 import NotificationsBell from "@/app/ui/notifications-bell";
 import WorldClockTicker from "@/app/ui/world-clock-ticker";
 import { getServerAuth } from "@/lib/auth";
@@ -52,6 +53,7 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex bg-gray-50/30">
+        <BannerProvider>
         {shouldShowSidebar && (
           <Sidebar
             user={sidebarUser}
@@ -80,6 +82,7 @@ export default async function RootLayout({
             body:has(.ticker-bar) .sidebar-margin { padding-top: 3rem; }
           `}} />
         )}
+        </BannerProvider>
       </body>
     </html>
   );

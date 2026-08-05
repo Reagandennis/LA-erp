@@ -22,7 +22,11 @@ const GoogleAuthContext = createContext<GoogleAuthContextType>({
 });
 
 const STORAGE_KEY = 'la_erp_google_access_token';
-const COMBINED_SCOPES = 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive';
+const COMBINED_SCOPES = [
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/contacts.readonly',
+].join(' ');
 
 export function GoogleAuthProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [token, setToken] = useState<string | null>(null);

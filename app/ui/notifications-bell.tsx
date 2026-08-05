@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+import { Toast, ToastStack } from './toast';
+
 type NotificationSource = 'todo' | 'quote' | 'trip' | 'message' | 'file' | 'calendar';
 
 type RawTodoNotification = {
@@ -296,9 +298,10 @@ export default function NotificationsBell() {
     if (visibleToastKeys.length === 0) {
       return undefined;
     }
+    // Long enough to read the message and click through to the item.
     const timeout = setTimeout(() => {
       setVisibleToastKeys((current) => current.slice(1));
-    }, 3000);
+    }, 6000);
     return () => clearTimeout(timeout);
   }, [visibleToastKeys]);
 
@@ -354,41 +357,23 @@ export default function NotificationsBell() {
       </button>
 
       {visibleToasts.length > 0 && (
-        <aside className="fixed left-0 top-20 w-full max-w-sm z-110 animate-in slide-in-from-left duration-300 ease-out">
-          <div className="space-y-3 px-4">
-            {visibleToasts.map((notification) => (
-              <div
-                key={compositeKey(notification)}
-                className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900 shadow-lg"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">{notification.toastTitle}</p>
-                    <p className="text-sm text-emerald-900">{notification.message}</p>
-                    <p className="text-xs text-emerald-700 mt-1">
-                      {new Date(notification.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => dismissToast(compositeKey(notification))}
-                    className="p-1 text-emerald-700 hover:text-emerald-900"
-                    aria-label="Dismiss notification"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </aside>
+        <ToastStack>
+          {visibleToasts.map((notification) => (
+            <Toast
+              key={compositeKey(notification)}
+              source={notification.source}
+              title={notification.toastTitle}
+              message={notification.message}
+              timestamp={notification.createdAt}
+              href={notification.href}
+              onAction={() => {
+                void markNotificationRead(notification);
+                dismissToast(compositeKey(notification));
+              }}
+              onDismiss={() => dismissToast(compositeKey(notification))}
+            />
+          ))}
+        </ToastStack>
       )}
 
       {isOpen && (

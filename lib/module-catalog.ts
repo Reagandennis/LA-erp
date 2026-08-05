@@ -148,9 +148,9 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     sortOrder: 21,
   },
   {
-    slug: 'accounts',
-    name: 'Accounts',
-    description: 'Review account records, balances, and commercial relationships.',
+    slug: 'customers',
+    name: 'Customers',
+    description: 'Review customer records, balances, and commercial relationships.',
     category: 'Finance',
     sortOrder: 22,
   },
@@ -204,8 +204,8 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     sortOrder: 29,
   },
   {
-    slug: 'upcoming-due-dates',
-    name: 'Upcoming Due Dates',
+    slug: 'notification-center',
+    name: 'Notification Center',
     description: 'Monitor important deadlines and items requiring action soon.',
     category: 'Compliance',
     sortOrder: 30,

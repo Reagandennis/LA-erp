@@ -16,6 +16,17 @@ export type MessageSummary = {
   senderName: string;
   body: string;
   createdAt: string;
+  /** Other members who have read this message (never includes the sender). */
+  readBy: number[];
+  /** How many members other than the sender the message is addressed to. */
+  recipientCount: number;
+};
+
+/** Broadcast when someone catches up, so senders' receipts update live. */
+export type ReadReceipt = {
+  conversationId: number;
+  userId: number;
+  lastReadAt: string;
 };
 
 export type ConversationSummary = {
@@ -121,21 +132,41 @@ export async function listMessages(
   const memberIds = await getConversationMemberIds(conversationId, userId);
   if (!memberIds) return null;
 
-  const messages = await prisma.message.findMany({
-    where: { conversationId },
-    orderBy: { createdAt: 'asc' },
-    take: 200,
-    include: { sender: { select: { name: true } } },
-  });
+  const [messages, members] = await Promise.all([
+    prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+      include: { sender: { select: { name: true } } },
+    }),
+    prisma.conversationMember.findMany({
+      where: { conversationId },
+      select: { userId: true, lastReadAt: true },
+    }),
+  ]);
 
-  return messages.map((m) => ({
-    id: m.id,
-    conversationId: m.conversationId,
-    senderId: m.senderId,
-    senderName: m.sender.name,
-    body: m.body,
-    createdAt: m.createdAt.toISOString(),
-  }));
+  return messages.map((m) => {
+    // A member has read the message when they caught up at or after it landed.
+    const readBy = members
+      .filter(
+        (member) =>
+          member.userId !== m.senderId &&
+          member.lastReadAt != null &&
+          member.lastReadAt.getTime() >= m.createdAt.getTime(),
+      )
+      .map((member) => member.userId);
+
+    return {
+      id: m.id,
+      conversationId: m.conversationId,
+      senderId: m.senderId,
+      senderName: m.sender.name,
+      body: m.body,
+      createdAt: m.createdAt.toISOString(),
+      readBy,
+      recipientCount: Math.max(0, members.length - 1),
+    };
+  });
 }
 
 /** Find an existing 1:1 conversation between two users, or create one. */
@@ -184,14 +215,31 @@ export async function getOrCreateDirectConversation(
 
 /** Mark a conversation as read for a user (clears its unread badge + message notifications). */
 export async function markConversationRead(conversationId: number, userId: number): Promise<void> {
+  const memberIds = await getConversationMemberIds(conversationId, userId);
+  if (!memberIds) return;
+
+  const lastReadAt = new Date();
+
   await prisma.conversationMember.updateMany({
     where: { conversationId, userId },
-    data: { lastReadAt: new Date() },
+    data: { lastReadAt },
   });
   await prisma.messageNotification.updateMany({
     where: { userId, conversationId, readAt: null },
     data: { readAt: new Date() },
   });
+
+  // Tell the other members so their sent-message receipts update without a poll.
+  const receipt: ReadReceipt = {
+    conversationId,
+    userId,
+    lastReadAt: lastReadAt.toISOString(),
+  };
+  broadcastToMembers(
+    memberIds.filter((id) => id !== userId),
+    'read',
+    receipt,
+  );
 }
 
 /**
@@ -251,6 +299,8 @@ export async function sendMessage(
     senderName,
     body: message.body,
     createdAt: message.createdAt.toISOString(),
+    readBy: [],
+    recipientCount: recipientIds.length,
   };
 
   // Live push to every member (including the sender's other open tabs).

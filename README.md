@@ -79,7 +79,7 @@ seeded into the database. Administrators grant module access per role.
 ### Finance
 - **Invoices** — create and send client invoices, record payments, track
   overdue balances, generate PDFs, and create invoices from approved quotes.
-- **Accounts** — accounts-receivable view with customer balances, overdue
+- **Customers** — accounts-receivable view with customer balances, overdue
   ageing, and statements.
 
 ### Operations
@@ -119,7 +119,7 @@ seeded into the database. Administrators grant module access per role.
 
 ### Compliance
 - **Access to SOPs** — controlled access to standard operating procedures.
-- **Upcoming Due Dates** — deadlines requiring action soon.
+- **Notification Center** — deadlines requiring action soon.
 - **Drivers License Expiry** — licensing expiry and renewal tracking.
 - **Certificate Expiry** — certificate validity and renewal schedules.
 - **Contract Renewal** — contract terms and renewal windows.

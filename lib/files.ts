@@ -8,6 +8,7 @@ export type StoredFileSummary = {
   id: number;
   name: string;
   description: string | null;
+  tags: string[];
   mimeType: string;
   size: number;
   uploadedBy: { id: number; name: string };
@@ -28,6 +29,7 @@ const SUMMARY_SELECT = {
   id: true,
   name: true,
   description: true,
+  tags: true,
   mimeType: true,
   size: true,
   createdAt: true,
@@ -40,6 +42,7 @@ type SummaryRow = {
   id: number;
   name: string;
   description: string | null;
+  tags: string[];
   mimeType: string;
   size: number;
   createdAt: Date;
@@ -54,6 +57,7 @@ function serialize(row: SummaryRow, viewerId: number): StoredFileSummary {
     id: row.id,
     name: row.name,
     description: row.description,
+    tags: row.tags,
     mimeType: row.mimeType,
     size: row.size,
     uploadedBy: { id: row.uploadedBy.id, name: row.uploadedBy.name },
@@ -161,10 +165,29 @@ async function ensureOwner(id: number, userId: number) {
   return 'ok' as const;
 }
 
+const MAX_TAGS_PER_FILE = 12;
+const MAX_TAG_LENGTH = 32;
+
+/** Trim, collapse whitespace, drop empties, dedupe case-insensitively, cap count. */
+function normalizeTags(raw: string[]): string[] {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const value of raw) {
+    const tag = value.trim().replace(/\s+/g, ' ').slice(0, MAX_TAG_LENGTH);
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+    if (tags.length >= MAX_TAGS_PER_FILE) break;
+  }
+  return tags;
+}
+
 export async function updateFile(
   id: number,
   userId: number,
-  patch: { name?: string; description?: string | null },
+  patch: { name?: string; description?: string | null; tags?: string[] },
 ): Promise<WriteResult> {
   const permission = await ensureOwner(id, userId);
   if (permission !== 'ok') return { status: permission };
@@ -175,6 +198,7 @@ export async function updateFile(
     if (name) data.name = name;
   }
   if (patch.description !== undefined) data.description = patch.description?.trim() || null;
+  if (patch.tags !== undefined) data.tags = normalizeTags(patch.tags);
 
   const row = await prisma.storedFile.update({ where: { id }, data, select: SUMMARY_SELECT });
   return { status: 'ok', file: serialize(row, userId) };

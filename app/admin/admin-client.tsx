@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 
 import type { AuditLogEntry, AuditQueryResult } from '@/lib/audit';
 import LogoutButton from '@/app/ui/logout-button';
+import { AvatarStatus, StatusDot, presenceOf, usePresence } from '@/app/ui/status-dot';
 
 const BRAND = '#03458f';
 
@@ -300,6 +301,7 @@ export default function AdminClient({
 
   const adminCount = users.filter((u) => u.roles.some((r) => r.name === 'admin')).length;
   const suspendedCount = users.filter((u) => u.status === 'suspended').length;
+  const presence = usePresence();
 
   const TABS = ['overview', 'users', 'roles', 'audit'] as const;
 
@@ -426,10 +428,15 @@ export default function AdminClient({
               {filteredUsers.map((u) => (
                 <button key={u.id} onClick={() => setSelectedUserId(u.id)} className="text-left bg-white p-5 rounded-2xl border border-gray-100 hover:border-[#03458f]/40 hover:shadow-sm transition-all">
                   <div className="flex justify-between items-start mb-4">
-                    <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-semibold" style={{ backgroundColor: BRAND }}>
-                      {u.name.substring(0, 2).toUpperCase()}
+                    <AvatarStatus variant={presenceOf(presence, u.id)}>
+                      <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-semibold" style={{ backgroundColor: BRAND }}>
+                        {u.name.substring(0, 2).toUpperCase()}
+                      </div>
+                    </AvatarStatus>
+                    <div className="flex flex-col items-end gap-1.5">
+                      <span className={`px-2 py-0.5 rounded-md text-xs font-medium border ${userStatusStyle(u.status)}`}>{u.status}</span>
+                      <StatusDot variant={presenceOf(presence, u.id)} size="sm" showLabel />
                     </div>
-                    <span className={`px-2 py-0.5 rounded-md text-xs font-medium border ${userStatusStyle(u.status)}`}>{u.status}</span>
                   </div>
                   <h3 className="font-semibold text-gray-900 truncate">{u.name}</h3>
                   <p className="text-xs text-gray-400 truncate mt-0.5 mb-3">{u.email}</p>

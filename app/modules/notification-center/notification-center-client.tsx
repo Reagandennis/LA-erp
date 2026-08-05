@@ -59,7 +59,7 @@ function groupOf(days: number): GroupKey {
   return 'later';
 }
 
-export default function DueDatesClient({ initialItems, initialBuckets }: Props) {
+export default function NotificationCenterClient({ initialItems, initialBuckets }: Props) {
   const [items] = useState<DueDateItem[]>(initialItems);
   const [buckets] = useState<DueDateBuckets>(initialBuckets);
   const [search, setSearch] = useState('');
@@ -92,7 +92,7 @@ export default function DueDatesClient({ initialItems, initialBuckets }: Props) 
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold text-gray-900">Upcoming Due Dates</h1>
+          <h1 className="text-2xl font-semibold text-gray-900">Notification Center</h1>
           <p className="text-gray-500 mt-1 text-sm">
             Deadlines from across the platform — invoices, quotes, licenses, contracts, SOP reviews, trips, and calendar.
           </p>

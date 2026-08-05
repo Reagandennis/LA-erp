@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 
+import { PRESENCE_HEARTBEAT_MS } from './presence';
 import { prisma } from './prisma';
 import { isPrismaDatabaseUnavailableError } from './prisma-errors';
 import {
@@ -111,6 +112,19 @@ async function resolveAuthenticatedUser(token: string | null) {
     user.id !== Number(payload.sub)
   ) {
     return null;
+  }
+
+  // Presence heartbeat. Throttled so an active user costs at most one write a
+  // minute rather than one per request.
+  if (Date.now() - session.lastSeenAt.getTime() > PRESENCE_HEARTBEAT_MS) {
+    try {
+      await prisma.session.update({
+        where: { id: session.id },
+        data: { lastSeenAt: new Date() },
+      });
+    } catch {
+      // Presence is best-effort; never fail a request over it.
+    }
   }
 
   return {
