@@ -150,7 +150,7 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
   {
     slug: 'customers',
     name: 'Customers',
-    description: 'Review customer records, balances, and commercial relationships.',
+    description: 'CRM — deal pipeline, account profiles, contacts, and receivables by entity.',
     category: 'Finance',
     sortOrder: 22,
   },

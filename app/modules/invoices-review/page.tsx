@@ -5,6 +5,7 @@ import { listBrandProfiles } from '@/lib/brand-profiles';
 import { listCustomers } from '@/lib/customers';
 import { listInvoiceableQuotes, listInvoices } from '@/lib/invoices';
 import { getOrganizationSettings } from '@/lib/organization';
+import { getQuickBooksStatus } from '@/lib/quickbooks';
 import { listProducts } from '@/lib/products';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
@@ -22,7 +23,7 @@ export default async function InvoicesReviewPage() {
     redirect('/dashboard');
   }
 
-  const [invoices, customers, products, brandProfiles, organization, invoiceableQuotes] =
+  const [invoices, customers, products, brandProfiles, organization, invoiceableQuotes, quickBooks] =
     await Promise.all([
       listInvoices(),
       listCustomers(),
@@ -30,6 +31,7 @@ export default async function InvoicesReviewPage() {
       listBrandProfiles({ includeArchived: false }),
       getOrganizationSettings(),
       listInvoiceableQuotes(),
+      getQuickBooksStatus(),
     ]);
 
   return (
@@ -55,6 +57,7 @@ export default async function InvoicesReviewPage() {
         taxLabel: organization.taxLabel,
         hasLogo: organization.hasLogo,
       }}
+      quickBooks={{ configured: quickBooks.configured, connected: quickBooks.connected }}
     />
   );
 }

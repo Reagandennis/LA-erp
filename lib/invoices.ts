@@ -3,6 +3,7 @@ import 'server-only';
 import { Prisma } from '@prisma/client';
 
 import { prisma } from './prisma';
+import { syncInvoicePaymentToQuickBooks, type QuickBooksSyncResult } from './quickbooks';
 import { computeQuoteTotals } from './quotes';
 
 export type InvoiceStatus = 'Draft' | 'Sent' | 'Partial' | 'Paid' | 'Void';
@@ -400,7 +401,7 @@ export async function recordInvoicePayment(params: {
   invoiceId: number;
   userId: number;
   input: InvoicePaymentInput;
-}): Promise<InvoiceDetail | { error: string }> {
+}): Promise<(InvoiceDetail & { quickbooks?: QuickBooksSyncResult }) | { error: string }> {
   const existing = await prisma.invoice.findUnique({
     where: { id: params.invoiceId },
     include: invoiceInclude,
@@ -411,8 +412,8 @@ export async function recordInvoicePayment(params: {
 
   const total = toNumber(existing.total);
 
-  return prisma.$transaction(async (tx) => {
-    await tx.invoicePayment.create({
+  const { detail, paymentId } = await prisma.$transaction(async (tx) => {
+    const payment = await tx.invoicePayment.create({
       data: {
         invoiceId: params.invoiceId,
         amount: new Prisma.Decimal(params.input.amount),
@@ -451,8 +452,13 @@ export async function recordInvoicePayment(params: {
     });
 
     const fresh = await tx.invoice.findUnique({ where: { id: params.invoiceId }, include: invoiceInclude });
-    return serializeDetail(fresh!);
+    return { detail: serializeDetail(fresh!), paymentId: payment.id };
   });
+
+  // Mirror to QuickBooks after the local write commits. Never blocks or fails
+  // the local payment — result is reported alongside the invoice.
+  const quickbooks = await syncInvoicePaymentToQuickBooks(paymentId);
+  return { ...detail, quickbooks };
 }
 
 export async function voidInvoice(id: number): Promise<InvoiceDetail | { error: string }> {

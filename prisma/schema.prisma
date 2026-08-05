@@ -30,6 +30,9 @@ model User {
   auditLogs      AuditLog[] @relation("AuditActor")
   auditTargets   AuditLog[] @relation("AuditTarget")
   createdCustomers   Customer[] @relation("CustomerCreatedBy")
+  createdDeals       Deal[]     @relation("DealCreatedBy")
+  createdCrmActivities CrmActivity[] @relation("CrmActivityCreatedBy")
+  quickbooksConnections QuickBooksConnection[] @relation("QuickBooksConnectedBy")
   createdQuotes      Quote[]    @relation("QuoteCreatedBy")
   approvableQuotes   Quote[]    @relation("QuoteApprover")
   quoteNotifications QuoteNotification[]
@@ -276,6 +279,10 @@ model Customer {
   company        String?
   address        String?
   billingAddress String?
+  // Which business entity this customer belongs to (LADYASKARI | LIONESS | STARLLWART).
+  entity         String   @default("LADYASKARI")
+  // QuickBooks Online Customer.Id once mirrored there.
+  quickbooksCustomerId String?
   createdById    Int
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -284,9 +291,12 @@ model Customer {
   invoices       Invoice[]
   trips          Trip[]
   contacts       Contact[]
+  deals          Deal[]
+  crmActivities  CrmActivity[]
 
   @@index([createdById, createdAt])
   @@index([name])
+  @@index([entity])
 }
 
 model Contact {
@@ -314,11 +324,64 @@ model Contact {
   updatedAt    DateTime @updatedAt
   createdBy    User      @relation("ContactCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  crmActivities CrmActivity[]
 
   @@index([createdById, createdAt])
   @@index([category])
   @@index([name])
   @@index([source])
+}
+
+// A CRM pipeline deal. Stage keys live in lib/crm.ts (lead → onboarding →
+// proposal → won → execution → invoiced → closed, plus lost). "Outstanding
+// 30+ days" is derived from stage=invoiced + stageChangedAt, not stored.
+model Deal {
+  id                Int       @id @default(autoincrement())
+  title             String
+  customerId        Int
+  stage             String    @default("lead")
+  value             Decimal   @default(0) @db.Decimal(14, 2)
+  currency          String    @default("USD")
+  quoteId           Int?
+  contractId        Int?
+  // E-signature tracking for the proposal / NDA: none | sent | signed | declined.
+  signatureStatus   String    @default("none")
+  expectedCloseDate DateTime?
+  lostReason        String?
+  notes             String?
+  stageChangedAt    DateTime  @default(now())
+  createdById       Int
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quote             Quote?    @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  contract          Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  createdBy         User      @relation("DealCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  activities        CrmActivity[]
+
+  @@index([stage, stageChangedAt])
+  @@index([customerId])
+  @@index([quoteId])
+}
+
+// Communication history entry: call | email | meeting | note.
+model CrmActivity {
+  id          Int      @id @default(autoincrement())
+  customerId  Int
+  dealId      Int?
+  contactId   Int?
+  type        String   @default("note")
+  summary     String
+  occurredAt  DateTime @default(now())
+  createdById Int
+  createdAt   DateTime @default(now())
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deal        Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  contact     Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  createdBy   User     @relation("CrmActivityCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([customerId, occurredAt])
+  @@index([dealId])
 }
 
 model Quote {
@@ -357,6 +420,7 @@ model Quote {
   notifications  QuoteNotification[]
   trip           Trip?     @relation("QuoteSourceTrip")
   invoices       Invoice[] @relation("QuoteInvoices")
+  deals          Deal[]
 
   @@index([createdById, status])
   @@index([approverId, status])
@@ -520,6 +584,8 @@ model Invoice {
   terms          String?
   sentAt         DateTime?
   paidAt         DateTime?
+  // QuickBooks Online Invoice.Id once mirrored there.
+  quickbooksInvoiceId String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
@@ -564,6 +630,9 @@ model InvoicePayment {
   reference   String?
   note        String?
   paidAt      DateTime
+  // QuickBooks Online Payment.Id when synced; sync error message when not.
+  quickbooksPaymentId String?
+  quickbooksSyncError String?
   createdById Int
   createdAt   DateTime @default(now())
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
@@ -575,6 +644,19 @@ model InvoicePayment {
 model InvoiceSequence {
   year       Int @id
   lastNumber Int @default(0)
+}
+
+// Single-company QuickBooks Online OAuth connection (latest row wins).
+model QuickBooksConnection {
+  id                   Int      @id @default(autoincrement())
+  realmId              String   @unique
+  accessToken          String
+  refreshToken         String
+  accessTokenExpiresAt DateTime
+  connectedById        Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  connectedBy          User     @relation("QuickBooksConnectedBy", fields: [connectedById], references: [id], onDelete: Restrict)
 }
 
 model Trip {
@@ -1224,6 +1306,7 @@ model Contract {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   createdBy        User     @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  deals            Deal[]
 
   @@index([endDate])
   @@index([status])

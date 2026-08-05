@@ -50,6 +50,7 @@ export default function InvoiceDetailDrawer({
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [quickBooksNotice, setQuickBooksNotice] = useState<{ tone: 'ok' | 'warn'; message: string } | null>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [payment, setPayment] = useState({
@@ -118,6 +119,7 @@ export default function InvoiceDetailDrawer({
     }
     setActionPending('payment');
     setError(null);
+    setQuickBooksNotice(null);
     try {
       const response = await fetch(`/api/invoices/${invoice.id}/payments`, {
         method: 'POST',
@@ -131,10 +133,24 @@ export default function InvoiceDetailDrawer({
           note: payment.note.trim() || null,
         }),
       });
-      const data = (await response.json().catch(() => null)) as { invoice?: InvoiceDetail; error?: string } | null;
+      const data = (await response.json().catch(() => null)) as
+        | {
+            invoice?: InvoiceDetail & { quickbooks?: { status: string; error?: string } };
+            error?: string;
+          }
+        | null;
       if (!response.ok || !data?.invoice) {
         setError(data?.error ?? 'Could not record payment');
         return;
+      }
+      const quickbooks = data.invoice.quickbooks;
+      if (quickbooks?.status === 'synced') {
+        setQuickBooksNotice({ tone: 'ok', message: 'Payment also recorded in QuickBooks.' });
+      } else if (quickbooks?.status === 'failed') {
+        setQuickBooksNotice({
+          tone: 'warn',
+          message: `Payment recorded locally, but QuickBooks sync failed: ${quickbooks.error ?? 'unknown error'}`,
+        });
       }
       setInvoice(data.invoice);
       onChanged(data.invoice);
@@ -388,6 +404,17 @@ export default function InvoiceDetailDrawer({
                 </div>
               )}
 
+              {quickBooksNotice && (
+                <div
+                  className={`rounded-xl border p-4 text-sm font-medium ${
+                    quickBooksNotice.tone === 'ok'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-amber-200 bg-amber-50 text-amber-700'
+                  }`}
+                >
+                  {quickBooksNotice.message}
+                </div>
+              )}
               {error && (
                 <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-700">{error}</div>
               )}

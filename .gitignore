@@ -43,3 +43,6 @@ next-env.d.ts
 # local env override (contains secrets — never commit)
 .local.env
 *.local.env
+
+# QuickBooks credentials scratch file (secrets live in .env)
+quickbook.txt

@@ -24,6 +24,7 @@ interface InvoicesClientProps {
   brandProfiles: BrandProfileOption[];
   invoiceableQuotes: InvoiceableQuote[];
   organization: OrganizationBranding;
+  quickBooks: { configured: boolean; connected: boolean };
 }
 
 const STATUS_FILTERS: StatusFilter[] = ['All', 'Draft', 'Sent', 'Overdue', 'Partial', 'Paid', 'Void'];
@@ -58,6 +59,7 @@ export default function InvoicesClient({
   brandProfiles,
   invoiceableQuotes,
   organization,
+  quickBooks,
 }: InvoicesClientProps) {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(initialInvoices);
   const [customers, setCustomers] = useState<CustomerOption[]>(initialCustomers);
@@ -153,6 +155,23 @@ export default function InvoicesClient({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {quickBooks.configured && !quickBooks.connected && (
+              <a
+                href="/api/quickbooks/connect"
+                className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+              >
+                Connect QuickBooks
+              </a>
+            )}
+            {quickBooks.connected && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2.5 text-xs font-semibold text-emerald-700"
+                title="Payments recorded here are mirrored to QuickBooks"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                QuickBooks connected
+              </span>
+            )}
             {invoiceableQuotes.length > 0 && (
               <button
                 type="button"
