@@ -8,6 +8,7 @@ import type { DiscountType } from './quotes';
 export interface TemplateLineItem {
   description: string;
   quantity: number;
+  days: number;
   unitPrice: number;
   taxable: boolean;
   discountType: DiscountType;
@@ -80,6 +81,7 @@ function normaliseItems(raw: Prisma.JsonValue): TemplateLineItem[] {
       return {
         description,
         quantity,
+        days: Number.isFinite(Number(item.days)) && Number(item.days) > 0 ? Number(item.days) : 1,
         unitPrice,
         taxable: item.taxable !== false,
         discountType: (item.discountType as DiscountType) ?? 'none',

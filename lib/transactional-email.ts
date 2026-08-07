@@ -103,6 +103,87 @@ export async function emailQuoteToCustomer(quote: QuoteDetail): Promise<{ to: st
 }
 
 /**
+ * Asks an approver to review a submitted invoice. Attaches the invoice PDF so
+ * they can review straight from their inbox. Best-effort: callers must not
+ * fail the submission if this throws.
+ */
+export async function emailInvoiceApprovalRequest(params: {
+  invoice: InvoiceDetail;
+  approver: { name: string; email: string };
+  submitterName: string;
+  reviewUrl: string;
+}): Promise<{ to: string }> {
+  const { invoice } = params;
+  const organization = await getOrganizationSettings();
+  const orgName = invoice.brandProfile?.companyName || organization.companyName || 'Our company';
+  const pdf = await buildInvoicePdf(invoice);
+
+  const bodyHtml = `
+    <p>Hi ${escapeEmailHtml(params.approver.name)},</p>
+    <p><strong>${escapeEmailHtml(params.submitterName)}</strong> submitted invoice <strong>${escapeEmailHtml(invoice.number)}</strong> for your approval.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:14px 0;font-size:14px;color:#374151;">
+      <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Customer</td><td>${escapeEmailHtml(invoice.customer.name)}</td></tr>
+      <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Total</td><td style="font-weight:700;">${escapeEmailHtml(formatMoney(invoice.total, invoice.currency))}</td></tr>
+      <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Due date</td><td>${escapeEmailHtml(formatDate(invoice.dueDate))}</td></tr>
+    </table>
+    <p>The invoice is attached as a PDF. It cannot be sent to the customer, and no payments can be recorded against it, until you approve it.</p>`;
+
+  const html = renderEmailLayout({
+    title: `Approval needed: invoice ${invoice.number}`,
+    bodyHtml,
+    organizationName: orgName,
+    cta: { label: 'Review in LA-ERP', url: params.reviewUrl },
+  });
+
+  await sendEmail({
+    to: params.approver.email,
+    subject: `Approval needed: invoice ${invoice.number} (${formatMoney(invoice.total, invoice.currency)})`,
+    html,
+    attachments: [{ filename: `${invoice.number}.pdf`, content: pdf, contentType: 'application/pdf' }],
+  });
+
+  return { to: params.approver.email };
+}
+
+/**
+ * Tells the invoice's creator the approval decision. Best-effort: callers must
+ * not fail the decision if this throws.
+ */
+export async function emailInvoiceDecisionToCreator(params: {
+  invoice: InvoiceDetail;
+  decision: 'approved' | 'declined';
+  note: string | null;
+  reviewUrl: string;
+}): Promise<{ to: string }> {
+  const { invoice } = params;
+  const organization = await getOrganizationSettings();
+  const orgName = invoice.brandProfile?.companyName || organization.companyName || 'Our company';
+  const approved = params.decision === 'approved';
+
+  const bodyHtml = `
+    <p>Hi ${escapeEmailHtml(invoice.createdBy.name)},</p>
+    <p>Invoice <strong>${escapeEmailHtml(invoice.number)}</strong> (${escapeEmailHtml(invoice.customer.name)}, ${escapeEmailHtml(formatMoney(invoice.total, invoice.currency))}) was <strong>${approved ? 'approved' : 'declined'}</strong>${invoice.approver ? ` by ${escapeEmailHtml(invoice.approver.name)}` : ''}.</p>
+    ${params.note ? `<p style="color:#6b7280;">Note: “${escapeEmailHtml(params.note)}”</p>` : ''}
+    <p>${approved ? 'You can now send it to the customer.' : 'Revise the invoice and resubmit it for approval.'}</p>`;
+
+  const html = renderEmailLayout({
+    title: `Invoice ${invoice.number} ${approved ? 'approved' : 'declined'}`,
+    bodyHtml,
+    organizationName: orgName,
+    cta: { label: approved ? 'Open invoice' : 'Revise invoice', url: params.reviewUrl },
+    accentColor: approved ? '#059669' : '#e11d48',
+  });
+
+  await sendEmail({
+    to: invoice.createdBy.email,
+    subject: `Invoice ${invoice.number} ${approved ? 'approved ✓' : 'declined'}`,
+    html,
+  });
+
+  return { to: invoice.createdBy.email };
+}
+
+/**
  * Sends a welcome email to a newly created user. Does not include a password —
  * the administrator shares credentials separately. Best-effort: callers should
  * not fail account creation if this throws.

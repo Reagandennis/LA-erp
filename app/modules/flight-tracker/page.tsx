@@ -86,7 +86,8 @@ const arrivalChipCls: Record<ArrivalKey, string> = {
   ontime: 'bg-emerald-50 text-emerald-700',
   delayed: 'bg-rose-50 text-rose-700',
   early: 'bg-sky-50 text-sky-700',
-  none: 'bg-slate-100 text-slate-500',
+  none: 'bg-slate-100 text-slate-500', // this is a bit of a lie, but we don't show the chip for "none" anyway  !
+  // !
 };
 
 const PlaneGlyph = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (

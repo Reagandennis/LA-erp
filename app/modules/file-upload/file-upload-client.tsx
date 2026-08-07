@@ -373,7 +373,7 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
             </svg>
           </div>
           <p className="text-sm font-bold text-gray-700">{dragOver ? 'Drop files to upload' : 'Drag & drop files here, or click to browse'}</p>
-          <p className="text-xs text-gray-400 mt-1 font-medium">Up to 25 MB per file • Private to you until you share</p>
+          <p className="text-xs text-gray-400 mt-1 font-medium">Up to 25 MB per file • Private to you until you share</p> // 25 mb limit per file
           {uploadError && <p className="text-xs font-bold text-rose-500 mt-3">{uploadError}</p>}
         </div>
 

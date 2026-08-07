@@ -33,6 +33,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (invoice.status === 'Void') {
     return NextResponse.json({ error: 'Cannot send a void invoice' }, { status: 400 });
   }
+  if (invoice.status === 'Draft' || invoice.status === 'Pending Approval' || invoice.status === 'Declined') {
+    return NextResponse.json(
+      { error: 'This invoice must be approved before it can be sent' },
+      { status: 400 },
+    );
+  }
   if (!isEmailConfigured()) {
     return NextResponse.json(
       { error: 'Email is not set up yet. Configure SMTP under Admin → Email.' },

@@ -26,6 +26,8 @@ export type DiscountType = 'none' | 'percentage' | 'fixed';
 export interface QuoteItemDraft {
   description: string;
   quantity: number;
+  /** Days the line covers; defaults to 1. Line subtotal = quantity × days × unitPrice. */
+  days?: number;
   unitPrice: number;
   taxable?: boolean;
   discountType?: DiscountType;
@@ -38,6 +40,7 @@ export interface QuoteItemSummary {
   position: number;
   description: string;
   quantity: number;
+  days: number;
   unitPrice: number;
   taxable: boolean;
   discountType: DiscountType;
@@ -136,6 +139,7 @@ interface QuoteItemRecord {
   position: number;
   description: string;
   quantity: Prisma.Decimal;
+  days: Prisma.Decimal;
   unitPrice: Prisma.Decimal;
   taxable: boolean;
   discountType: string;
@@ -184,6 +188,7 @@ type QuoteItemCollectionClient = {
       position: number;
       description: string;
       quantity: Prisma.Decimal;
+      days: Prisma.Decimal;
       unitPrice: Prisma.Decimal;
       taxable: boolean;
       discountType: string;
@@ -256,8 +261,9 @@ function clampDiscount(amount: Prisma.Decimal, max: Prisma.Decimal): Prisma.Deci
 
 function computeLine(item: QuoteItemDraft) {
   const quantity = asDecimal(item.quantity);
+  const days = asDecimal(item.days ?? 1);
   const unitPrice = asDecimal(item.unitPrice);
-  const gross = quantity.mul(unitPrice);
+  const gross = quantity.mul(days).mul(unitPrice);
   const discountType = (item.discountType ?? 'none') as DiscountType;
   const discountValue = asDecimal(item.discountValue ?? 0);
   let discountAmount = ZERO;
@@ -270,6 +276,7 @@ function computeLine(item: QuoteItemDraft) {
   const total = round2(gross.sub(discountAmount));
   return {
     quantity,
+    days,
     unitPrice,
     taxable: item.taxable ?? true,
     discountType,
@@ -328,6 +335,7 @@ function serializeItem(item: QuoteItemRecord): QuoteItemSummary {
     position: item.position,
     description: item.description,
     quantity: toNumber(item.quantity),
+    days: toNumber(item.days),
     unitPrice: toNumber(item.unitPrice),
     taxable: item.taxable,
     discountType: item.discountType as DiscountType,
@@ -483,6 +491,7 @@ export async function createQuote(input: QuoteCreateInput): Promise<QuoteDetail>
           position: item.position,
           description: item.description,
           quantity: item.quantity,
+          days: item.days,
           unitPrice: item.unitPrice,
           taxable: item.taxable,
           discountType: item.discountType,
@@ -551,6 +560,7 @@ export async function updateDraftQuote(params: {
     existing.items.map<QuoteItemDraft>((item) => ({
       description: item.description,
       quantity: toNumber(item.quantity),
+      days: toNumber(item.days),
       unitPrice: toNumber(item.unitPrice),
       taxable: item.taxable,
       discountType: item.discountType as DiscountType,
@@ -605,6 +615,7 @@ export async function updateDraftQuote(params: {
           position: item.position,
           description: item.description,
           quantity: item.quantity,
+          days: item.days,
           unitPrice: item.unitPrice,
           taxable: item.taxable,
           discountType: item.discountType,
@@ -779,6 +790,7 @@ export async function duplicateQuote(params: {
   const itemDrafts: QuoteItemDraft[] = original.items.map((item) => ({
     description: item.description,
     quantity: toNumber(item.quantity),
+    days: toNumber(item.days),
     unitPrice: toNumber(item.unitPrice),
     taxable: item.taxable,
     discountType: item.discountType as DiscountType,

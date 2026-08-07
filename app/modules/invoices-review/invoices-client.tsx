@@ -1,10 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 
 import InvoiceBuilder from './invoice-builder';
 import InvoiceDetailDrawer from './invoice-detail-drawer';
 import type {
+  ApproverOption,
   BrandProfileOption,
   CustomerOption,
   InvoiceableQuote,
@@ -25,12 +27,27 @@ interface InvoicesClientProps {
   invoiceableQuotes: InvoiceableQuote[];
   organization: OrganizationBranding;
   quickBooks: { configured: boolean; connected: boolean };
+  approvers: ApproverOption[];
 }
 
-const STATUS_FILTERS: StatusFilter[] = ['All', 'Draft', 'Sent', 'Overdue', 'Partial', 'Paid', 'Void'];
+const STATUS_FILTERS: StatusFilter[] = [
+  'All',
+  'Draft',
+  'Pending Approval',
+  'Approved',
+  'Declined',
+  'Sent',
+  'Overdue',
+  'Partial',
+  'Paid',
+  'Void',
+];
 
 const STATUS_STYLES: Record<string, string> = {
   Draft: 'bg-gray-100 text-gray-600',
+  'Pending Approval': 'bg-amber-50 text-amber-700',
+  Approved: 'bg-emerald-50 text-emerald-700',
+  Declined: 'bg-rose-50 text-rose-700',
   Sent: 'bg-blue-50 text-blue-700',
   Partial: 'bg-amber-50 text-amber-700',
   Paid: 'bg-emerald-50 text-emerald-700',
@@ -60,6 +77,7 @@ export default function InvoicesClient({
   invoiceableQuotes,
   organization,
   quickBooks,
+  approvers,
 }: InvoicesClientProps) {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(initialInvoices);
   const [customers, setCustomers] = useState<CustomerOption[]>(initialCustomers);
@@ -72,6 +90,16 @@ export default function InvoicesClient({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<StatusFilter>('All');
   const [showQuotePicker, setShowQuotePicker] = useState(false);
+  const router = useRouter();
+
+  // While the quote picker is open, refresh the server-provided quote list when
+  // the user returns to this tab — they may have just edited a quote elsewhere.
+  useEffect(() => {
+    if (!showQuotePicker) return;
+    const refresh = () => router.refresh();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [showQuotePicker, router]);
   const [creatingFromQuote, setCreatingFromQuote] = useState<number | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
 
@@ -356,6 +384,7 @@ export default function InvoicesClient({
           products={products}
           brandProfiles={brandProfiles}
           organization={organization}
+          approvers={approvers}
           onClose={() => setBuilderState({ open: false })}
           onCustomerCreated={(customer) =>
             setCustomers((current) =>
@@ -376,6 +405,7 @@ export default function InvoicesClient({
           currentUser={currentUser}
           isAdmin={isAdmin}
           organization={organization}
+          approvers={approvers}
           onClose={() => setSelectedInvoiceId(null)}
           onChanged={(invoice) => upsertInvoice(invoice)}
           onDeleted={(id) => {
@@ -471,30 +501,48 @@ function QuotePicker({
           {error && <p className="border-b border-rose-100 bg-rose-50 px-6 py-2.5 text-sm font-medium text-rose-700">{error}</p>}
           <div className="max-h-[60vh] divide-y divide-gray-50 overflow-y-auto">
             {quotes.map((quote) => (
-              <button
+              <div
                 key={quote.id}
-                type="button"
-                disabled={creatingId !== null}
-                onClick={() => onPick(quote.id)}
-                className="flex w-full items-center justify-between gap-4 px-6 py-3.5 text-left transition-colors hover:bg-gray-50 disabled:opacity-50"
+                className="flex w-full items-center justify-between gap-4 px-6 py-3.5 transition-colors hover:bg-gray-50"
               >
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-gray-900">{quote.reference}</p>
                   <p className="truncate text-xs text-gray-500">
                     {quote.customer} · {quote.subject}
                   </p>
+                  <p className="mt-0.5 text-sm font-semibold text-gray-900 sm:hidden">
+                    {quote.total.toLocaleString(undefined, { style: 'currency', currency: quote.currency })}
+                  </p>
                 </div>
-                <div className="flex items-center gap-3 whitespace-nowrap">
-                  <span className="text-sm font-semibold text-gray-900">
+                <div className="flex shrink-0 items-center gap-3 whitespace-nowrap">
+                  <span className="hidden text-sm font-semibold text-gray-900 sm:block">
                     {quote.total.toLocaleString(undefined, { style: 'currency', currency: quote.currency })}
                   </span>
-                  <span className="text-xs font-semibold text-primary">
+                  <a
+                    href={`/modules/quotes/${quote.id}/edit`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-primary/40 hover:text-primary"
+                    title="Open the quote editor in a new tab — adjust it, then come back and create the invoice"
+                  >
+                    Edit quote
+                  </a>
+                  <button
+                    type="button"
+                    disabled={creatingId !== null}
+                    onClick={() => onPick(quote.id)}
+                    className="rounded-lg bg-primary px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  >
                     {creatingId === quote.id ? 'Creating…' : 'Create →'}
-                  </span>
+                  </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
+          <p className="border-t border-gray-100 px-6 py-3 text-xs text-gray-400">
+            “Edit quote” opens the quote in a new tab — after saving changes there, come back and hit Create.
+            Invoices created here start as drafts you can still edit before sending.
+          </p>
         </div>
       </div>
     </>

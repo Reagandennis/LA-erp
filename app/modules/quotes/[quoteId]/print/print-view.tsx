@@ -161,10 +161,11 @@ export default function PrintView({ quote, taxLabel, brand, customer }: Props) {
           <table className="mt-4 w-full">
             <thead>
               <tr className="border-b-2 text-xs uppercase tracking-wider text-gray-500" style={{ borderColor: brand.primaryColor }}>
-                <th className="px-2 py-2.5 text-left font-semibold">Description</th>
+                <th className="px-2 py-2.5 text-left font-semibold">Service / Description</th>
+                <th className="px-2 py-2.5 text-right font-semibold">Qty</th>
                 <th className="px-2 py-2.5 text-right font-semibold">Days</th>
-                <th className="px-2 py-2.5 text-right font-semibold">Unit</th>
-                <th className="px-2 py-2.5 text-right font-semibold">Total</th>
+                <th className="px-2 py-2.5 text-right font-semibold">Cost</th>
+                <th className="px-2 py-2.5 text-right font-semibold">Sub-Total</th>
               </tr>
             </thead>
             <tbody>
@@ -175,6 +176,7 @@ export default function PrintView({ quote, taxLabel, brand, customer }: Props) {
                     {!item.taxable && <span className="ml-2 text-xs text-gray-400">Not taxable</span>}
                   </td>
                   <td className="px-2 py-2.5 text-right tabular-nums">{item.quantity}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{item.days}</td>
                   <td className="px-2 py-2.5 text-right tabular-nums">
                     {formatMoney(item.unitPrice, quote.currency)}
                   </td>

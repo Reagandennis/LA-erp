@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getServerAuth } from '@/lib/auth';
 import { listBrandProfiles } from '@/lib/brand-profiles';
 import { listCustomers } from '@/lib/customers';
-import { listInvoiceableQuotes, listInvoices } from '@/lib/invoices';
+import { listInvoiceApproverCandidates, listInvoiceableQuotes, listInvoices } from '@/lib/invoices';
 import { getOrganizationSettings } from '@/lib/organization';
 import { getQuickBooksStatus } from '@/lib/quickbooks';
 import { listProducts } from '@/lib/products';
@@ -23,7 +23,7 @@ export default async function InvoicesReviewPage() {
     redirect('/dashboard');
   }
 
-  const [invoices, customers, products, brandProfiles, organization, invoiceableQuotes, quickBooks] =
+  const [invoices, customers, products, brandProfiles, organization, invoiceableQuotes, quickBooks, approvers] =
     await Promise.all([
       listInvoices(),
       listCustomers(),
@@ -32,6 +32,7 @@ export default async function InvoicesReviewPage() {
       getOrganizationSettings(),
       listInvoiceableQuotes(),
       getQuickBooksStatus(),
+      listInvoiceApproverCandidates(auth.user.id),
     ]);
 
   return (
@@ -58,6 +59,7 @@ export default async function InvoicesReviewPage() {
         hasLogo: organization.hasLogo,
       }}
       quickBooks={{ configured: quickBooks.configured, connected: quickBooks.connected }}
+      approvers={approvers}
     />
   );
 }

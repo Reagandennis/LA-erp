@@ -17,6 +17,8 @@ export function dateIso(value: unknown, fallback: string | null): string | null 
 export interface LineItem {
   description: string;
   quantity: number;
+  /** Days the line covers (quotes only; invoices ignore it). Defaults to 1. */
+  days?: number;
   unitPrice: number;
   taxable?: boolean;
 }
@@ -30,9 +32,16 @@ export function parseLineItems(value: unknown): LineItem[] {
     const r = raw as Record<string, unknown>;
     const description = asString(r.description);
     const quantity = asNumber(r.quantity) ?? 1;
+    const days = asNumber(r.days);
     const unitPrice = asNumber(r.unitPrice) ?? asNumber(r.price) ?? 0;
     if (!description) continue;
-    out.push({ description, quantity, unitPrice, taxable: asBool(r.taxable) });
+    out.push({
+      description,
+      quantity,
+      ...(days && days > 0 ? { days } : {}),
+      unitPrice,
+      taxable: asBool(r.taxable),
+    });
   }
   return out;
 }
@@ -46,6 +55,7 @@ export const lineItemsSchema: JsonSchema = {
     properties: {
       description: { type: 'string' },
       quantity: { type: 'number' },
+      days: { type: 'number', description: 'Days the line covers (quotes only, default 1)' },
       unitPrice: { type: 'number' },
       taxable: { type: 'boolean' },
     },

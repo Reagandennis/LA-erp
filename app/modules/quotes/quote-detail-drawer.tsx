@@ -342,8 +342,8 @@ export default function QuoteDetailDrawer({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-gray-900">{item.description}</p>
                         <p className="mt-0.5 text-xs text-gray-500">
-                          {item.quantity} {Number(item.quantity) === 1 ? 'day' : 'days'} ·{' '}
-                          {formatMoney(item.unitPrice, quote.currency)}/day
+                          Qty {item.quantity} × {item.days} {Number(item.days) === 1 ? 'day' : 'days'} ×{' '}
+                          {formatMoney(item.unitPrice, quote.currency)}
                           {!item.taxable ? ' · non-taxable' : ''}
                         </p>
                       </div>

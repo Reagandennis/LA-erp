@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
     items: validation.data.items.map((item) => ({
       description: item.description,
       quantity: item.quantity,
+      days: item.days ?? 1,
       unitPrice: item.unitPrice,
       taxable: item.taxable ?? true,
       discountType: item.discountType ?? 'none',

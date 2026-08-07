@@ -7,8 +7,32 @@ import type {
 
 export type { BrandProfileOption, CustomerOption, OrganizationBranding, ProductOption };
 
-export type InvoiceStatus = 'Draft' | 'Sent' | 'Partial' | 'Paid' | 'Void';
-export type StatusFilter = 'All' | 'Draft' | 'Sent' | 'Overdue' | 'Partial' | 'Paid' | 'Void';
+export type InvoiceStatus =
+  | 'Draft'
+  | 'Pending Approval'
+  | 'Approved'
+  | 'Declined'
+  | 'Sent'
+  | 'Partial'
+  | 'Paid'
+  | 'Void';
+
+export interface ApproverOption {
+  id: number;
+  name: string;
+  email: string;
+}
+export type StatusFilter =
+  | 'All'
+  | 'Draft'
+  | 'Pending Approval'
+  | 'Approved'
+  | 'Declined'
+  | 'Sent'
+  | 'Overdue'
+  | 'Partial'
+  | 'Paid'
+  | 'Void';
 export type DiscountType = 'none' | 'percentage' | 'fixed';
 
 export const PAYMENT_METHODS = [
@@ -67,6 +91,10 @@ export interface InvoiceSummary {
   updatedAt: string;
   customer: { id: number; name: string; company: string | null; email: string | null };
   createdBy: { id: number; name: string; email: string };
+  approver: { id: number; name: string; email: string } | null;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
   brandProfile: { id: number; name: string; companyName: string | null; primaryColor: string } | null;
   sourceQuote: { id: number; reference: string } | null;
   itemCount: number;

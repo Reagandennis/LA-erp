@@ -126,6 +126,12 @@ const quoteItemSchema = z.object({
     .finite()
     .gt(0, 'Quantity must be greater than zero')
     .max(1_000_000),
+  days: z
+    .number({ invalid_type_error: 'Days must be a number' })
+    .finite()
+    .gt(0, 'Days must be greater than zero')
+    .max(100_000)
+    .optional(),
   unitPrice: z
     .number({ invalid_type_error: 'Unit price must be a number' })
     .finite()
@@ -189,6 +195,18 @@ export const quoteDecisionSchema = z.object({
   note: z.string().trim().max(1000).optional().nullable(),
 });
 
+export const invoiceSubmitSchema = z.object({
+  approverId: z
+    .number({ invalid_type_error: 'Pick an approver' })
+    .int()
+    .positive('Pick an approver'),
+});
+
+export const invoiceDecisionSchema = z.object({
+  decision: z.enum(['approved', 'declined']),
+  note: z.string().trim().max(1000).optional().nullable(),
+});
+
 export const productCreateSchema = z.object({
   name: z.string().trim().min(1, 'Product name is required').max(160),
   description: z.string().trim().max(2000).optional().nullable(),
@@ -209,6 +227,7 @@ export const productUpdateSchema = productCreateSchema.partial().extend({
 const templateItemSchema = z.object({
   description: z.string().trim().min(1).max(280),
   quantity: z.number().finite().gt(0).max(1_000_000),
+  days: z.number().finite().gt(0).max(100_000).optional(),
   unitPrice: z.number().finite().gte(0).max(100_000_000),
   taxable: z.boolean().optional(),
   discountType: discountTypeSchema.optional(),

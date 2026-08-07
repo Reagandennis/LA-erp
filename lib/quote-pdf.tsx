@@ -61,8 +61,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
-  colDescription: { flex: 4, paddingHorizontal: 6 },
-  colQty: { flex: 1, paddingHorizontal: 6, textAlign: 'right' },
+  colDescription: { flex: 3.4, paddingHorizontal: 6 },
+  colQty: { flex: 0.8, paddingHorizontal: 6, textAlign: 'right' },
+  colDays: { flex: 0.8, paddingHorizontal: 6, textAlign: 'right' },
   colUnit: { flex: 1.4, paddingHorizontal: 6, textAlign: 'right' },
   colDiscount: { flex: 1.2, paddingHorizontal: 6, textAlign: 'right' },
   colTotal: { flex: 1.4, paddingHorizontal: 6, textAlign: 'right', fontWeight: 700 },
@@ -227,10 +228,11 @@ function QuotePdfDocument({ quote, brand, taxLabel, logoDataUri, customer }: Quo
         {/* ── Items table ── */}
         <View style={styles.itemsTable}>
           <View style={styles.itemsHeader}>
-            <Text style={[styles.colDescription, styles.headerText]}>Description</Text>
-            <Text style={[styles.colQty, styles.headerText]}>Days</Text>
-            <Text style={[styles.colUnit, styles.headerText]}>Unit</Text>
-            <Text style={[styles.colTotal, styles.headerText]}>Total</Text>
+            <Text style={[styles.colDescription, styles.headerText]}>Service / Description</Text>
+            <Text style={[styles.colQty, styles.headerText]}>Qty</Text>
+            <Text style={[styles.colDays, styles.headerText]}>Days</Text>
+            <Text style={[styles.colUnit, styles.headerText]}>Cost</Text>
+            <Text style={[styles.colTotal, styles.headerText]}>Sub-Total</Text>
           </View>
           {quote.items.map((item) => (
             <View key={item.id} style={styles.itemRow}>
@@ -241,6 +243,7 @@ function QuotePdfDocument({ quote, brand, taxLabel, logoDataUri, customer }: Quo
                 ) : null}
               </View>
               <Text style={[styles.colQty, styles.cellText]}>{item.quantity}</Text>
+              <Text style={[styles.colDays, styles.cellText]}>{item.days}</Text>
               <Text style={[styles.colUnit, styles.cellText]}>{formatMoney(item.unitPrice, currency)}</Text>
               <Text style={styles.colTotal}>{formatMoney(item.total, currency)}</Text>
             </View>

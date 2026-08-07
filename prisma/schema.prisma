@@ -40,6 +40,8 @@ model User {
   createdQuoteTemplates QuoteTemplate[] @relation("QuoteTemplateCreatedBy")
   createdBrandProfiles BrandProfile[] @relation("BrandProfileCreatedBy")
   createdInvoices    Invoice[]       @relation("InvoiceCreatedBy")
+  approvableInvoices Invoice[]       @relation("InvoiceApprover")
+  invoiceNotifications InvoiceNotification[]
   recordedInvoicePayments InvoicePayment[] @relation("InvoicePaymentCreatedBy")
   organizationUpdates OrganizationSettings[] @relation("OrganizationUpdatedBy")
   createdTrips       Trip[]          @relation("TripCreatedBy")
@@ -436,6 +438,8 @@ model QuoteItem {
   position       Int
   description    String
   quantity       Decimal @db.Decimal(12, 2)
+  // Number of days the line covers; line subtotal = quantity × days × unitPrice.
+  days           Decimal @default(1) @db.Decimal(12, 2)
   unitPrice      Decimal @db.Decimal(14, 2)
   taxable        Boolean @default(true)
   discountType   String  @default("none")
@@ -566,9 +570,14 @@ model Invoice {
   number         String    @unique
   customerId     Int
   createdById    Int
+  approverId     Int?
   brandProfileId Int?
   sourceQuoteId  Int?
+  // Draft | Pending Approval | Approved | Declined | Sent | Partial | Paid | Void
   status         String    @default("Draft")
+  decisionNote   String?
+  submittedAt    DateTime?
+  decidedAt      DateTime?
   issueDate      DateTime
   dueDate        DateTime
   currency       String    @default("USD")
@@ -590,10 +599,12 @@ model Invoice {
   updatedAt      DateTime  @updatedAt
   customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
   createdBy      User      @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approver       User?     @relation("InvoiceApprover", fields: [approverId], references: [id], onDelete: SetNull)
   brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
   sourceQuote    Quote?    @relation("QuoteInvoices", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
   items          InvoiceItem[]
   payments       InvoicePayment[]
+  notifications  InvoiceNotification[]
 
   @@index([customerId])
   @@index([status, dueDate])
@@ -644,6 +655,21 @@ model InvoicePayment {
 model InvoiceSequence {
   year       Int @id
   lastNumber Int @default(0)
+}
+
+model InvoiceNotification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  invoiceId Int
+  type      String
+  message   String
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoice   Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([invoiceId])
 }
 
 // Single-company QuickBooks Online OAuth connection (latest row wins).

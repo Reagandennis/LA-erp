@@ -21,6 +21,7 @@ interface TemplatesClientProps {
 type ItemForm = {
   description: string;
   quantity: string;
+  days: string;
   unitPrice: string;
   taxable: boolean;
   discountType: DiscountType;
@@ -39,7 +40,7 @@ type TemplateForm = {
   items: ItemForm[];
 };
 
-const EMPTY_ITEM: ItemForm = { description: '', quantity: '1', unitPrice: '0', taxable: true, discountType: 'none', discountValue: '0' };
+const EMPTY_ITEM: ItemForm = { description: '', quantity: '1', days: '1', unitPrice: '0', taxable: true, discountType: 'none', discountValue: '0' };
 
 const EMPTY_FORM: TemplateForm = {
   name: '',
@@ -105,6 +106,7 @@ export default function TemplatesClient({ initialTemplates }: TemplatesClientPro
         ? t.items.map((i) => ({
             description: i.description,
             quantity: String(i.quantity),
+            days: String(i.days ?? 1),
             unitPrice: String(i.unitPrice),
             taxable: i.taxable,
             discountType: i.discountType,
@@ -129,8 +131,9 @@ export default function TemplatesClient({ initialTemplates }: TemplatesClientPro
   const itemsSubtotal = useMemo(() => {
     return form.items.reduce((sum, it) => {
       const qty = Number(it.quantity) || 0;
+      const days = Number(it.days) || 0;
       const price = Number(it.unitPrice) || 0;
-      const gross = qty * price;
+      const gross = qty * days * price;
       const dv = Number(it.discountValue) || 0;
       const disc = it.discountType === 'percentage' ? (gross * dv) / 100 : it.discountType === 'fixed' ? dv : 0;
       return sum + Math.max(0, gross - disc);
@@ -150,6 +153,7 @@ export default function TemplatesClient({ initialTemplates }: TemplatesClientPro
       .map((it) => ({
         description: it.description.trim(),
         quantity: Number(it.quantity) || 0,
+        days: Number(it.days) || 1,
         unitPrice: Number(it.unitPrice) || 0,
         taxable: it.taxable,
         discountType: it.discountType,
@@ -178,8 +182,8 @@ export default function TemplatesClient({ initialTemplates }: TemplatesClientPro
       currency: form.currency,
       terms: form.terms.trim() || null,
       notes: form.notes.trim() || null,
-      discountType: form.discountType,
-      discountValue: Number(form.discountValue) || 0,
+      discountType: 'none',
+      discountValue: 0,
       items,
     };
 
@@ -323,13 +327,17 @@ export default function TemplatesClient({ initialTemplates }: TemplatesClientPro
                         <span className="flex h-6 w-6 mt-1 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-500">{i + 1}</span>
                         <div className="flex-1 space-y-2">
                           <input className={smallInput} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder="Item description" />
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                             <div>
                               <MiniLabel>Qty</MiniLabel>
                               <input type="number" min={0} step="any" className={smallInput} value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} />
                             </div>
                             <div>
-                              <MiniLabel>Unit price</MiniLabel>
+                              <MiniLabel>Days</MiniLabel>
+                              <input type="number" min={0} step="any" className={smallInput} value={it.days} onChange={(e) => setItem(i, { days: e.target.value })} />
+                            </div>
+                            <div>
+                              <MiniLabel>Cost</MiniLabel>
                               <input type="number" min={0} step="any" className={smallInput} value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} />
                             </div>
                             <div>
@@ -371,16 +379,6 @@ export default function TemplatesClient({ initialTemplates }: TemplatesClientPro
                 <div>
                   <Label>Tax %</Label>
                   <input type="number" min={0} max={100} step="any" className={inputClass} value={form.taxPercent} onChange={(e) => setForm({ ...form, taxPercent: e.target.value })} />
-                </div>
-                <div>
-                  <Label>Discount</Label>
-                  <select className={inputClass} value={form.discountType} onChange={(e) => setForm({ ...form, discountType: e.target.value as DiscountType })}>
-                    {DISCOUNT_TYPES.map((d) => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <Label>Disc. value</Label>
-                  <input type="number" min={0} step="any" disabled={form.discountType === 'none'} className={`${inputClass} disabled:opacity-50`} value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} />
                 </div>
               </div>
 

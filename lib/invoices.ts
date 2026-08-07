@@ -6,9 +6,26 @@ import { prisma } from './prisma';
 import { syncInvoicePaymentToQuickBooks, type QuickBooksSyncResult } from './quickbooks';
 import { computeQuoteTotals } from './quotes';
 
-export type InvoiceStatus = 'Draft' | 'Sent' | 'Partial' | 'Paid' | 'Void';
+export type InvoiceStatus =
+  | 'Draft'
+  | 'Pending Approval'
+  | 'Approved'
+  | 'Declined'
+  | 'Sent'
+  | 'Partial'
+  | 'Paid'
+  | 'Void';
 
-export const INVOICE_STATUSES: InvoiceStatus[] = ['Draft', 'Sent', 'Partial', 'Paid', 'Void'];
+export const INVOICE_STATUSES: InvoiceStatus[] = [
+  'Draft',
+  'Pending Approval',
+  'Approved',
+  'Declined',
+  'Sent',
+  'Partial',
+  'Paid',
+  'Void',
+];
 
 export const PAYMENT_METHODS = [
   'Bank transfer',
@@ -74,10 +91,14 @@ export interface InvoiceSummary {
   terms: string | null;
   sentAt: string | null;
   paidAt: string | null;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
   createdAt: string;
   updatedAt: string;
   customer: { id: number; name: string; company: string | null; email: string | null };
   createdBy: { id: number; name: string; email: string };
+  approver: { id: number; name: string; email: string } | null;
   brandProfile: { id: number; name: string; companyName: string | null; primaryColor: string } | null;
   sourceQuote: { id: number; reference: string } | null;
   itemCount: number;
@@ -91,6 +112,7 @@ export interface InvoiceDetail extends InvoiceSummary {
 const invoiceInclude = {
   customer: { select: { id: true, name: true, company: true, email: true } },
   createdBy: { select: { id: true, name: true, email: true } },
+  approver: { select: { id: true, name: true, email: true } },
   brandProfile: { select: { id: true, name: true, companyName: true, primaryColor: true } },
   sourceQuote: { select: { id: true, reference: true } },
   items: { orderBy: { position: 'asc' } },
@@ -168,10 +190,14 @@ function serializeSummary(record: InvoiceRecord): InvoiceSummary {
     terms: record.terms,
     sentAt: record.sentAt?.toISOString() ?? null,
     paidAt: record.paidAt?.toISOString() ?? null,
+    submittedAt: record.submittedAt?.toISOString() ?? null,
+    decidedAt: record.decidedAt?.toISOString() ?? null,
+    decisionNote: record.decisionNote,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     customer: record.customer,
     createdBy: record.createdBy,
+    approver: record.approver,
     brandProfile: record.brandProfile,
     sourceQuote: record.sourceQuote,
     itemCount: record.items.length,
@@ -307,8 +333,8 @@ export async function updateInvoice(params: {
     include: invoiceInclude,
   });
   if (!existing) return { error: 'Invoice not found' };
-  if (existing.status === 'Paid' || existing.status === 'Void') {
-    return { error: `Cannot edit a ${existing.status.toLowerCase()} invoice` };
+  if (existing.status !== 'Draft' && existing.status !== 'Declined') {
+    return { error: `Cannot edit an invoice in status "${existing.status}"` };
   }
 
   const taxRate = params.input.taxRate ?? toNumber(existing.taxRate);
@@ -381,9 +407,13 @@ export async function sendInvoice(id: number): Promise<InvoiceDetail | { error: 
   const existing = await prisma.invoice.findUnique({ where: { id }, include: invoiceInclude });
   if (!existing) return { error: 'Invoice not found' };
   if (existing.status === 'Void') return { error: 'Cannot send a void invoice' };
+  // Sending requires a completed approval; re-sending an already-sent invoice is fine.
+  if (existing.status === 'Draft' || existing.status === 'Pending Approval' || existing.status === 'Declined') {
+    return { error: 'This invoice must be approved before it can be sent' };
+  }
   await prisma.invoice.update({
     where: { id },
-    data: { status: existing.status === 'Draft' ? 'Sent' : existing.status, sentAt: existing.sentAt ?? new Date() },
+    data: { status: existing.status === 'Approved' ? 'Sent' : existing.status, sentAt: existing.sentAt ?? new Date() },
   });
   const fresh = await prisma.invoice.findUnique({ where: { id }, include: invoiceInclude });
   return serializeDetail(fresh!);
@@ -408,6 +438,11 @@ export async function recordInvoicePayment(params: {
   });
   if (!existing) return { error: 'Invoice not found' };
   if (existing.status === 'Void') return { error: 'Cannot record a payment on a void invoice' };
+  // Approval gate: nothing gets recorded against an invoice that has not passed
+  // approval. Payments are only valid once the invoice is Approved or out the door.
+  if (existing.status !== 'Approved' && existing.status !== 'Sent' && existing.status !== 'Partial') {
+    return { error: 'Payments can only be recorded after the invoice has been approved' };
+  }
   if (!(params.input.amount > 0)) return { error: 'Payment amount must be greater than zero' };
 
   const total = toNumber(existing.total);
@@ -490,15 +525,20 @@ export async function createInvoiceFromQuote(params: {
   });
   if (!quote) return { error: 'Quote not found' };
 
-  const items: InvoiceItemDraft[] = quote.items.map((item) => ({
-    description: item.description,
-    quantity: toNumber(item.quantity),
-    unitPrice: toNumber(item.unitPrice),
-    taxable: item.taxable,
-    discountType: item.discountType as DiscountType,
-    discountValue: toNumber(item.discountValue),
-    productId: item.productId,
-  }));
+  const items: InvoiceItemDraft[] = quote.items.map((item) => {
+    // Invoice lines have no "days" column — fold quote days into the quantity
+    // so the invoice total matches the quote (qty × days × unit price).
+    const days = toNumber(item.days);
+    return {
+      description: days !== 1 ? `${item.description} (${days} days)` : item.description,
+      quantity: toNumber(item.quantity) * days,
+      unitPrice: toNumber(item.unitPrice),
+      taxable: item.taxable,
+      discountType: item.discountType as DiscountType,
+      discountValue: toNumber(item.discountValue),
+      productId: item.productId,
+    };
+  });
 
   const now = new Date();
   const due = new Date(now.getTime() + (params.dueInDays ?? 14) * 24 * 3600 * 1000);
@@ -544,4 +584,133 @@ export async function listInvoiceableQuotes(): Promise<
     total: toNumber(q.total),
     currency: q.currency,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Approval workflow (mirrors quotes: Draft/Declined → Pending Approval →
+// Approved/Declined; only Approved invoices can be sent).
+// ---------------------------------------------------------------------------
+
+export async function listInvoiceApproverCandidates(excludeUserId: number) {
+  return prisma.user.findMany({
+    where: { status: 'active', id: { not: excludeUserId } },
+    select: { id: true, name: true, email: true },
+    orderBy: { name: 'asc' },
+  });
+}
+
+export async function submitInvoiceForApproval(params: {
+  id: number;
+  userId: number;
+  isAdmin: boolean;
+  approverId: number;
+}): Promise<InvoiceDetail | { error: string }> {
+  const existing = await prisma.invoice.findUnique({ where: { id: params.id }, include: invoiceInclude });
+  if (!existing) return { error: 'Invoice not found' };
+  if (!params.isAdmin && existing.createdById !== params.userId) {
+    return { error: 'You cannot submit this invoice' };
+  }
+  if (existing.status !== 'Draft' && existing.status !== 'Declined') {
+    return { error: `Cannot submit an invoice in status "${existing.status}"` };
+  }
+  if (params.approverId === params.userId) {
+    return { error: 'You cannot approve your own invoice — pick another approver' };
+  }
+  const approver = await prisma.user.findFirst({
+    where: { id: params.approverId, status: 'active' },
+    select: { id: true },
+  });
+  if (!approver) return { error: 'Approver not found' };
+
+  await prisma.invoice.update({
+    where: { id: params.id },
+    data: {
+      approverId: params.approverId,
+      status: 'Pending Approval',
+      submittedAt: new Date(),
+      decisionNote: null,
+      decidedAt: null,
+    },
+  });
+  await prisma.invoiceNotification.create({
+    data: {
+      userId: params.approverId,
+      invoiceId: existing.id,
+      type: 'invoice.submitted',
+      message: `${existing.createdBy.name} submitted invoice ${existing.number} for your approval`,
+    },
+  });
+
+  const fresh = await prisma.invoice.findUnique({ where: { id: params.id }, include: invoiceInclude });
+  return serializeDetail(fresh!);
+}
+
+export async function decideInvoice(params: {
+  id: number;
+  userId: number;
+  isAdmin: boolean;
+  decision: 'approved' | 'declined';
+  note: string | null;
+}): Promise<InvoiceDetail | { error: string }> {
+  const existing = await prisma.invoice.findUnique({ where: { id: params.id }, include: invoiceInclude });
+  if (!existing) return { error: 'Invoice not found' };
+  if (existing.status !== 'Pending Approval') {
+    return { error: `Cannot decide an invoice in status "${existing.status}"` };
+  }
+  // Separation of duties: the creator can never decide their own invoice —
+  // not even an admin. Someone else has to sign off before it can be sent.
+  if (existing.createdById === params.userId) {
+    return { error: 'You cannot approve or decline an invoice you created' };
+  }
+  const isApprover = existing.approverId === params.userId;
+  if (!isApprover && !params.isAdmin) {
+    return { error: 'Only the assigned approver can decide this invoice' };
+  }
+
+  const newStatus = params.decision === 'approved' ? 'Approved' : 'Declined';
+  await prisma.invoice.update({
+    where: { id: params.id },
+    data: { status: newStatus, decisionNote: params.note, decidedAt: new Date() },
+  });
+  await prisma.invoiceNotification.create({
+    data: {
+      userId: existing.createdById,
+      invoiceId: existing.id,
+      type: params.decision === 'approved' ? 'invoice.approved' : 'invoice.declined',
+      message:
+        params.decision === 'approved'
+          ? `Invoice ${existing.number} was approved — you can now send it`
+          : `Invoice ${existing.number} was declined${params.note ? `: ${params.note}` : ''}`,
+    },
+  });
+
+  const fresh = await prisma.invoice.findUnique({ where: { id: params.id }, include: invoiceInclude });
+  return serializeDetail(fresh!);
+}
+
+export async function listInvoiceNotifications(userId: number) {
+  const rows = await prisma.invoiceNotification.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: { id: true, invoiceId: true, type: true, message: true, createdAt: true, readAt: true },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    invoiceId: row.invoiceId,
+    type: row.type,
+    message: row.message,
+    createdAt: row.createdAt.toISOString(),
+    readAt: row.readAt?.toISOString() ?? null,
+  }));
+}
+
+export async function markInvoiceNotificationsRead(userId: number, ids: number[]): Promise<number> {
+  const normalized = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
+  if (normalized.length === 0) return 0;
+  const result = await prisma.invoiceNotification.updateMany({
+    where: { userId, id: { in: normalized } },
+    data: { readAt: new Date() },
+  });
+  return result.count;
 }

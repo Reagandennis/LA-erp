@@ -53,6 +53,7 @@ export interface TemplateOption {
   items: Array<{
     description: string;
     quantity: number;
+    days: number;
     unitPrice: number;
     taxable: boolean;
     discountType: DiscountType;
@@ -122,6 +123,7 @@ export interface QuoteItemSummary {
   position: number;
   description: string;
   quantity: number;
+  days: number;
   unitPrice: number;
   taxable: boolean;
   discountType: DiscountType;

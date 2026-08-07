@@ -40,6 +40,7 @@ interface ItemDraft {
   key: string;
   description: string;
   quantity: string;
+  days: string;
   unitPrice: string;
   taxable: boolean;
   discountType: DiscountType;
@@ -69,6 +70,7 @@ function emptyItem(): ItemDraft {
     key: makeKey(),
     description: '',
     quantity: '1',
+    days: '1',
     unitPrice: '0',
     taxable: true,
     discountType: 'none',
@@ -87,10 +89,6 @@ function formatMoney(value: number, currency: string) {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function clamp(value: number, max: number): number {
-  return Math.max(0, Math.min(value, max));
 }
 
 export default function QuoteBuilder({
@@ -136,12 +134,6 @@ export default function QuoteBuilder({
       ? String(round2(quote.taxRate * 100))
       : String(round2((organization.defaultTaxRate ?? 0) * 100)),
   );
-  const [quoteDiscountType, setQuoteDiscountType] = useState<DiscountType>(
-    quote?.discountType ?? 'none',
-  );
-  const [quoteDiscountValue, setQuoteDiscountValue] = useState<string>(
-    quote ? String(quote.discountValue) : '0',
-  );
   const [notes, setNotes] = useState<string>(quote?.notes ?? '');
   const [terms, setTerms] = useState<string>(quote?.terms ?? '');
   const [items, setItems] = useState<ItemDraft[]>(
@@ -150,6 +142,7 @@ export default function QuoteBuilder({
           key: makeKey(),
           description: item.description,
           quantity: String(item.quantity),
+          days: String(item.days ?? 1),
           unitPrice: String(item.unitPrice),
           taxable: item.taxable,
           discountType: item.discountType,
@@ -193,8 +186,9 @@ export default function QuoteBuilder({
   const totals = useMemo(() => {
     const lineSummaries = items.map((item) => {
       const qty = Number(item.quantity) || 0;
+      const days = Number(item.days) || 0;
       const unit = Number(item.unitPrice) || 0;
-      const net = round2(qty * unit);
+      const net = round2(qty * days * unit);
       return { net, taxable: item.taxable };
     });
 
@@ -205,17 +199,9 @@ export default function QuoteBuilder({
     );
     const taxRate = (Number(taxRatePct) || 0) / 100;
     const tax = round2(taxableSubtotal * taxRate);
-    const preDiscount = round2(subtotal + tax);
-
-    let quoteDiscount = 0;
-    const dv = Number(quoteDiscountValue) || 0;
-    if (quoteDiscountType === 'percentage') quoteDiscount = (preDiscount * dv) / 100;
-    else if (quoteDiscountType === 'fixed') quoteDiscount = dv;
-    quoteDiscount = clamp(round2(quoteDiscount), preDiscount);
-
-    const total = round2(preDiscount - quoteDiscount);
-    return { subtotal, tax, taxRate, quoteDiscount, total };
-  }, [items, taxRatePct, quoteDiscountType, quoteDiscountValue]);
+    const total = round2(subtotal + tax);
+    return { subtotal, tax, taxRate, total };
+  }, [items, taxRatePct]);
 
   const updateItem = (key: string, patch: Partial<Omit<ItemDraft, 'key'>>) => {
     setItems((current) =>
@@ -240,8 +226,6 @@ export default function QuoteBuilder({
   const applyTemplate = (template: TemplateOption) => {
     setCurrency(template.currency);
     setTaxRatePct(String(round2(template.taxRate * 100)));
-    setQuoteDiscountType(template.discountType);
-    setQuoteDiscountValue(String(template.discountValue));
     if (template.terms) setTerms(template.terms);
     if (template.notes) setNotes(template.notes);
     if (template.items.length > 0) {
@@ -250,6 +234,7 @@ export default function QuoteBuilder({
           key: makeKey(),
           description: item.description,
           quantity: String(item.quantity),
+          days: String(item.days ?? 1),
           unitPrice: String(item.unitPrice),
           taxable: item.taxable,
           discountType: item.discountType,
@@ -264,6 +249,7 @@ export default function QuoteBuilder({
     items.map((item) => ({
       description: item.description.trim(),
       quantity: Number(item.quantity),
+      days: Number(item.days),
       unitPrice: Number(item.unitPrice),
       taxable: item.taxable,
       discountType: 'none' as DiscountType,
@@ -290,11 +276,13 @@ export default function QuoteBuilder({
         !item.description ||
         !Number.isFinite(item.quantity) ||
         item.quantity <= 0 ||
+        !Number.isFinite(item.days) ||
+        item.days <= 0 ||
         !Number.isFinite(item.unitPrice) ||
         item.unitPrice < 0,
     );
     if (invalidItem) {
-      setError('Each line item needs a description, positive quantity and non-negative unit price');
+      setError('Each line item needs a description, positive quantity, positive days, and non-negative cost');
       return;
     }
 
@@ -313,8 +301,8 @@ export default function QuoteBuilder({
       expiryDate,
       currency,
       taxRate: (Number(taxRatePct) || 0) / 100,
-      discountType: quoteDiscountType,
-      discountValue: Number(quoteDiscountValue) || 0,
+      discountType: 'none',
+      discountValue: 0,
       notes: notes.trim() || null,
       terms: terms.trim() || null,
       items: itemsPayload,
@@ -428,8 +416,8 @@ export default function QuoteBuilder({
           currency,
           terms: terms.trim() || null,
           notes: notes.trim() || null,
-          discountType: quoteDiscountType,
-          discountValue: Number(quoteDiscountValue) || 0,
+          discountType: 'none',
+          discountValue: 0,
           items: itemsPayload,
         }),
       });
@@ -743,8 +731,9 @@ export default function QuoteBuilder({
               <div className="space-y-2.5">
                 {items.map((item, index) => {
                   const qty = Number(item.quantity) || 0;
+                  const days = Number(item.days) || 0;
                   const unit = Number(item.unitPrice) || 0;
-                  const net = round2(qty * unit);
+                  const net = round2(qty * days * unit);
                   return (
                     <div
                       key={item.key}
@@ -771,8 +760,11 @@ export default function QuoteBuilder({
                         )}
                       </div>
 
-                      <div className="grid grid-cols-12 items-center gap-2">
-                        <div className="col-span-12 md:col-span-6">
+                      <div className="grid grid-cols-12 items-start gap-2">
+                        <div className="col-span-12 md:col-span-4">
+                          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Service / Description
+                          </label>
                           <input
                             type="text"
                             placeholder={`Item ${index + 1} description`}
@@ -796,27 +788,54 @@ export default function QuoteBuilder({
                             </button>
                           )}
                         </div>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          placeholder="Days"
-                          value={item.quantity}
-                          onChange={(event) => updateItem(item.key, { quantity: event.target.value })}
-                          className="col-span-4 rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 md:col-span-2"
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="Unit price"
-                          value={item.unitPrice}
-                          onChange={(event) => updateItem(item.key, { unitPrice: event.target.value })}
-                          className="col-span-4 rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 md:col-span-2"
-                        />
-                        <p className="col-span-4 text-right text-sm font-semibold text-gray-900 md:col-span-2">
-                          {formatMoney(net, currency)}
-                        </p>
+                        <div className="col-span-3 md:col-span-2">
+                          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Qty
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={(event) => updateItem(item.key, { quantity: event.target.value })}
+                            className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </div>
+                        <div className="col-span-3 md:col-span-2">
+                          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Days
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            placeholder="Days"
+                            value={item.days}
+                            onChange={(event) => updateItem(item.key, { days: event.target.value })}
+                            className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </div>
+                        <div className="col-span-3 md:col-span-2">
+                          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Cost
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Cost"
+                            value={item.unitPrice}
+                            onChange={(event) => updateItem(item.key, { unitPrice: event.target.value })}
+                            className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </div>
+                        <div className="col-span-3 md:col-span-2 text-right">
+                          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Sub-Total
+                          </label>
+                          <p className="py-2 text-sm font-semibold text-gray-900">{formatMoney(net, currency)}</p>
+                        </div>
                       </div>
 
                       <label className="flex w-fit items-center gap-2 text-xs font-medium text-gray-600">
@@ -887,42 +906,12 @@ export default function QuoteBuilder({
                 </div>
               </div>
               <div className="space-y-4 rounded-xl border border-gray-100 bg-gray-50/60 p-5">
-                <div>
-                  <label className={labelClass}>Quote-level discount</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={quoteDiscountType}
-                      onChange={(event) => setQuoteDiscountType(event.target.value as DiscountType)}
-                      className="flex-1 rounded-lg bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    >
-                      <option value="none">None</option>
-                      <option value="percentage">% of total</option>
-                      <option value="fixed">Fixed amount</option>
-                    </select>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={quoteDiscountValue}
-                      disabled={quoteDiscountType === 'none'}
-                      onChange={(event) => setQuoteDiscountValue(event.target.value)}
-                      className="w-24 rounded-lg bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-gray-100 disabled:text-gray-400"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 border-t border-gray-200 pt-3">
+                <div className="space-y-1.5">
                   <Row label="Subtotal" value={formatMoney(totals.subtotal, currency)} />
                   <Row
                     label={`${organization.taxLabel || 'Tax'} (${(totals.taxRate * 100).toFixed(2)}%)`}
                     value={formatMoney(totals.tax, currency)}
                   />
-                  {quoteDiscountType !== 'none' && totals.quoteDiscount > 0 && (
-                    <Row
-                      label={`Discount${quoteDiscountType === 'percentage' ? ` (${quoteDiscountValue}%)` : ''}`}
-                      value={`- ${formatMoney(totals.quoteDiscount, currency)}`}
-                    />
-                  )}
                   <div className="flex items-center justify-between border-t border-gray-200 pt-2.5">
                     <span className="text-sm font-semibold text-gray-900">Total</span>
                     <span className="text-lg font-bold text-primary">

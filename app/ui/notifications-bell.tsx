@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { Toast, ToastStack } from './toast';
 
-type NotificationSource = 'todo' | 'quote' | 'trip' | 'message' | 'file' | 'calendar';
+type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar';
 
 type RawTodoNotification = {
   id: number;
@@ -53,6 +53,15 @@ type RawFileNotification = {
   readAt: string | null;
 };
 
+type RawInvoiceNotification = {
+  id: number;
+  invoiceId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
 type RawCalendarNotification = {
   id: number;
   eventId: number;
@@ -77,6 +86,7 @@ type NotificationItem = {
 const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   todo: '/api/planning/notifications',
   quote: '/api/quotes/notifications',
+  invoice: '/api/invoices/notifications',
   trip: '/api/planning/trip-notifications',
   message: '/api/communication/notifications',
   file: '/api/files/notifications',
@@ -93,6 +103,12 @@ function buildToastTitle(source: NotificationSource, type: string): string {
     if (type === 'quote.approved') return 'Quote approved';
     if (type === 'quote.declined') return 'Quote declined';
     return 'Quote update';
+  }
+  if (source === 'invoice') {
+    if (type === 'invoice.submitted') return 'Invoice awaiting your approval';
+    if (type === 'invoice.approved') return 'Invoice approved';
+    if (type === 'invoice.declined') return 'Invoice declined';
+    return 'Invoice update';
   }
   if (source === 'trip') {
     return 'Trip reminder';
@@ -113,6 +129,9 @@ function buildToastTitle(source: NotificationSource, type: string): string {
 function buildHref(item: { source: NotificationSource; entityId: number }): string {
   if (item.source === 'quote') {
     return '/modules/quotes';
+  }
+  if (item.source === 'invoice') {
+    return '/modules/invoices-review';
   }
   if (item.source === 'trip') {
     return `/modules/trip-planning/${item.entityId}`;
@@ -143,9 +162,10 @@ export default function NotificationsBell() {
 
     const loadNotifications = async () => {
       try {
-        const [todoResponse, quoteResponse, tripResponse, messageResponse, fileResponse, calendarResponse] = await Promise.all([
+        const [todoResponse, quoteResponse, invoiceResponse, tripResponse, messageResponse, fileResponse, calendarResponse] = await Promise.all([
           fetch(SOURCE_ENDPOINTS.todo, { credentials: 'include' }).catch(() => null),
           fetch(SOURCE_ENDPOINTS.quote, { credentials: 'include' }).catch(() => null),
+          fetch(SOURCE_ENDPOINTS.invoice, { credentials: 'include' }).catch(() => null),
           fetch(SOURCE_ENDPOINTS.trip, { credentials: 'include' }).catch(() => null),
           fetch(SOURCE_ENDPOINTS.message, { credentials: 'include' }).catch(() => null),
           fetch(SOURCE_ENDPOINTS.file, { credentials: 'include' }).catch(() => null),
@@ -188,6 +208,25 @@ export default function NotificationsBell() {
               readAt: item.readAt,
               href: buildHref({ source: 'quote', entityId: item.quoteId }),
               toastTitle: buildToastTitle('quote', item.type),
+            });
+          }
+        }
+
+        if (invoiceResponse && invoiceResponse.ok) {
+          const data = (await invoiceResponse.json().catch(() => null)) as
+            | { notifications?: RawInvoiceNotification[] }
+            | null;
+          for (const item of data?.notifications ?? []) {
+            merged.push({
+              source: 'invoice',
+              id: item.id,
+              entityId: item.invoiceId,
+              type: item.type,
+              message: item.message,
+              createdAt: item.createdAt,
+              readAt: item.readAt,
+              href: buildHref({ source: 'invoice', entityId: item.invoiceId }),
+              toastTitle: buildToastTitle('invoice', item.type),
             });
           }
         }

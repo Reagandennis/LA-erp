@@ -4,13 +4,14 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { PAYMENT_METHODS } from './types';
-import type { InvoiceDetail, OrganizationBranding } from './types';
+import type { ApproverOption, InvoiceDetail, OrganizationBranding } from './types';
 
 interface InvoiceDetailDrawerProps {
   invoiceId: number;
   currentUser: { id: number; name: string; email: string };
   isAdmin: boolean;
   organization: OrganizationBranding;
+  approvers: ApproverOption[];
   onClose: () => void;
   onChanged: (invoice: InvoiceDetail) => void;
   onDeleted: (invoiceId: number) => void;
@@ -19,6 +20,9 @@ interface InvoiceDetailDrawerProps {
 
 const STATUS_STYLES: Record<string, string> = {
   Draft: 'bg-white/15 text-white',
+  'Pending Approval': 'bg-amber-400/25 text-white',
+  Approved: 'bg-emerald-400/30 text-white',
+  Declined: 'bg-rose-400/30 text-white',
   Sent: 'bg-blue-400/25 text-white',
   Partial: 'bg-amber-400/25 text-white',
   Paid: 'bg-emerald-400/30 text-white',
@@ -41,17 +45,22 @@ function todayIso() {
 
 export default function InvoiceDetailDrawer({
   invoiceId,
+  currentUser,
+  isAdmin,
   organization,
   onClose,
   onChanged,
   onDeleted,
   onEdit,
+  approvers,
 }: InvoiceDetailDrawerProps) {
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quickBooksNotice, setQuickBooksNotice] = useState<{ tone: 'ok' | 'warn'; message: string } | null>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
+  const [submitApproverId, setSubmitApproverId] = useState('');
+  const [decisionDraft, setDecisionDraft] = useState('');
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [payment, setPayment] = useState({
     amount: '',
@@ -91,11 +100,17 @@ export default function InvoiceDetailDrawer({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const callAction = async (label: string, url: string): Promise<void> => {
+  const callAction = async (label: string, url: string, body?: Record<string, unknown>): Promise<void> => {
     setActionPending(label);
     setError(null);
     try {
-      const response = await fetch(url, { method: 'POST', credentials: 'include' });
+      const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        ...(body !== undefined
+          ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+          : {}),
+      });
       const data = (await response.json().catch(() => null)) as { invoice?: InvoiceDetail; error?: string } | null;
       if (!response.ok || !data?.invoice) {
         setError(data?.error ?? 'Action failed');
@@ -192,8 +207,11 @@ export default function InvoiceDetailDrawer({
   const statusLabel = invoice ? (invoice.isOverdue ? 'Overdue' : invoice.status) : '';
   const issuer =
     invoice?.brandProfile?.companyName || invoice?.brandProfile?.name || organization.companyName || 'Organization default';
-  const canEdit = invoice && (invoice.status === 'Draft' || invoice.status === 'Sent' || invoice.status === 'Partial');
-  const canPay = invoice && invoice.status !== 'Void' && invoice.balanceDue > 0;
+  const canEdit = invoice && (invoice.status === 'Draft' || invoice.status === 'Declined');
+  const canPay =
+    invoice &&
+    (invoice.status === 'Approved' || invoice.status === 'Sent' || invoice.status === 'Partial') &&
+    invoice.balanceDue > 0;
   const taxLabel = organization.taxLabel || 'Tax';
 
   return (
@@ -430,7 +448,93 @@ export default function InvoiceDetailDrawer({
                   Record payment
                 </button>
               )}
-              {invoice.status === 'Draft' && (
+              {(invoice.status === 'Draft' || invoice.status === 'Declined') && (
+                <div className="space-y-2 rounded-xl border border-gray-100 bg-gray-50/60 p-3.5">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    {invoice.status === 'Declined' ? 'Declined — revise and resubmit' : 'Submit for approval'}
+                  </p>
+                  {invoice.status === 'Declined' && invoice.decisionNote && (
+                    <p className="text-sm text-rose-600">“{invoice.decisionNote}”</p>
+                  )}
+                  <div className="flex gap-2">
+                    <select
+                      value={submitApproverId}
+                      onChange={(event) => setSubmitApproverId(event.target.value)}
+                      className="flex-1 rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      <option value="">Select approver…</option>
+                      {approvers.map((approver) => (
+                        <option key={approver.id} value={approver.id}>{approver.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={actionPending !== null || !submitApproverId}
+                      onClick={() =>
+                        callAction('submit', `/api/invoices/${invoice.id}/submit`, {
+                          approverId: Number(submitApproverId),
+                        })
+                      }
+                      className="rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {actionPending === 'submit' ? 'Submitting…' : 'Submit'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {invoice.status === 'Pending Approval' &&
+                (invoice.createdBy.id !== currentUser.id &&
+                (isAdmin || invoice.approver?.id === currentUser.id) ? (
+                  <div className="space-y-2 rounded-xl border border-amber-100 bg-amber-50/60 p-3.5">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+                      Awaiting your approval
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Decision note (optional)"
+                      value={decisionDraft}
+                      onChange={(event) => setDecisionDraft(event.target.value)}
+                      className="w-full rounded-lg bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={actionPending !== null}
+                        onClick={() =>
+                          callAction('decision', `/api/invoices/${invoice.id}/decision`, {
+                            decision: 'approved',
+                            note: decisionDraft.trim() || null,
+                          })
+                        }
+                        className="rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {actionPending === 'decision' ? 'Saving…' : 'Approve'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionPending !== null}
+                        onClick={() =>
+                          callAction('decision', `/api/invoices/${invoice.id}/decision`, {
+                            decision: 'declined',
+                            note: decisionDraft.trim() || null,
+                          })
+                        }
+                        className="rounded-lg border border-rose-200 bg-white py-2.5 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-amber-100 bg-amber-50/60 p-3.5 text-sm text-amber-700">
+                    Awaiting approval from{' '}
+                    {invoice.approver
+                      ? `${invoice.approver.name} (${invoice.approver.email})`
+                      : 'the assigned approver'}
+                    . You submitted this invoice, so you cannot approve it yourself.
+                  </p>
+                ))}
+              {invoice.status === 'Approved' && (
                 <button
                   type="button"
                   onClick={() => callAction('send', `/api/invoices/${invoice.id}/send`)}
@@ -476,7 +580,7 @@ export default function InvoiceDetailDrawer({
                   </button>
                 )}
               </div>
-              {invoice.status === 'Draft' && (
+              {(invoice.status === 'Draft' || invoice.status === 'Declined') && (
                 <button
                   type="button"
                   onClick={handleDelete}

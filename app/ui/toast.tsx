@@ -14,7 +14,7 @@ import {
   TruckIcon,
 } from './icons';
 
-export type ToastSource = 'todo' | 'quote' | 'trip' | 'message' | 'file' | 'calendar';
+export type ToastSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar';
 
 const SOURCE_META: Record<
   ToastSource,
@@ -22,6 +22,7 @@ const SOURCE_META: Record<
 > = {
   todo: { Icon: ClipboardCheckIcon, label: 'Task', accent: 'bg-primary/10 text-primary' },
   quote: { Icon: DocumentIcon, label: 'Quote', accent: 'bg-amber-100 text-amber-600' },
+  invoice: { Icon: DocumentIcon, label: 'Invoice', accent: 'bg-blue-100 text-blue-600' },
   trip: { Icon: TruckIcon, label: 'Trip', accent: 'bg-teal-100 text-teal-600' },
   message: {
     Icon: ChatHistoryIcon,

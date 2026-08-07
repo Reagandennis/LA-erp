@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import type {
+  ApproverOption,
   BrandProfileOption,
   CustomerOption,
   DiscountType,
@@ -34,6 +35,7 @@ interface InvoiceBuilderProps {
   products: ProductOption[];
   brandProfiles: BrandProfileOption[];
   organization: OrganizationBranding;
+  approvers: ApproverOption[];
   onClose: () => void;
   onSaved: (invoice: InvoiceDetail) => void;
   onCustomerCreated: (customer: CustomerOption) => void;
@@ -82,6 +84,7 @@ export default function InvoiceBuilder({
   products,
   brandProfiles,
   organization,
+  approvers,
   onClose,
   onSaved,
   onCustomerCreated,
@@ -130,7 +133,8 @@ export default function InvoiceBuilder({
       : [emptyItem()],
   );
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState<'draft' | 'send' | null>(null);
+  const [submitting, setSubmitting] = useState<'draft' | 'submit' | null>(null);
+  const [approverId, setApproverId] = useState<string>(invoice?.approver?.id ? String(invoice.approver.id) : '');
 
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [customerDraft, setCustomerDraft] = useState({
@@ -207,11 +211,16 @@ export default function InvoiceBuilder({
       productId: item.productId,
     }));
 
-  const handleSave = async (action: 'draft' | 'send') => {
+  const handleSave = async (action: 'draft' | 'submit') => {
     setError(null);
     const numericCustomerId = Number(customerId);
     if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
       setError('Pick a customer to bill');
+      return;
+    }
+    const numericApproverId = approverId ? Number(approverId) : null;
+    if (action === 'submit' && (!numericApproverId || numericApproverId <= 0)) {
+      setError('Pick an approver before submitting for approval');
       return;
     }
     const itemsPayload = collectItemsPayload();
@@ -261,15 +270,23 @@ export default function InvoiceBuilder({
       }
 
       let saved = data.invoice;
-      if (action === 'send') {
-        const sendResponse = await fetch(`/api/invoices/${saved.id}/send`, {
+      if (action === 'submit') {
+        const submitResponse = await fetch(`/api/invoices/${saved.id}/submit`, {
           method: 'POST',
           credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approverId: numericApproverId }),
         });
-        const sendData = (await sendResponse.json().catch(() => null)) as
+        const submitData = (await submitResponse.json().catch(() => null)) as
           | { invoice?: InvoiceDetail; error?: string }
           | null;
-        if (sendResponse.ok && sendData?.invoice) saved = sendData.invoice;
+        if (!submitResponse.ok || !submitData?.invoice) {
+          // The invoice itself was saved — surface the submit failure but keep the draft.
+          setError(submitData?.error ?? 'Invoice saved as draft, but submitting for approval failed');
+          onSaved(saved);
+          return;
+        }
+        saved = submitData.invoice;
       }
       onSaved(saved);
     } catch {
@@ -495,6 +512,18 @@ export default function InvoiceBuilder({
                 </select>
               </div>
               <div>
+                <label className={labelClass}>Approver</label>
+                <select value={approverId} onChange={(event) => setApproverId(event.target.value)} className={inputClass}>
+                  <option value="">Select approver…</option>
+                  {approvers.map((approver) => (
+                    <option key={approver.id} value={approver.id}>
+                      {approver.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1.5 text-xs text-gray-400">Required when you submit for approval.</p>
+              </div>
+              <div>
                 <label className={labelClass}>Due date</label>
                 <input
                   type="date"
@@ -718,11 +747,11 @@ export default function InvoiceBuilder({
             </button>
             <button
               type="button"
-              onClick={() => handleSave('send')}
+              onClick={() => handleSave('submit')}
               disabled={submitting !== null}
               className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
-              {submitting === 'send' ? 'Saving…' : 'Save & send'}
+              {submitting === 'submit' ? 'Saving…' : 'Save & submit for approval'}
             </button>
           </div>
         </div>
