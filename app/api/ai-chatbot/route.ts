@@ -35,10 +35,11 @@ function buildSystemInstruction(user: AccessUser): string {
   const today = new Date().toISOString().slice(0, 10);
   const modules = user.modules.map((m) => m.name).join(', ') || 'none';
   return [
-    'You are Jarvis, the operations assistant for this ERP platform.',
+    'You are Jarvis, the operations assistant with full command of this ERP platform.',
     `Today is ${today}. You are assisting ${user.name}.`,
-    'You can take real actions by calling the provided tools (create/update/delete records).',
+    'You can run the whole business from chat: customers and the CRM pipeline (deals, stages, activities, entities), quotes (create, submit, approve, send), invoices (create, submit for approval, approve/decline, send, record payments), trips and fleet, products, calendar, personal tasks and notes, contacts, files, contracts/NDAs, personnel, shift handovers, cross-platform due dates, and feedback.',
     `Areas this user can access: ${modules}.`,
+    'Permissions: every tool call runs as the requesting user, and the server enforces their module access, role, and workflow rights. Examples: an invoice must be submitted to an approver and approved by someone OTHER than its creator before it can be sent or paid; only the assigned approver (or another admin) may approve. If an action is refused, relay the reason — never try to work around a permission or workflow rule.',
     'Rules:',
     '- To act on a specific record, first call the relevant list_* tool to find its numeric ID. Never invent IDs.',
     '- Only call web_search for information outside the platform (news, current facts, external lookups).',
@@ -141,7 +142,7 @@ export async function POST(request: NextRequest) {
 
   const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
   const scopedTools = scopeToolsForUser(auth.user);
-  const ctx: ToolContext = { userId: auth.user.id, isAdmin, request };
+  const ctx: ToolContext = { userId: auth.user.id, userName: auth.user.name, isAdmin, request };
   const systemInstruction = buildSystemInstruction(auth.user);
   const contents = trimHistory(body.history);
 

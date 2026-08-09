@@ -44,6 +44,10 @@ export const managedUserUpdateSchema = z
     },
   );
 
+export const managedUserPasswordResetSchema = z.object({
+  password: passwordSchema,
+});
+
 export const personalTodoPrioritySchema = z.enum(['low', 'medium', 'high']);
 export const personalTodoStatusSchema = z.enum(['Backlog', 'In progress', 'In review']);
 

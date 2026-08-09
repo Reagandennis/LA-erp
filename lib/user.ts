@@ -344,6 +344,55 @@ export async function updateManagedUser(input: {
   });
 }
 
+export async function resetManagedUserPassword(input: {
+  userId: number;
+  passwordHash: string;
+  // When the admin resets their own password, the session performing the
+  // change survives; every other session is still revoked.
+  keepSessionId?: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.user.findUnique({
+      where: { id: input.userId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    await tx.user.update({
+      where: { id: input.userId },
+      data: {
+        passwordHash: input.passwordHash,
+        sessionVersion: input.keepSessionId
+          ? undefined
+          : {
+              increment: 1,
+            },
+      },
+    });
+
+    await tx.session.updateMany({
+      where: {
+        userId: input.userId,
+        revokedAt: null,
+        ...(input.keepSessionId ? { id: { not: input.keepSessionId } } : {}),
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    const updated = await tx.user.findUnique({
+      where: { id: input.userId },
+      include: userAccessInclude,
+    });
+
+    return updated ? buildAccessUser(updated) : null;
+  });
+}
+
 export async function deleteManagedUser(userId: number) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.user.findUnique({

@@ -20,6 +20,7 @@ export interface FunctionDeclaration {
 
 export interface ToolContext {
   userId: number;
+  userName: string;
   isAdmin: boolean;
   request: NextRequest;
 }

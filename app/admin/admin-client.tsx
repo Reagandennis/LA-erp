@@ -137,6 +137,13 @@ export default function AdminClient({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  useEffect(() => {
+    setPasswordDraft('');
+  }, [selectedUserId]);
+
   // --- Audit state ---------------------------------------------------------
   const [audit, setAudit] = useState<AuditQueryResult>(initialAudit);
   const [auditFilters, setAuditFilters] = useState<AuditFilterState>(EMPTY_AUDIT_FILTERS);
@@ -282,6 +289,29 @@ export default function AdminClient({
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Update failed');
+    }
+  };
+
+  const handlePasswordReset = async (userId: number) => {
+    setError(''); setSuccess(''); setIsResettingPassword(true);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/password`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ password: passwordDraft }),
+      });
+      const payload = await parseJson(res);
+      if (payload?.user) {
+        setUsers(users.map((u) => (u.id === userId ? (payload.user as AdminUser) : u)));
+        setPasswordDraft('');
+        setSuccess(
+          userId === currentUserId
+            ? 'Your password was changed. Other sessions were signed out.'
+            : 'Password reset. The user was signed out of all sessions.',
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Password reset failed');
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -660,6 +690,38 @@ export default function AdminClient({
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Reset password</h3>
+                <div className="space-y-2">
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="New password"
+                    value={passwordDraft}
+                    onChange={(e) => setPasswordDraft(e.target.value)}
+                    className={inputClass}
+                  />
+                  <button
+                    onClick={() => void handlePasswordReset(selectedUser.id)}
+                    disabled={
+                      isResettingPassword ||
+                      passwordDraft.length < 8 ||
+                      !/[A-Za-z]/.test(passwordDraft) ||
+                      !/\d/.test(passwordDraft)
+                    }
+                    className="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    {isResettingPassword ? 'Resetting…' : 'Reset password'}
+                  </button>
+                  <p className="text-xs text-gray-400">
+                    At least 8 characters with a letter and a number.{' '}
+                    {selectedUser.id === currentUserId
+                      ? 'Your other sessions will be signed out; this one stays active.'
+                      : 'The user will be signed out of all sessions.'}
+                  </p>
                 </div>
               </div>
             </div>
