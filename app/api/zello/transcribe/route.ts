@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 import { userHasModule, userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +11,6 @@ export const revalidate = 0;
 export const runtime = 'nodejs';
 
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
-const MAX_BYTES = 12 * 1024 * 1024; // ~12 MB of WAV is plenty for a single transmission
 
 const PROMPT =
   'This audio is a short two-way radio (push-to-talk) transmission from a private security ' +
@@ -28,13 +29,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  const rateLimit = await enforceRateLimit({
+    scope: 'zello.transcribe',
+    key: `${auth.user.id}`,
+    limit: 30,
+    windowMs: 60 * 1000,
+  });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many transcription requests. Slow down and try again.',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      },
+      { status: 429 },
+    );
+  }
+
   const apiKey = (process.env.GEMINI_API_KEY ?? '').trim();
   if (!apiKey) return NextResponse.json({ error: 'not-configured' });
 
   const mimeType = (request.headers.get('content-type') ?? 'audio/wav').split(';')[0].trim() || 'audio/wav';
   const buffer = Buffer.from(await request.arrayBuffer());
   if (buffer.length === 0) return NextResponse.json({ error: 'empty' }, { status: 400 });
-  if (buffer.length > MAX_BYTES) return NextResponse.json({ error: 'too-large' }, { status: 413 });
+  const maxAudioMb = await getUploadLimitMb('audioMb');
+  if (buffer.length > mbToBytes(maxAudioMb)) return NextResponse.json({ error: 'too-large' }, { status: 413 });
 
   // gemini-3.1-flash-lite (the app default) handles audio; override per-feature if needed.
   const model = (process.env.ZELLO_TRANSCRIBE_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini-2.0-flash').trim();

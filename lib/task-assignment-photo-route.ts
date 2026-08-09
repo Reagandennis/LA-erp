@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { fileResponse } from '@/lib/file-response';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { getResourcePhoto, setResourcePhoto, type ResourceKind } from '@/lib/task-assignment';
-
-const MAX_PHOTO_BYTES = 8 * 1024 * 1024; // 8 MB
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
 function parseId(value: string) {
   const n = Number(value);
@@ -26,14 +26,10 @@ export function makePhotoHandlers(kind: ResourceKind) {
     const photo = await getResourcePhoto(kind, id);
     if (!photo) return NextResponse.json({ error: 'No photo on file' }, { status: 404 });
 
-    const body = new Uint8Array(photo.content);
-    return new Response(body, {
-      headers: {
-        'Content-Type': photo.mime,
-        'Content-Disposition': `inline; filename="${photo.name.replace(/"/g, '')}"`,
-        'Content-Length': String(body.byteLength),
-        'Cache-Control': 'private, no-store',
-      },
+    return fileResponse({
+      content: photo.content,
+      mime: photo.mime,
+      name: photo.name,
     });
   }
 
@@ -56,11 +52,12 @@ export function makePhotoHandlers(kind: ResourceKind) {
     if (!(file instanceof File) || file.size === 0) {
       return NextResponse.json({ error: 'No image uploaded' }, { status: 400 });
     }
-    if (!file.type.startsWith('image/')) {
-      return NextResponse.json({ error: 'File must be an image' }, { status: 400 });
+    if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') {
+      return NextResponse.json({ error: 'File must be a non-SVG image' }, { status: 400 });
     }
-    if (file.size > MAX_PHOTO_BYTES) {
-      return NextResponse.json({ error: 'Image exceeds the 8 MB limit' }, { status: 400 });
+    const maxPhotoMb = await getUploadLimitMb('photoMb');
+    if (file.size > mbToBytes(maxPhotoMb)) {
+      return NextResponse.json({ error: `Image exceeds the ${maxPhotoMb} MB limit` }, { status: 400 });
     }
 
     const ok = await setResourcePhoto(kind, id, {

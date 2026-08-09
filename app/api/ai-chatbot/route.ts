@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { userHasModule, userHasRole, type AccessUser } from '@/lib/user';
@@ -131,6 +132,24 @@ export async function POST(request: NextRequest) {
   if (!userHasRole(auth.user, ADMIN_ROLE_NAME) && !userHasModule(auth.user, 'ai-chatbot')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+
+  // Each call can fan out to several Gemini tool rounds — keep it bounded.
+  const rateLimit = await enforceRateLimit({
+    scope: 'ai.chat',
+    key: `${auth.user.id}`,
+    limit: 20,
+    windowMs: 60 * 1000,
+  });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many assistant requests. Slow down and try again.',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      },
+      { status: 429 },
+    );
+  }
+
   if (!isConfigured()) {
     return NextResponse.json({ error: 'The AI assistant is not configured (missing GEMINI_API_KEY).' }, { status: 503 });
   }

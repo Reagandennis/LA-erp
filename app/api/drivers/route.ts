@@ -2,11 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
 import { computeStats, createDriverLicense, listDriverLicenses } from '@/lib/drivers';
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export async function GET(request: NextRequest) {
   const { auth, response } = await requireRequestAuth(request);
@@ -46,8 +45,9 @@ export async function POST(request: NextRequest) {
   let document: { name: string; mime: string; size: number; content: Buffer } | null = null;
   const file = formData.get('document');
   if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_DOCUMENT_BYTES) {
-      return NextResponse.json({ error: 'Document exceeds the 10 MB limit' }, { status: 400 });
+    const maxDocumentMb = await getUploadLimitMb('documentMb');
+    if (file.size > mbToBytes(maxDocumentMb)) {
+      return NextResponse.json({ error: `Document exceeds the ${maxDocumentMb} MB limit` }, { status: 400 });
     }
     document = {
       name: file.name,

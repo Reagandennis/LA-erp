@@ -22,7 +22,7 @@ export function signConfirmation(userId: number, tool: string, args: Record<stri
 /** Verify a confirm token belongs to this user and return the held call, or null. */
 export function verifyConfirmation(token: string, userId: number): ConfirmPayload | null {
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as {
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as {
       type?: string;
       sub?: string;
       tool?: string;

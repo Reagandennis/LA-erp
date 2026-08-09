@@ -7,12 +7,12 @@ import {
   setBrandProfileLogo,
 } from '@/lib/brand-profiles';
 import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
-const MAX_BYTES = 1_000_000; // 1MB
 
 function parseId(value: string) {
   const parsed = Number(value);
@@ -65,8 +65,9 @@ export async function POST(
       { status: 400 },
     );
   }
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: 'Logo must be 1MB or smaller' }, { status: 400 });
+  const maxLogoMb = await getUploadLimitMb('logoMb');
+  if (file.size > mbToBytes(maxLogoMb)) {
+    return NextResponse.json({ error: `Logo must be ${maxLogoMb} MB or smaller` }, { status: 400 });
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());

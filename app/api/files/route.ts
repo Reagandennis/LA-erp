@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 import { computeStats, createFiles, listFiles } from '@/lib/files';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB per file
 
 export async function GET(request: NextRequest) {
   const { auth, response } = await requireRequestAuth(request);
@@ -24,6 +24,22 @@ export async function POST(request: NextRequest) {
   const { auth, response } = await requireRequestAuth(request);
   if (response || !auth) return response;
 
+  const rateLimit = await enforceRateLimit({
+    scope: 'file.upload',
+    key: `${auth.user.id}`,
+    limit: 20,
+    windowMs: 60 * 1000,
+  });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many uploads. Slow down and try again.',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      },
+      { status: 429 },
+    );
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -36,12 +52,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No files uploaded' }, { status: 400 });
   }
 
+  const maxFileMb = await getUploadLimitMb('fileMb');
   const toStore: Array<{ name: string; mime: string; size: number; content: Buffer }> = [];
   for (const file of files) {
     if (!(file instanceof File) || file.size === 0) continue;
-    if (file.size > MAX_FILE_BYTES) {
+    if (file.size > mbToBytes(maxFileMb)) {
       return NextResponse.json(
-        { error: `"${file.name}" exceeds the 25 MB per-file limit` },
+        { error: `"${file.name}" exceeds the ${maxFileMb} MB per-file limit` },
         { status: 400 },
       );
     }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { requireRequestAuth } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,23 @@ function str(value: unknown): string | null {
 export async function GET(request: NextRequest) {
   const { auth, response } = await requireRequestAuth(request);
   if (response || !auth) return response;
+
+  // Every call hits the paid FR24 API — keep per-user usage bounded.
+  const rateLimit = await enforceRateLimit({
+    scope: 'flight.radar',
+    key: `${auth.user.id}`,
+    limit: 60,
+    windowMs: 60 * 1000,
+  });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many flight lookups. Slow down and try again.',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      },
+      { status: 429 },
+    );
+  }
 
   const token = process.env.FR24_API_TOKEN;
   if (!token) {

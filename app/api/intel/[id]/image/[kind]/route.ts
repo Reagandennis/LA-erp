@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { fileResponse } from '@/lib/file-response';
 import { getAssessmentImage } from '@/lib/intel';
 import { requireRequestAuth } from '@/lib/request-auth';
 
@@ -28,10 +29,10 @@ export async function GET(
   const image = await getAssessmentImage(id, kind);
   if (!image) return NextResponse.json({ error: 'Image not found' }, { status: 404 });
 
-  return new NextResponse(new Uint8Array(image.content), {
-    headers: {
-      'Content-Type': image.mime,
-      'Cache-Control': 'private, max-age=3600',
-    },
+  return fileResponse({
+    content: image.content,
+    mime: image.mime,
+    name: `assessment-${id}-${kind}`,
+    cacheControl: 'private, max-age=3600',
   });
 }

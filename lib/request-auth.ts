@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getRequestAuth } from './auth';
 import { ADMIN_ROLE_NAME } from './rbac';
-import { userHasRole } from './user';
+import { userHasModule, userHasRole } from './user';
 
 export async function requireRequestAuth(request: NextRequest) {
   const auth = await getRequestAuth(request);
@@ -20,6 +20,32 @@ export async function requireRequestAuth(request: NextRequest) {
   return {
     auth,
     response: null,
+  };
+}
+
+/** Authenticated AND holding at least one of the given module slugs. Admins bypass. */
+export async function requireModuleRequest(
+  request: NextRequest,
+  ...moduleSlugs: string[]
+) {
+  const result = await requireRequestAuth(request);
+
+  if (result.response || !result.auth) {
+    return result;
+  }
+
+  const { user } = result.auth;
+
+  if (
+    userHasRole(user, ADMIN_ROLE_NAME) ||
+    moduleSlugs.some((slug) => userHasModule(user, slug))
+  ) {
+    return result;
+  }
+
+  return {
+    auth: null,
+    response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
   };
 }
 

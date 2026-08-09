@@ -10,33 +10,37 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q')?.trim();
 
+  // Require a real search term so this can't be used to dump the directory.
+  if (!query || query.length < 2) {
+    return NextResponse.json({ users: [] });
+  }
+
   const users = await prisma.user.findMany({
     select: {
       id: true,
       name: true,
       email: true,
     },
-    where: query
-      ? {
-          OR: [
-            {
-              name: {
-                contains: query,
-                mode: 'insensitive',
-              },
-            },
-            {
-              email: {
-                contains: query,
-                mode: 'insensitive',
-              },
-            },
-          ],
-        }
-      : undefined,
+    where: {
+      OR: [
+        {
+          name: {
+            contains: query,
+            mode: 'insensitive',
+          },
+        },
+        {
+          email: {
+            contains: query,
+            mode: 'insensitive',
+          },
+        },
+      ],
+    },
     orderBy: {
       name: 'asc',
     },
+    take: 20,
   });
 
   return NextResponse.json({ users });

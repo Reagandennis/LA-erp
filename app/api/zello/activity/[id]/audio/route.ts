@@ -3,13 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 import { userHasModule, userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
-
-const MAX_BYTES = 12 * 1024 * 1024;
 
 type AuthUser = Parameters<typeof userHasRole>[0];
 function canUse(user: AuthUser): boolean {
@@ -50,7 +49,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const buf = Buffer.from(await request.arrayBuffer());
   if (buf.length === 0) return NextResponse.json({ error: 'empty' }, { status: 400 });
-  if (buf.length > MAX_BYTES) return NextResponse.json({ error: 'too-large' }, { status: 413 });
+  const maxAudioMb = await getUploadLimitMb('audioMb');
+  if (buf.length > mbToBytes(maxAudioMb)) return NextResponse.json({ error: 'too-large' }, { status: 413 });
 
   try {
     await prisma.zelloActivity.update({ where: { id }, data: { audio: buf, hasAudio: true } });

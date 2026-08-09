@@ -278,7 +278,7 @@ async function geocode(query: string): Promise<GeoResult> {
 
 function isImage(res: Response): boolean {
   const ct = res.headers.get('content-type') ?? '';
-  return ct.startsWith('image/');
+  return ct.startsWith('image/') && !ct.includes('svg');
 }
 
 async function fetchStaticMap(lat: number, lng: number): Promise<{ mime: string; content: Buffer } | null> {

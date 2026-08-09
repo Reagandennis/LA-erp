@@ -3,12 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { getDriverLicenseDocument, setDriverLicenseDocument } from '@/lib/drivers';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 import { userHasModule, userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10 MB
 const DRIVERS_MODULE = 'drivers-license-expiry';
 
 function parseId(value: string) {
@@ -71,8 +71,9 @@ export async function POST(
   if (!(file instanceof File) || file.size === 0) {
     return NextResponse.json({ error: 'No document uploaded' }, { status: 400 });
   }
-  if (file.size > MAX_DOCUMENT_BYTES) {
-    return NextResponse.json({ error: 'Document exceeds the 10 MB limit' }, { status: 400 });
+  const maxDocumentMb = await getUploadLimitMb('documentMb');
+  if (file.size > mbToBytes(maxDocumentMb)) {
+    return NextResponse.json({ error: `Document exceeds the ${maxDocumentMb} MB limit` }, { status: 400 });
   }
 
   const item = await setDriverLicenseDocument(id, {

@@ -48,6 +48,20 @@ export const managedUserPasswordResetSchema = z.object({
   password: passwordSchema,
 });
 
+const uploadLimitMbSchema = z
+  .number()
+  .int('Limits must be whole megabytes')
+  .min(1, 'Limits must be at least 1 MB')
+  .max(100, 'Limits cannot exceed 100 MB');
+
+export const uploadLimitsUpdateSchema = z.object({
+  fileMb: uploadLimitMbSchema,
+  photoMb: uploadLimitMbSchema,
+  documentMb: uploadLimitMbSchema,
+  audioMb: uploadLimitMbSchema,
+  logoMb: uploadLimitMbSchema,
+});
+
 export const personalTodoPrioritySchema = z.enum(['low', 'medium', 'high']);
 export const personalTodoStatusSchema = z.enum(['Backlog', 'In progress', 'In review']);
 

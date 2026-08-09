@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
 type PersonalTodoLookupClient = {
   findFirst: (args: { where: { id: number; userId: number } }) => Promise<{ id: number } | null>;
@@ -113,6 +115,23 @@ export async function POST(
     return NextResponse.json({ error: 'Task not found' }, { status: 404 });
   }
 
+  const rateLimit = await enforceRateLimit({
+    scope: 'file.upload',
+    key: `${auth.user.id}`,
+    limit: 20,
+    windowMs: 60 * 1000,
+  });
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many uploads. Slow down and try again.',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      },
+      { status: 429 },
+    );
+  }
+
   let formData: FormData;
 
   try {
@@ -127,11 +146,19 @@ export async function POST(
     return NextResponse.json({ error: 'No files uploaded' }, { status: 400 });
   }
 
+  const maxFileMb = await getUploadLimitMb('fileMb');
   const created: AttachmentRecord[] = [];
 
   for (const file of files) {
     if (!(file instanceof File)) {
       continue;
+    }
+
+    if (file.size > mbToBytes(maxFileMb)) {
+      return NextResponse.json(
+        { error: `"${file.name}" exceeds the ${maxFileMb} MB per-file limit` },
+        { status: 400 },
+      );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());

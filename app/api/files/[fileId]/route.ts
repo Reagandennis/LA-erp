@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { fileResponse } from '@/lib/file-response';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { deleteFile, getFileContent, updateFile } from '@/lib/files';
 
@@ -27,16 +28,12 @@ export async function GET(
   if (!file) return NextResponse.json({ error: 'File not found' }, { status: 404 });
 
   const download = request.nextUrl.searchParams.get('download') === '1';
-  const disposition = download ? 'attachment' : 'inline';
-  const body = new Uint8Array(file.content);
 
-  return new Response(body, {
-    headers: {
-      'Content-Type': file.mime,
-      'Content-Disposition': `${disposition}; filename="${file.name.replace(/"/g, '')}"`,
-      'Content-Length': String(body.byteLength),
-      'Cache-Control': 'private, no-store',
-    },
+  return fileResponse({
+    content: file.content,
+    mime: file.mime,
+    name: file.name,
+    download,
   });
 }
 

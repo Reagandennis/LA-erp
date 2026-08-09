@@ -75,10 +75,37 @@ const inputClass =
 
 async function parseJson(response: Response) {
   const payload = (await response.json().catch(() => null)) as
-    | { error?: string; users?: AdminUser[]; roles?: AdminRole[]; modules?: AdminModule[]; user?: AdminUser }
+    | { error?: string; users?: AdminUser[]; roles?: AdminRole[]; modules?: AdminModule[]; user?: AdminUser; limits?: UploadLimits }
     | null;
   if (!response.ok) throw new Error(payload?.error || 'Request failed');
   return payload;
+}
+
+const UPLOAD_LIMIT_FIELDS = [
+  { key: 'fileMb', label: 'Files & attachments', description: 'File manager uploads and task attachments' },
+  { key: 'photoMb', label: 'Photos', description: 'Personnel, contact, and fleet photos' },
+  { key: 'documentMb', label: 'Documents', description: 'Contract and driver licence documents' },
+  { key: 'audioMb', label: 'Radio audio', description: 'Zello recordings and transcription clips' },
+  { key: 'logoMb', label: 'Logos', description: 'Organization and quote brand logos' },
+] as const;
+
+type UploadLimitKey = (typeof UPLOAD_LIMIT_FIELDS)[number]['key'];
+type UploadLimits = Record<UploadLimitKey, number>;
+type UploadLimitsDraft = Record<UploadLimitKey, string>;
+
+function toLimitsDraft(limits: UploadLimits): UploadLimitsDraft {
+  return {
+    fileMb: String(limits.fileMb),
+    photoMb: String(limits.photoMb),
+    documentMb: String(limits.documentMb),
+    audioMb: String(limits.audioMb),
+    logoMb: String(limits.logoMb),
+  };
+}
+
+function parseLimitMb(value: string): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 100 ? n : null;
 }
 
 function toggleId(id: number, selectedIds: number[]): number[] {
@@ -123,7 +150,7 @@ export default function AdminClient({
   const [modules, setModules] = useState<AdminModule[]>(initialModules);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'roles' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'roles' | 'audit' | 'settings'>('overview');
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const [createForm, setCreateForm] = useState({
@@ -143,6 +170,22 @@ export default function AdminClient({
   useEffect(() => {
     setPasswordDraft('');
   }, [selectedUserId]);
+
+  const [limitsDraft, setLimitsDraft] = useState<UploadLimitsDraft | null>(null);
+  const [limitsLoading, setLimitsLoading] = useState(false);
+  const [limitsSaving, setLimitsSaving] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'settings' || limitsDraft || limitsLoading) return;
+    setLimitsLoading(true);
+    fetch('/api/admin/upload-limits', { credentials: 'include' })
+      .then(parseJson)
+      .then((payload) => {
+        if (payload?.limits) setLimitsDraft(toLimitsDraft(payload.limits));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load upload limits'))
+      .finally(() => setLimitsLoading(false));
+  }, [activeTab, limitsDraft, limitsLoading]);
 
   // --- Audit state ---------------------------------------------------------
   const [audit, setAudit] = useState<AuditQueryResult>(initialAudit);
@@ -315,6 +358,36 @@ export default function AdminClient({
     }
   };
 
+  const handleSaveUploadLimits = async () => {
+    if (!limitsDraft) return;
+    const parsed = {
+      fileMb: parseLimitMb(limitsDraft.fileMb),
+      photoMb: parseLimitMb(limitsDraft.photoMb),
+      documentMb: parseLimitMb(limitsDraft.documentMb),
+      audioMb: parseLimitMb(limitsDraft.audioMb),
+      logoMb: parseLimitMb(limitsDraft.logoMb),
+    };
+    if (Object.values(parsed).some((v) => v === null)) {
+      setError('Upload limits must be whole numbers between 1 and 100 MB.');
+      return;
+    }
+    setError(''); setSuccess(''); setLimitsSaving(true);
+    try {
+      const res = await fetch('/api/admin/upload-limits', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(parsed),
+      });
+      const payload = await parseJson(res);
+      if (payload?.limits) {
+        setLimitsDraft(toLimitsDraft(payload.limits));
+        setSuccess('Upload limits saved.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save upload limits');
+    } finally {
+      setLimitsSaving(false);
+    }
+  };
+
   const handleDeleteUser = async (userId: number) => {
     if (!globalThis.confirm('Delete this user account? This cannot be undone.')) return;
     try {
@@ -333,7 +406,7 @@ export default function AdminClient({
   const suspendedCount = users.filter((u) => u.status === 'suspended').length;
   const presence = usePresence();
 
-  const TABS = ['overview', 'users', 'roles', 'audit'] as const;
+  const TABS = ['overview', 'users', 'roles', 'audit', 'settings'] as const;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -585,6 +658,52 @@ export default function AdminClient({
                 <button disabled={audit.page <= 1 || auditLoading} onClick={() => setAuditFilters((f) => ({ ...f, page: Math.max(1, f.page - 1) }))} className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40">Prev</button>
                 <button disabled={audit.page >= audit.totalPages || auditLoading} onClick={() => setAuditFilters((f) => ({ ...f, page: f.page + 1 }))} className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40">Next</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings */}
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl">
+            <div className="bg-white rounded-2xl border border-gray-100 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">Upload limits</h3>
+              <p className="text-sm text-gray-500 mb-5">
+                Maximum size per uploaded file, in megabytes (1–100). Changes apply immediately for all users.
+              </p>
+              {!limitsDraft ? (
+                <p className="text-sm text-gray-400">{limitsLoading ? 'Loading…' : 'Upload limits could not be loaded.'}</p>
+              ) : (
+                <div className="space-y-3">
+                  {UPLOAD_LIMIT_FIELDS.map((field) => (
+                    <div key={field.key} className="flex items-center justify-between gap-4 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900">{field.label}</p>
+                        <p className="text-xs text-gray-400">{field.description}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={1}
+                          value={limitsDraft[field.key]}
+                          onChange={(e) => setLimitsDraft({ ...limitsDraft, [field.key]: e.target.value })}
+                          className={`w-20 px-3 py-2 bg-white border rounded-lg text-sm text-right text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 ${parseLimitMb(limitsDraft[field.key]) === null ? 'border-rose-300' : 'border-gray-200'}`}
+                        />
+                        <span className="text-xs text-gray-400 w-7">MB</span>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => void handleSaveUploadLimits()}
+                    disabled={limitsSaving || UPLOAD_LIMIT_FIELDS.some((f) => parseLimitMb(limitsDraft[f.key]) === null)}
+                    className="w-full py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm disabled:opacity-60"
+                    style={{ backgroundColor: BRAND }}
+                  >
+                    {limitsSaving ? 'Saving…' : 'Save limits'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -8,98 +8,98 @@ datasource db {
 }
 
 model User {
-  id             Int        @id @default(autoincrement())
-  email          String     @unique
-  name           String
-  passwordHash   String
-  status         String     @default("active")
-  sessionVersion Int        @default(1)
-  dashboardHighlights String[] @default([])
-  worldClockZones String[] @default([])
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  userRoles      UserRole[]
-  userModules    UserModule[]
-  personalTodos  PersonalTodo[]
-  personalTodoBoard PersonalTodoBoard?
-  personalTodoAttachments PersonalTodoAttachment[]
-  personalTodoShares PersonalTodoShare[]
-  personalTodoNotifications PersonalTodoNotification[]
-  personalTodoComments PersonalTodoComment[]
-  sessions       Session[]
-  auditLogs      AuditLog[] @relation("AuditActor")
-  auditTargets   AuditLog[] @relation("AuditTarget")
-  createdCustomers   Customer[] @relation("CustomerCreatedBy")
-  createdDeals       Deal[]     @relation("DealCreatedBy")
-  createdCrmActivities CrmActivity[] @relation("CrmActivityCreatedBy")
-  quickbooksConnections QuickBooksConnection[] @relation("QuickBooksConnectedBy")
-  createdQuotes      Quote[]    @relation("QuoteCreatedBy")
-  approvableQuotes   Quote[]    @relation("QuoteApprover")
-  quoteNotifications QuoteNotification[]
-  createdProducts    Product[]       @relation("ProductCreatedBy")
-  createdQuoteTemplates QuoteTemplate[] @relation("QuoteTemplateCreatedBy")
-  createdBrandProfiles BrandProfile[] @relation("BrandProfileCreatedBy")
-  createdInvoices    Invoice[]       @relation("InvoiceCreatedBy")
-  approvableInvoices Invoice[]       @relation("InvoiceApprover")
-  invoiceNotifications InvoiceNotification[]
-  recordedInvoicePayments InvoicePayment[] @relation("InvoicePaymentCreatedBy")
-  organizationUpdates OrganizationSettings[] @relation("OrganizationUpdatedBy")
-  createdTrips       Trip[]          @relation("TripCreatedBy")
-  ownedTrips         Trip[]          @relation("TripOwner")
+  id                             Int                             @id @default(autoincrement())
+  email                          String                          @unique
+  name                           String
+  passwordHash                   String
+  status                         String                          @default("active")
+  sessionVersion                 Int                             @default(1)
+  dashboardHighlights            String[]                        @default([])
+  worldClockZones                String[]                        @default([])
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
+  userRoles                      UserRole[]
+  userModules                    UserModule[]
+  personalTodos                  PersonalTodo[]
+  personalTodoBoard              PersonalTodoBoard?
+  personalTodoAttachments        PersonalTodoAttachment[]
+  personalTodoShares             PersonalTodoShare[]
+  personalTodoNotifications      PersonalTodoNotification[]
+  personalTodoComments           PersonalTodoComment[]
+  sessions                       Session[]
+  auditLogs                      AuditLog[]                      @relation("AuditActor")
+  auditTargets                   AuditLog[]                      @relation("AuditTarget")
+  createdCustomers               Customer[]                      @relation("CustomerCreatedBy")
+  createdDeals                   Deal[]                          @relation("DealCreatedBy")
+  createdCrmActivities           CrmActivity[]                   @relation("CrmActivityCreatedBy")
+  quickbooksConnections          QuickBooksConnection[]          @relation("QuickBooksConnectedBy")
+  createdQuotes                  Quote[]                         @relation("QuoteCreatedBy")
+  approvableQuotes               Quote[]                         @relation("QuoteApprover")
+  quoteNotifications             QuoteNotification[]
+  createdProducts                Product[]                       @relation("ProductCreatedBy")
+  createdQuoteTemplates          QuoteTemplate[]                 @relation("QuoteTemplateCreatedBy")
+  createdBrandProfiles           BrandProfile[]                  @relation("BrandProfileCreatedBy")
+  createdInvoices                Invoice[]                       @relation("InvoiceCreatedBy")
+  approvableInvoices             Invoice[]                       @relation("InvoiceApprover")
+  invoiceNotifications           InvoiceNotification[]
+  recordedInvoicePayments        InvoicePayment[]                @relation("InvoicePaymentCreatedBy")
+  organizationUpdates            OrganizationSettings[]          @relation("OrganizationUpdatedBy")
+  createdTrips                   Trip[]                          @relation("TripCreatedBy")
+  ownedTrips                     Trip[]                          @relation("TripOwner")
   tripItineraryItemNotifications TripItineraryItemNotification[]
-  createdConversations Conversation[] @relation("ConversationCreatedBy")
-  conversationMembers  ConversationMember[]
-  sentMessages         Message[]      @relation("MessageSender")
-  messageNotifications MessageNotification[]
-  feedback             Feedback[]     @relation("FeedbackAuthor")
-  feedbackUpvotes      FeedbackUpvote[]
-  feedbackComments     FeedbackComment[]
-  createdDriverLicenses DriverLicense[] @relation("DriverLicenseCreatedBy")
-  uploadedFiles        StoredFile[]   @relation("StoredFileUploadedBy")
-  receivedFileShares   StoredFileShare[]
-  fileNotifications    FileNotification[]
-  calendarEvents       CalendarEvent[]
-  calendarEventNotifications CalendarEventNotification[]
-  scheduleShifts        ScheduleShift[] @relation("ScheduleEmployee")
-  createdScheduleShifts ScheduleShift[] @relation("ScheduleCreatedBy")
-  zelloActivities       ZelloActivity[] @relation("ZelloActivityRecordedBy")
-  whatsAppMessages      WhatsAppMessage[] @relation("WhatsAppMessageRecordedBy")
-  createdVehicles       Vehicle[]       @relation("VehicleCreatedBy")
-  createdDrivers        Driver[]        @relation("DriverCreatedBy")
-  createdOfficers       Officer[]       @relation("OfficerCreatedBy")
-  createdTripAssignments TripAssignment[] @relation("TripAssignmentCreatedBy")
-  createdIntelAssessments IntelAssessment[] @relation("IntelAssessmentCreatedBy")
-  createdHandovers      HandoverEntry[] @relation("HandoverCreatedBy")
-  acknowledgedHandovers HandoverEntry[] @relation("HandoverAcknowledgedBy")
-  createdContacts       Contact[]       @relation("ContactCreatedBy")
-  createdSops           Sop[]           @relation("SopCreatedBy")
-  sopAcknowledgements   SopAcknowledgement[]
-  sopRevisions          SopRevision[]   @relation("SopRevisionChangedBy")
-  createdContracts      Contract[]      @relation("ContractCreatedBy")
-  notes                 Note[]          @relation("NoteOwner")
-  createdPersonnel      Personnel[]     @relation("PersonnelCreatedBy")
-  personnelRecord       Personnel?      @relation("PersonnelUser")
+  createdConversations           Conversation[]                  @relation("ConversationCreatedBy")
+  conversationMembers            ConversationMember[]
+  sentMessages                   Message[]                       @relation("MessageSender")
+  messageNotifications           MessageNotification[]
+  feedback                       Feedback[]                      @relation("FeedbackAuthor")
+  feedbackUpvotes                FeedbackUpvote[]
+  feedbackComments               FeedbackComment[]
+  createdDriverLicenses          DriverLicense[]                 @relation("DriverLicenseCreatedBy")
+  uploadedFiles                  StoredFile[]                    @relation("StoredFileUploadedBy")
+  receivedFileShares             StoredFileShare[]
+  fileNotifications              FileNotification[]
+  calendarEvents                 CalendarEvent[]
+  calendarEventNotifications     CalendarEventNotification[]
+  scheduleShifts                 ScheduleShift[]                 @relation("ScheduleEmployee")
+  createdScheduleShifts          ScheduleShift[]                 @relation("ScheduleCreatedBy")
+  zelloActivities                ZelloActivity[]                 @relation("ZelloActivityRecordedBy")
+  whatsAppMessages               WhatsAppMessage[]               @relation("WhatsAppMessageRecordedBy")
+  createdVehicles                Vehicle[]                       @relation("VehicleCreatedBy")
+  createdDrivers                 Driver[]                        @relation("DriverCreatedBy")
+  createdOfficers                Officer[]                       @relation("OfficerCreatedBy")
+  createdTripAssignments         TripAssignment[]                @relation("TripAssignmentCreatedBy")
+  createdIntelAssessments        IntelAssessment[]               @relation("IntelAssessmentCreatedBy")
+  createdHandovers               HandoverEntry[]                 @relation("HandoverCreatedBy")
+  acknowledgedHandovers          HandoverEntry[]                 @relation("HandoverAcknowledgedBy")
+  createdContacts                Contact[]                       @relation("ContactCreatedBy")
+  createdSops                    Sop[]                           @relation("SopCreatedBy")
+  sopAcknowledgements            SopAcknowledgement[]
+  sopRevisions                   SopRevision[]                   @relation("SopRevisionChangedBy")
+  createdContracts               Contract[]                      @relation("ContractCreatedBy")
+  notes                          Note[]                          @relation("NoteOwner")
+  createdPersonnel               Personnel[]                     @relation("PersonnelCreatedBy")
+  personnelRecord                Personnel?                      @relation("PersonnelUser")
 }
 
 model PersonalTodo {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  title       String
-  description String?
-  priority    String   @default("medium")
-  status      String   @default("Backlog")
-  dueDate     DateTime?
-  completed   Boolean  @default(false)
-  completedAt DateTime?
-  deletedAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  attachments PersonalTodoAttachment[]
-  shares      PersonalTodoShare[]
+  id            Int                        @id @default(autoincrement())
+  userId        Int
+  title         String
+  description   String?
+  priority      String                     @default("medium")
+  status        String                     @default("Backlog")
+  dueDate       DateTime?
+  completed     Boolean                    @default(false)
+  completedAt   DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  user          User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attachments   PersonalTodoAttachment[]
+  shares        PersonalTodoShare[]
   notifications PersonalTodoNotification[]
-  comments    PersonalTodoComment[]
-  subtasks    Json?
+  comments      PersonalTodoComment[]
+  subtasks      Json?
 
   @@index([userId, completed, dueDate])
   @@index([userId, createdAt])
@@ -107,69 +107,69 @@ model PersonalTodo {
 }
 
 model PersonalTodoAttachment {
-  id        Int      @id @default(autoincrement())
+  id        Int          @id @default(autoincrement())
   todoId    Int
   userId    Int
   filename  String
   mimeType  String
   size      Int
   content   Bytes
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
   todo      PersonalTodo @relation(fields: [todoId], references: [id], onDelete: Cascade)
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([todoId, userId])
   @@index([userId, createdAt])
 }
 
 model PersonalTodoShare {
-  id        Int      @id @default(autoincrement())
+  id        Int          @id @default(autoincrement())
   todoId    Int
   userId    Int
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
   todo      PersonalTodo @relation(fields: [todoId], references: [id], onDelete: Cascade)
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([todoId, userId])
   @@index([userId, createdAt])
 }
 
 model PersonalTodoNotification {
-  id        Int      @id @default(autoincrement())
+  id        Int          @id @default(autoincrement())
   userId    Int
   todoId    Int
   type      String
   message   String
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
   readAt    DateTime?
   todo      PersonalTodo @relation(fields: [todoId], references: [id], onDelete: Cascade)
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
 }
 
 model PersonalTodoComment {
-  id        Int      @id @default(autoincrement())
+  id        Int          @id @default(autoincrement())
   todoId    Int
   userId    Int
   body      String
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
   todo      PersonalTodo @relation(fields: [todoId], references: [id], onDelete: Cascade)
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([todoId, createdAt])
   @@index([userId, createdAt])
 }
 
 model PersonalTodoBoard {
-  id          Int      @id @default(autoincrement())
-  userId      Int      @unique
-  columns     Json
+  id           Int      @id @default(autoincrement())
+  userId       Int      @unique
+  columns      Json
   columnColors Json?
-  taskOrder   Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskOrder    Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -274,27 +274,27 @@ model AuditLog {
 }
 
 model Customer {
-  id             Int      @id @default(autoincrement())
-  name           String
-  email          String?
-  phone          String?
-  company        String?
-  address        String?
-  billingAddress String?
+  id                   Int           @id @default(autoincrement())
+  name                 String
+  email                String?
+  phone                String?
+  company              String?
+  address              String?
+  billingAddress       String?
   // Which business entity this customer belongs to (LADYASKARI | LIONESS | STARLLWART).
-  entity         String   @default("LADYASKARI")
+  entity               String        @default("LADYASKARI")
   // QuickBooks Online Customer.Id once mirrored there.
   quickbooksCustomerId String?
-  createdById    Int
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  createdBy      User     @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  quotes         Quote[]
-  invoices       Invoice[]
-  trips          Trip[]
-  contacts       Contact[]
-  deals          Deal[]
-  crmActivities  CrmActivity[]
+  createdById          Int
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  createdBy            User          @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  quotes               Quote[]
+  invoices             Invoice[]
+  trips                Trip[]
+  contacts             Contact[]
+  deals                Deal[]
+  crmActivities        CrmActivity[]
 
   @@index([createdById, createdAt])
   @@index([name])
@@ -302,31 +302,31 @@ model Customer {
 }
 
 model Contact {
-  id           Int      @id @default(autoincrement())
-  name         String
-  role         String?
-  category     String   @default("Client")
-  email        String?
-  phone        String?
-  location     String?
-  notes        String?
-  tags         String[] @default([])
-  customerId   Int?
-  photoName    String?
-  photoMime    String?
-  photoSize    Int?
-  photoContent Bytes?
+  id                 Int           @id @default(autoincrement())
+  name               String
+  role               String?
+  category           String        @default("Client")
+  email              String?
+  phone              String?
+  location           String?
+  notes              String?
+  tags               String[]      @default([])
+  customerId         Int?
+  photoName          String?
+  photoMime          String?
+  photoSize          Int?
+  photoContent       Bytes?
   // Provenance: "manual" or "google". Google rows carry the People API resource
   // name so a re-sync updates the same row instead of creating a duplicate.
-  source             String    @default("manual")
-  googleResourceName String?   @unique
+  source             String        @default("manual")
+  googleResourceName String?       @unique
   syncedAt           DateTime?
-  createdById  Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  createdBy    User      @relation("ContactCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  crmActivities CrmActivity[]
+  createdById        Int
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  createdBy          User          @relation("ContactCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  customer           Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  crmActivities      CrmActivity[]
 
   @@index([createdById, createdAt])
   @@index([category])
@@ -338,27 +338,27 @@ model Contact {
 // proposal → won → execution → invoiced → closed, plus lost). "Outstanding
 // 30+ days" is derived from stage=invoiced + stageChangedAt, not stored.
 model Deal {
-  id                Int       @id @default(autoincrement())
+  id                Int           @id @default(autoincrement())
   title             String
   customerId        Int
-  stage             String    @default("lead")
-  value             Decimal   @default(0) @db.Decimal(14, 2)
-  currency          String    @default("USD")
+  stage             String        @default("lead")
+  value             Decimal       @default(0) @db.Decimal(14, 2)
+  currency          String        @default("USD")
   quoteId           Int?
   contractId        Int?
   // E-signature tracking for the proposal / NDA: none | sent | signed | declined.
-  signatureStatus   String    @default("none")
+  signatureStatus   String        @default("none")
   expectedCloseDate DateTime?
   lostReason        String?
   notes             String?
-  stageChangedAt    DateTime  @default(now())
+  stageChangedAt    DateTime      @default(now())
   createdById       Int
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  quote             Quote?    @relation(fields: [quoteId], references: [id], onDelete: SetNull)
-  contract          Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
-  createdBy         User      @relation("DealCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  customer          Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quote             Quote?        @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  contract          Contract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  createdBy         User          @relation("DealCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   activities        CrmActivity[]
 
   @@index([stage, stageChangedAt])
@@ -387,41 +387,41 @@ model CrmActivity {
 }
 
 model Quote {
-  id             Int       @id @default(autoincrement())
-  reference      String    @unique
-  trackingCode   String?   @unique
+  id             Int                 @id @default(autoincrement())
+  reference      String              @unique
+  trackingCode   String?             @unique
   customerId     Int
   createdById    Int
   approverId     Int?
   brandProfileId Int?
   subject        String
-  status         String    @default("Draft")
+  status         String              @default("Draft")
   issueDate      DateTime
   expiryDate     DateTime
-  currency       String    @default("USD")
-  taxRate        Decimal   @default(0) @db.Decimal(6, 4)
-  discountType   String    @default("none")
-  discountValue  Decimal   @default(0) @db.Decimal(14, 2)
-  discountAmount Decimal   @default(0) @db.Decimal(14, 2)
-  subtotal       Decimal   @default(0) @db.Decimal(14, 2)
-  tax            Decimal   @default(0) @db.Decimal(14, 2)
-  total          Decimal   @default(0) @db.Decimal(14, 2)
+  currency       String              @default("USD")
+  taxRate        Decimal             @default(0) @db.Decimal(6, 4)
+  discountType   String              @default("none")
+  discountValue  Decimal             @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal             @default(0) @db.Decimal(14, 2)
+  subtotal       Decimal             @default(0) @db.Decimal(14, 2)
+  tax            Decimal             @default(0) @db.Decimal(14, 2)
+  total          Decimal             @default(0) @db.Decimal(14, 2)
   notes          String?
   terms          String?
   decisionNote   String?
   submittedAt    DateTime?
   decidedAt      DateTime?
   sentAt         DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy      User      @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  approver       User?     @relation("QuoteApprover", fields: [approverId], references: [id], onDelete: SetNull)
-  brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  customer       Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy      User                @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approver       User?               @relation("QuoteApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  brandProfile   BrandProfile?       @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
   items          QuoteItem[]
   notifications  QuoteNotification[]
-  trip           Trip?     @relation("QuoteSourceTrip")
-  invoices       Invoice[] @relation("QuoteInvoices")
+  trip           Trip?               @relation("QuoteSourceTrip")
+  invoices       Invoice[]           @relation("QuoteInvoices")
   deals          Deal[]
 
   @@index([createdById, status])
@@ -433,22 +433,22 @@ model Quote {
 }
 
 model QuoteItem {
-  id             Int     @id @default(autoincrement())
-  quoteId        Int
-  position       Int
-  description    String
-  quantity       Decimal @db.Decimal(12, 2)
+  id                 Int                 @id @default(autoincrement())
+  quoteId            Int
+  position           Int
+  description        String
+  quantity           Decimal             @db.Decimal(12, 2)
   // Number of days the line covers; line subtotal = quantity × days × unitPrice.
-  days           Decimal @default(1) @db.Decimal(12, 2)
-  unitPrice      Decimal @db.Decimal(14, 2)
-  taxable        Boolean @default(true)
-  discountType   String  @default("none")
-  discountValue  Decimal @default(0) @db.Decimal(14, 2)
-  discountAmount Decimal @default(0) @db.Decimal(14, 2)
-  total          Decimal @db.Decimal(14, 2)
-  productId      Int?
-  quote          Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  days               Decimal             @default(1) @db.Decimal(12, 2)
+  unitPrice          Decimal             @db.Decimal(14, 2)
+  taxable            Boolean             @default(true)
+  discountType       String              @default("none")
+  discountValue      Decimal             @default(0) @db.Decimal(14, 2)
+  discountAmount     Decimal             @default(0) @db.Decimal(14, 2)
+  total              Decimal             @db.Decimal(14, 2)
+  productId          Int?
+  quote              Quote               @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  product            Product?            @relation(fields: [productId], references: [id], onDelete: SetNull)
   tripItineraryItems TripItineraryItem[] @relation("QuoteItemSourceItinerary")
 
   @@index([quoteId, position])
@@ -471,18 +471,18 @@ model QuoteNotification {
 }
 
 model Product {
-  id               Int      @id @default(autoincrement())
+  id               Int           @id @default(autoincrement())
   name             String
   description      String?
   sku              String?
-  defaultUnitPrice Decimal  @default(0) @db.Decimal(14, 2)
-  currency         String   @default("USD")
-  taxable          Boolean  @default(true)
-  archived         Boolean  @default(false)
+  defaultUnitPrice Decimal       @default(0) @db.Decimal(14, 2)
+  currency         String        @default("USD")
+  taxable          Boolean       @default(true)
+  archived         Boolean       @default(false)
   createdById      Int
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  createdBy        User     @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  createdBy        User          @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   quoteItems       QuoteItem[]
   invoiceItems     InvoiceItem[]
 
@@ -537,7 +537,7 @@ model QuoteSequence {
 }
 
 model BrandProfile {
-  id           Int      @id @default(autoincrement())
+  id           Int       @id @default(autoincrement())
   name         String
   companyName  String?
   addressLine1 String?
@@ -551,13 +551,13 @@ model BrandProfile {
   website      String?
   logo         Bytes?
   logoMimeType String?
-  primaryColor String   @default("#03458f")
-  isDefault    Boolean  @default(false)
-  archived     Boolean  @default(false)
+  primaryColor String    @default("#03458f")
+  isDefault    Boolean   @default(false)
+  archived     Boolean   @default(false)
   createdById  Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  createdBy    User     @relation("BrandProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  createdBy    User      @relation("BrandProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   quotes       Quote[]
   invoices     Invoice[]
 
@@ -566,45 +566,45 @@ model BrandProfile {
 }
 
 model Invoice {
-  id             Int       @id @default(autoincrement())
-  number         String    @unique
-  customerId     Int
-  createdById    Int
-  approverId     Int?
-  brandProfileId Int?
-  sourceQuoteId  Int?
+  id                  Int                   @id @default(autoincrement())
+  number              String                @unique
+  customerId          Int
+  createdById         Int
+  approverId          Int?
+  brandProfileId      Int?
+  sourceQuoteId       Int?
   // Draft | Pending Approval | Approved | Declined | Sent | Partial | Paid | Void
-  status         String    @default("Draft")
-  decisionNote   String?
-  submittedAt    DateTime?
-  decidedAt      DateTime?
-  issueDate      DateTime
-  dueDate        DateTime
-  currency       String    @default("USD")
-  taxRate        Decimal   @default(0) @db.Decimal(6, 4)
-  discountType   String    @default("none")
-  discountValue  Decimal   @default(0) @db.Decimal(14, 2)
-  discountAmount Decimal   @default(0) @db.Decimal(14, 2)
-  subtotal       Decimal   @default(0) @db.Decimal(14, 2)
-  tax            Decimal   @default(0) @db.Decimal(14, 2)
-  total          Decimal   @default(0) @db.Decimal(14, 2)
-  amountPaid     Decimal   @default(0) @db.Decimal(14, 2)
-  notes          String?
-  terms          String?
-  sentAt         DateTime?
-  paidAt         DateTime?
+  status              String                @default("Draft")
+  decisionNote        String?
+  submittedAt         DateTime?
+  decidedAt           DateTime?
+  issueDate           DateTime
+  dueDate             DateTime
+  currency            String                @default("USD")
+  taxRate             Decimal               @default(0) @db.Decimal(6, 4)
+  discountType        String                @default("none")
+  discountValue       Decimal               @default(0) @db.Decimal(14, 2)
+  discountAmount      Decimal               @default(0) @db.Decimal(14, 2)
+  subtotal            Decimal               @default(0) @db.Decimal(14, 2)
+  tax                 Decimal               @default(0) @db.Decimal(14, 2)
+  total               Decimal               @default(0) @db.Decimal(14, 2)
+  amountPaid          Decimal               @default(0) @db.Decimal(14, 2)
+  notes               String?
+  terms               String?
+  sentAt              DateTime?
+  paidAt              DateTime?
   // QuickBooks Online Invoice.Id once mirrored there.
   quickbooksInvoiceId String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy      User      @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  approver       User?     @relation("InvoiceApprover", fields: [approverId], references: [id], onDelete: SetNull)
-  brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
-  sourceQuote    Quote?    @relation("QuoteInvoices", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
-  items          InvoiceItem[]
-  payments       InvoicePayment[]
-  notifications  InvoiceNotification[]
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  customer            Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy           User                  @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approver            User?                 @relation("InvoiceApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  brandProfile        BrandProfile?         @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
+  sourceQuote         Quote?                @relation("QuoteInvoices", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
+  items               InvoiceItem[]
+  payments            InvoicePayment[]
+  notifications       InvoiceNotification[]
 
   @@index([customerId])
   @@index([status, dueDate])
@@ -614,19 +614,19 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id             Int     @id @default(autoincrement())
+  id             Int      @id @default(autoincrement())
   invoiceId      Int
   position       Int
   description    String
-  quantity       Decimal @db.Decimal(12, 2)
-  unitPrice      Decimal @db.Decimal(14, 2)
-  taxable        Boolean @default(true)
-  discountType   String  @default("none")
-  discountValue  Decimal @default(0) @db.Decimal(14, 2)
-  discountAmount Decimal @default(0) @db.Decimal(14, 2)
-  total          Decimal @db.Decimal(14, 2)
+  quantity       Decimal  @db.Decimal(12, 2)
+  unitPrice      Decimal  @db.Decimal(14, 2)
+  taxable        Boolean  @default(true)
+  discountType   String   @default("none")
+  discountValue  Decimal  @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal  @default(0) @db.Decimal(14, 2)
+  total          Decimal  @db.Decimal(14, 2)
   productId      Int?
-  invoice        Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([invoiceId, position])
@@ -634,20 +634,20 @@ model InvoiceItem {
 }
 
 model InvoicePayment {
-  id          Int      @id @default(autoincrement())
-  invoiceId   Int
-  amount      Decimal  @db.Decimal(14, 2)
-  method      String   @default("Bank transfer")
-  reference   String?
-  note        String?
-  paidAt      DateTime
+  id                  Int      @id @default(autoincrement())
+  invoiceId           Int
+  amount              Decimal  @db.Decimal(14, 2)
+  method              String   @default("Bank transfer")
+  reference           String?
+  note                String?
+  paidAt              DateTime
   // QuickBooks Online Payment.Id when synced; sync error message when not.
   quickbooksPaymentId String?
   quickbooksSyncError String?
-  createdById Int
-  createdAt   DateTime @default(now())
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  createdBy   User     @relation("InvoicePaymentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById         Int
+  createdAt           DateTime @default(now())
+  invoice             Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdBy           User     @relation("InvoicePaymentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([invoiceId, paidAt])
 }
@@ -686,26 +686,26 @@ model QuickBooksConnection {
 }
 
 model Trip {
-  id            Int       @id @default(autoincrement())
-  reference     String    @unique
-  trackingCode  String    @unique
+  id            Int                 @id @default(autoincrement())
+  reference     String              @unique
+  trackingCode  String              @unique
   customerId    Int
-  sourceQuoteId Int?      @unique
+  sourceQuoteId Int?                @unique
   createdById   Int
   ownerId       Int?
   title         String
   description   String?
-  status        String    @default("Draft")
+  status        String              @default("Draft")
   startDate     DateTime?
   endDate       DateTime?
-  currency      String    @default("USD")
+  currency      String              @default("USD")
   notes         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  sourceQuote   Quote?    @relation("QuoteSourceTrip", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
-  createdBy     User      @relation("TripCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  owner         User?     @relation("TripOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  customer      Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  sourceQuote   Quote?              @relation("QuoteSourceTrip", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
+  createdBy     User                @relation("TripCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  owner         User?               @relation("TripOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   items         TripItineraryItem[]
   assignments   TripAssignment[]
 
@@ -716,14 +716,14 @@ model Trip {
 }
 
 model TripItineraryItem {
-  id                    Int       @id @default(autoincrement())
+  id                    Int                             @id @default(autoincrement())
   tripId                Int
   position              Int
-  itemType              String    @default("activity")
+  itemType              String                          @default("activity")
   description           String
   subtitle              String?
-  quantity              Decimal   @db.Decimal(12, 2)
-  unitPrice             Decimal?  @db.Decimal(14, 2)
+  quantity              Decimal                         @db.Decimal(12, 2)
+  unitPrice             Decimal?                        @db.Decimal(14, 2)
   completedAt           DateTime?
   sourceQuoteItemId     Int?
   scheduledAt           DateTime?
@@ -734,8 +734,8 @@ model TripItineraryItem {
   reminderSentAt        DateTime?
   imageUrl              String?
   confirmationCode      String?
-  trip                  Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  sourceQuoteItem       QuoteItem? @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
+  trip                  Trip                            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  sourceQuoteItem       QuoteItem?                      @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
   notifications         TripItineraryItemNotification[]
 
   @@index([tripId, position])
@@ -745,12 +745,12 @@ model TripItineraryItem {
 }
 
 model TripItineraryItemNotification {
-  id        Int      @id @default(autoincrement())
+  id        Int               @id @default(autoincrement())
   userId    Int
   itemId    Int
   type      String
   message   String
-  createdAt DateTime @default(now())
+  createdAt DateTime          @default(now())
   readAt    DateTime?
   item      TripItineraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -766,12 +766,12 @@ model TripSequence {
 // --- Task assignment: fleet & protection resources allocated to trips ---
 
 model Vehicle {
-  id           Int      @id @default(autoincrement())
-  registration String   @unique
+  id           Int              @id @default(autoincrement())
+  registration String           @unique
   make         String?
   model        String?
-  type         String   @default("Sedan")
-  status       String   @default("Available")
+  type         String           @default("Sedan")
+  status       String           @default("Available")
   capacity     Int?
   notes        String?
   photoName    String?
@@ -779,9 +779,9 @@ model Vehicle {
   photoSize    Int?
   photoContent Bytes?
   createdById  Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  createdBy    User     @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  createdBy    User             @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   assignments  TripAssignment[]
 
   @@index([status])
@@ -789,20 +789,20 @@ model Vehicle {
 }
 
 model Driver {
-  id            Int      @id @default(autoincrement())
+  id            Int              @id @default(autoincrement())
   name          String
   phone         String?
   licenseNumber String?
-  status        String   @default("Available")
+  status        String           @default("Available")
   notes         String?
   photoName     String?
   photoMime     String?
   photoSize     Int?
   photoContent  Bytes?
   createdById   Int
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     User     @relation("DriverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  createdBy     User             @relation("DriverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   assignments   TripAssignment[]
 
   @@index([status])
@@ -810,22 +810,22 @@ model Driver {
 }
 
 model Officer {
-  id          Int      @id @default(autoincrement())
-  name        String
-  callSign    String?
-  grade       String   @default("CPO")
-  phone       String?
-  status      String   @default("Available")
-  notes       String?
+  id           Int              @id @default(autoincrement())
+  name         String
+  callSign     String?
+  grade        String           @default("CPO")
+  phone        String?
+  status       String           @default("Available")
+  notes        String?
   photoName    String?
   photoMime    String?
   photoSize    Int?
   photoContent Bytes?
-  createdById Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  createdBy   User     @relation("OfficerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  assignments TripAssignment[]
+  createdById  Int
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  createdBy    User             @relation("OfficerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments  TripAssignment[]
 
   @@index([status])
   @@index([name])
@@ -928,13 +928,13 @@ model RateLimitBucket {
 }
 
 model Conversation {
-  id          Int      @id @default(autoincrement())
-  type        String   @default("direct")
+  id          Int                  @id @default(autoincrement())
+  type        String               @default("direct")
   title       String?
   createdById Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  createdBy   User     @relation("ConversationCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  createdBy   User                 @relation("ConversationCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   members     ConversationMember[]
   messages    Message[]
 
@@ -942,11 +942,11 @@ model Conversation {
 }
 
 model ConversationMember {
-  id             Int       @id @default(autoincrement())
+  id             Int          @id @default(autoincrement())
   conversationId Int
   userId         Int
   lastReadAt     DateTime?
-  joinedAt       DateTime  @default(now())
+  joinedAt       DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -955,13 +955,13 @@ model ConversationMember {
 }
 
 model Message {
-  id             Int      @id @default(autoincrement())
+  id             Int                   @id @default(autoincrement())
   conversationId Int
   senderId       Int
   body           String
-  createdAt      DateTime @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  createdAt      DateTime              @default(now())
+  conversation   Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User                  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
   notifications  MessageNotification[]
 
   @@index([conversationId, createdAt])
@@ -984,15 +984,15 @@ model MessageNotification {
 }
 
 model Feedback {
-  id          Int      @id @default(autoincrement())
+  id          Int               @id @default(autoincrement())
   title       String
   description String
-  category    String   @default("Improvement")
-  status      String   @default("New")
+  category    String            @default("Improvement")
+  status      String            @default("New")
   authorId    Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  author      User     @relation("FeedbackAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  author      User              @relation("FeedbackAuthor", fields: [authorId], references: [id], onDelete: Cascade)
   upvotes     FeedbackUpvote[]
   comments    FeedbackComment[]
 
@@ -1025,10 +1025,10 @@ model FeedbackComment {
 }
 
 model DriverLicense {
-  id              Int      @id @default(autoincrement())
+  id              Int       @id @default(autoincrement())
   driverName      String
   licenseNumber   String
-  category        String   @default("Class A")
+  category        String    @default("Class A")
   expiryDate      DateTime
   lastVerified    DateTime?
   notes           String?
@@ -1037,27 +1037,27 @@ model DriverLicense {
   documentSize    Int?
   documentContent Bytes?
   createdById     Int
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  createdBy       User     @relation("DriverLicenseCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  createdBy       User      @relation("DriverLicenseCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
 
   @@index([expiryDate])
   @@index([driverName])
 }
 
 model StoredFile {
-  id           Int      @id @default(autoincrement())
-  name         String
-  description  String?
-  tags         String[] @default([])
-  mimeType     String
-  size         Int
-  content      Bytes
-  uploadedById Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  uploadedBy   User     @relation("StoredFileUploadedBy", fields: [uploadedById], references: [id], onDelete: Cascade)
-  shares       StoredFileShare[]
+  id            Int                @id @default(autoincrement())
+  name          String
+  description   String?
+  tags          String[]           @default([])
+  mimeType      String
+  size          Int
+  content       Bytes
+  uploadedById  Int
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  uploadedBy    User               @relation("StoredFileUploadedBy", fields: [uploadedById], references: [id], onDelete: Cascade)
+  shares        StoredFileShare[]
   notifications FileNotification[]
 
   @@index([createdAt])
@@ -1065,10 +1065,10 @@ model StoredFile {
 }
 
 model StoredFileShare {
-  id        Int      @id @default(autoincrement())
+  id        Int        @id @default(autoincrement())
   fileId    Int
   userId    Int
-  createdAt DateTime @default(now())
+  createdAt DateTime   @default(now())
   file      StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1077,12 +1077,12 @@ model StoredFileShare {
 }
 
 model FileNotification {
-  id        Int       @id @default(autoincrement())
+  id        Int        @id @default(autoincrement())
   userId    Int
   fileId    Int
   type      String
   message   String
-  createdAt DateTime  @default(now())
+  createdAt DateTime   @default(now())
   readAt    DateTime?
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   file      StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
@@ -1091,7 +1091,7 @@ model FileNotification {
 }
 
 model CalendarEvent {
-  id                    Int       @id @default(autoincrement())
+  id                    Int                         @id @default(autoincrement())
   userId                Int
   title                 String
   description           String?
@@ -1099,14 +1099,14 @@ model CalendarEvent {
   tag                   String?
   startsAt              DateTime
   endsAt                DateTime?
-  allDay                Boolean   @default(false)
+  allDay                Boolean                     @default(false)
   reminderMinutesBefore Int?
   reminderAt            DateTime?
   reminderSentAt        DateTime?
   googleEventId         String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+  user                  User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   notifications         CalendarEventNotification[]
 
   @@index([userId, startsAt])
@@ -1114,12 +1114,12 @@ model CalendarEvent {
 }
 
 model CalendarEventNotification {
-  id        Int       @id @default(autoincrement())
+  id        Int           @id @default(autoincrement())
   userId    Int
   eventId   Int
   type      String
   message   String
-  createdAt DateTime  @default(now())
+  createdAt DateTime      @default(now())
   readAt    DateTime?
   user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   event     CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -1130,7 +1130,7 @@ model CalendarEventNotification {
 model ScheduleShift {
   id             Int      @id @default(autoincrement())
   employeeId     Int
-  date           String   // 'YYYY-MM-DD'
+  date           String // 'YYYY-MM-DD'
   type           String
   startTime      String?
   endTime        String?
@@ -1211,23 +1211,23 @@ model WhatsAppMessage {
 
 // Standard Operating Procedure — a controlled compliance document.
 model Sop {
-  id            Int      @id @default(autoincrement())
-  code          String   @unique // e.g. OPS-SAF-01
-  title         String
-  category      String   @default("Operations")
-  status        String   @default("Draft") // Draft | Review | Active | Archived
-  version       String   @default("v1.0")
-  ownerName     String? // accountable owner (free text)
-  description   String?
-  steps         String[] @default([]) // numbered procedure steps
-  effectiveDate DateTime?
-  reviewDate    DateTime? // next review due
-  createdById   Int
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     User      @relation("SopCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  id               Int                  @id @default(autoincrement())
+  code             String               @unique // e.g. OPS-SAF-01
+  title            String
+  category         String               @default("Operations")
+  status           String               @default("Draft") // Draft | Review | Active | Archived
+  version          String               @default("v1.0")
+  ownerName        String? // accountable owner (free text)
+  description      String?
+  steps            String[]             @default([]) // numbered procedure steps
+  effectiveDate    DateTime?
+  reviewDate       DateTime? // next review due
+  createdById      Int
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  createdBy        User                 @relation("SopCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   acknowledgements SopAcknowledgement[]
-  revisions     SopRevision[]
+  revisions        SopRevision[]
 
   @@index([status])
   @@index([category])
@@ -1265,28 +1265,28 @@ model SopRevision {
 
 // A workforce / HR record. Standalone, with an optional link to a login (User) account.
 model Personnel {
-  id           Int      @id @default(autoincrement())
+  id           Int       @id @default(autoincrement())
   name         String
   email        String?
   phone        String?
   role         String? // job title
-  department   String   @default("Operations")
-  status       String   @default("Active") // Active | On Leave | Remote | Terminated
+  department   String    @default("Operations")
+  status       String    @default("Active") // Active | On Leave | Remote | Terminated
   location     String?
   manager      String? // manager name (free text)
   joinDate     DateTime?
-  skills       String[] @default([])
+  skills       String[]  @default([])
   notes        String?
-  userId       Int?     @unique // optional one-to-one link to a login account
+  userId       Int?      @unique // optional one-to-one link to a login account
   photoName    String?
   photoMime    String?
   photoSize    Int?
   photoContent Bytes?
   createdById  Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  createdBy    User     @relation("PersonnelCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  user         User?    @relation("PersonnelUser", fields: [userId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  createdBy    User      @relation("PersonnelCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  user         User?     @relation("PersonnelUser", fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([department])
   @@index([status])
@@ -1311,17 +1311,17 @@ model Note {
 
 // A tracked agreement/contract with a renewal window (consultants, vendors, retainers).
 model Contract {
-  id               Int      @id @default(autoincrement())
-  reference        String   @unique // e.g. CTR-9901
+  id               Int       @id @default(autoincrement())
+  reference        String    @unique // e.g. CTR-9901
   counterpartyName String // consultant / vendor / supplier
   email            String?
   department       String?
-  type             String   @default("Fixed Term") // Fixed Term | Retainer | Project Based
-  status           String   @default("Active") // Active | In Renewal | Renewed | Cancelled
+  type             String    @default("Fixed Term") // Fixed Term | Retainer | Project Based
+  status           String    @default("Active") // Active | In Renewal | Renewed | Cancelled
   startDate        DateTime
   endDate          DateTime
   value            Int? // contract value in whole currency units
-  currency         String   @default("USD")
+  currency         String    @default("USD")
   lastRenewalDate  DateTime?
   notes            String?
   documentName     String?
@@ -1329,12 +1329,25 @@ model Contract {
   documentSize     Int?
   documentContent  Bytes?
   createdById      Int
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  createdBy        User     @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdBy        User      @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   deals            Deal[]
 
   @@index([endDate])
   @@index([status])
   @@index([counterpartyName])
+}
+
+// Admin-tunable upload size limits in whole megabytes. Single row (id = 1);
+// defaults mirror the previously hardcoded per-route limits.
+model UploadLimitSettings {
+  id          Int      @id @default(1)
+  fileMb      Int      @default(25)
+  photoMb     Int      @default(8)
+  documentMb  Int      @default(10)
+  audioMb     Int      @default(12)
+  logoMb      Int      @default(1)
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
 }
