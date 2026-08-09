@@ -2,7 +2,7 @@
 
 **LA-ERP** is a modular, role-controlled operations platform that brings sales,
 finance, fleet, workforce, communication, and compliance into a single
-dashboard. It ships with **40 built-in modules** that administrators enable per
+dashboard. It ships with **42 built-in modules** that administrators enable per
 role, so every user sees only the tools they're meant to use.
 
 Built on **Next.js 16** (App Router), **React 19**, **TypeScript**, and
@@ -34,12 +34,18 @@ Built on **Next.js 16** (App Router), **React 19**, **TypeScript**, and
 
 - **Secure by default** — revocable, database-backed JWT sessions; no public
   self-signup; accounts are created and managed by administrators.
+- **Hardened surface** — security response headers (CSP, HSTS, frame/sniff
+  protection), safe serving of user-uploaded files, per-user rate limits, and
+  admin-tunable upload size limits.
 - **Role & permission control** — every action is checked server-side against
   the user's role and permissions (RBAC).
+- **Sales-to-cash** — a CRM pipeline (customers, deals, activities) that flows
+  into quotes, then into invoices with an approval workflow and optional
+  QuickBooks sync.
 - **Audit visibility** — authentication and admin actions are recorded to an
-  audit log.
+  audit log with server-side filtering and CSV export.
 - **Real-time** — live updates and in-app notifications across modules.
-- **Modular** — 40 modules across 13 categories, enabled per role.
+- **Modular** — 42 modules across 13 categories, enabled per role.
 - **Document generation** — branded PDF quotes and invoices via
   `@react-pdf/renderer`.
 
@@ -77,10 +83,13 @@ seeded into the database. Administrators grant module access per role.
   invoices.
 
 ### Finance
-- **Invoices** — create and send client invoices, record payments, track
-  overdue balances, generate PDFs, and create invoices from approved quotes.
-- **Customers** — accounts-receivable view with customer balances, overdue
-  ageing, and statements.
+- **Invoices** — create and send client invoices with an approval workflow
+  (submit → approve/decline → send), record payments, track overdue balances,
+  generate PDFs, create invoices from approved quotes, and optionally sync with
+  QuickBooks Online.
+- **Customers** — CRM and accounts-receivable in one: customer accounts, a deal
+  pipeline with stages, an activity feed, plus balances, overdue ageing, and
+  statements.
 
 ### Operations
 - **Trip Planning** — turn approved quotes into scheduled trips with
@@ -157,6 +166,10 @@ seeded into the database. Administrators grant module access per role.
   can be revoked at any time (logout, role change, status change).
 - **Validation at the edge** — request payloads are validated with Zod before
   they reach domain logic.
+- **Hardened responses** — security headers (CSP, HSTS, `X-Frame-Options`,
+  `X-Content-Type-Options`) are set in `next.config.ts`; user-uploaded files are
+  served through `lib/file-response.ts`, which forces unknown types to download
+  rather than render inline; expensive routes are rate-limited via the database.
 
 ---
 
@@ -168,7 +181,7 @@ app/
   api/           Route handlers (see API overview)
   auth/          Sign-in flow
   dashboard/     Authenticated dashboard shell
-  modules/       Per-module front-ends (40 modules + _components)
+  modules/       Per-module front-ends (42 modules + _components)
   ui/            Shared UI primitives
   layout.tsx     Root layout
   globals.css    Tailwind entry
@@ -241,6 +254,8 @@ The seed step creates or updates the bootstrap administrator from these values.
 | `OPENSKY_USERNAME`, `OPENSKY_PASSWORD` | Flight Tracker (OpenSky)  |
 | `ZELLO_*`                         | Radio / Zello (see below) |
 | `WACLI_BIN`                       | WhatsApp (path to the `wacli` binary) |
+| `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online integration |
+| `QUICKBOOKS_REDIRECT_URI`, `QUICKBOOKS_ENVIRONMENT` | QuickBooks OAuth callback & `sandbox`/`production` |
 
 Modules whose integration variables are unset degrade gracefully — they remain
 visible but report that they need configuration.
@@ -253,10 +268,12 @@ The data model lives in [`prisma/schema.prisma`](prisma/schema.prisma) (~50
 models). Major groups:
 
 - **Identity & access** — `User`, `Role`, `Permission`, `RolePermission`,
-  `UserRole`, `Module`, `UserModule`, `Session`, `AuditLog`, `RateLimitBucket`.
-- **Sales & finance** — `Customer`, `Quote`, `QuoteItem`, `QuoteTemplate`,
-  `Product`, `BrandProfile`, `Invoice`, `InvoiceItem`, `InvoicePayment`, plus
-  `*Sequence` models for human-readable numbering.
+  `UserRole`, `Module`, `UserModule`, `Session`, `AuditLog`, `RateLimitBucket`,
+  `UploadLimitSettings`.
+- **Sales & finance** — `Customer`, `Deal`, `CrmActivity`, `Quote`, `QuoteItem`,
+  `QuoteTemplate`, `Product`, `BrandProfile`, `Invoice`, `InvoiceItem`,
+  `InvoicePayment`, `QuickBooksConnection`, plus `*Sequence` models for
+  human-readable numbering.
 - **Operations** — `Trip`, `TripItineraryItem`, `ScheduleShift`,
   `DriverLicense`.
 - **Communication** — `Conversation`, `ConversationMember`, `Message`,
@@ -287,10 +304,14 @@ npm run db:seed                  # seed roles, permissions, modules, admin
   - `viewer` — read-only access to assigned content.
 - **Permissions:** `user:create/read/update/delete`, `role:manage`,
   `audit:read`, `content:create/read/update/delete`.
+- **Admin controls (`/admin`):** create, suspend, and delete users; assign roles
+  and modules; **reset any user's password** (which revokes the target's other
+  sessions); adjust **upload size limits** per category from the Settings tab;
+  and review the audit log.
 - **Safeguards:** passwords hashed with `bcryptjs`; auth and admin mutation
   routes are rate-limited via the database; audit events written for login
-  success/failure, logout, and user create/update/delete; the last administrator
-  cannot be deleted or demoted.
+  success/failure, logout, user create/update/delete, password resets, and
+  upload-limit changes; the last administrator cannot be deleted or demoted.
 
 ---
 
@@ -301,10 +322,12 @@ Route handlers live under `app/api/`, grouped by domain:
 | Group            | Purpose                                       |
 | ---------------- | --------------------------------------------- |
 | `auth`           | Login, logout, session                        |
-| `admin`          | User management and audit log                 |
+| `admin`          | User management, password reset, upload limits, audit log |
 | `users`          | User-facing account operations                |
+| `crm`            | Customers, deals, and activities              |
+| `quickbooks`     | QuickBooks OAuth connect, status, disconnect  |
 | `quotes`         | Quotes, customers, products, templates, brand profiles, PDF |
-| `invoices`       | Invoices, payments, PDF, create-from-quote    |
+| `invoices`       | Invoices, approval workflow, payments, PDF, create-from-quote |
 | `trips`          | Trip planning & itineraries                   |
 | `planning`       | Scheduling                                    |
 | `calendar`       | Calendar events                               |
@@ -342,6 +365,12 @@ to keep the inbox current.
 ### AI Chatbot
 Set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) to enable AI-assisted
 search and drafting.
+
+### QuickBooks Online
+Set `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_REDIRECT_URI`,
+and `QUICKBOOKS_ENVIRONMENT` (`sandbox` or `production`). An admin (or a holder of
+the invoicing module) connects an account via OAuth from the app; the connection
+is stored per-organization and can be disconnected at any time.
 
 ---
 
@@ -383,6 +412,18 @@ Tests live in `tests/` and run on Vitest.
 5. Build and start: `npm run build && npm run start`.
 
 Configure any optional integration variables for the modules you intend to use.
+
+**Hardening notes:**
+
+- The Content-Security-Policy in `next.config.ts` ships as
+  `Content-Security-Policy-Report-Only`. Verify the Google Maps and Sign-In
+  flows raise no violations in the browser console, then rename the header to
+  `Content-Security-Policy` to enforce it.
+- If you raise the admin-configurable upload limits, make sure your reverse
+  proxy (e.g. Caddy) permits a request body at least that large, or uploads are
+  rejected before reaching the app.
+- Never commit real secrets. If a credential was ever committed, rotate it —
+  removing it from history does not protect clones taken beforehand.
 
 ---
 
