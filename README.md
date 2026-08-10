@@ -2,7 +2,7 @@
 
 **LA-ERP** is a modular, role-controlled operations platform that brings sales,
 finance, fleet, workforce, communication, and compliance into a single
-dashboard. It ships with **42 built-in modules** that administrators enable per
+dashboard. It ships with **44 built-in modules** that administrators enable per
 role, so every user sees only the tools they're meant to use.
 
 Built on **Next.js 16** (App Router), **React 19**, **TypeScript**, and
@@ -45,7 +45,7 @@ Built on **Next.js 16** (App Router), **React 19**, **TypeScript**, and
 - **Audit visibility** — authentication and admin actions are recorded to an
   audit log with server-side filtering and CSV export.
 - **Real-time** — live updates and in-app notifications across modules.
-- **Modular** — 42 modules across 13 categories, enabled per role.
+- **Modular** — 44 modules across 13 categories, enabled per role.
 - **Document generation** — branded PDF quotes and invoices via
   `@react-pdf/renderer`.
 
@@ -110,6 +110,8 @@ seeded into the database. Administrators grant module access per role.
 ### Communication
 - **Communication** — internal operational messaging.
 - **WhatsApp** — WhatsApp-linked conversations and replies.
+- **Telegram** — Telegram bot conversations and group chats.
+- **Signal** — Signal direct messages and groups via a linked account.
 - **Radio / Zello** — dispatch-style push-to-talk voice workflows.
 - **Phone** — calling workflows and call activity.
 - **Contact List** — operational contacts and external relationships.
@@ -181,7 +183,7 @@ app/
   api/           Route handlers (see API overview)
   auth/          Sign-in flow
   dashboard/     Authenticated dashboard shell
-  modules/       Per-module front-ends (42 modules + _components)
+  modules/       Per-module front-ends (44 modules + _components)
   ui/            Shared UI primitives
   layout.tsx     Root layout
   globals.css    Tailwind entry
@@ -254,6 +256,8 @@ The seed step creates or updates the bootstrap administrator from these values.
 | `OPENSKY_USERNAME`, `OPENSKY_PASSWORD` | Flight Tracker (OpenSky)  |
 | `ZELLO_*`                         | Radio / Zello (see below) |
 | `WACLI_BIN`                       | WhatsApp (path to the `wacli` binary) |
+| `TELEGRAM_BOT_TOKEN`              | Telegram (bot token from @BotFather) |
+| `SIGNAL_CLI_BIN`, `SIGNAL_CLI_ACCOUNT` | Signal (path to `signal-cli`; linked/registered E.164 number) |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online integration |
 | `QUICKBOOKS_REDIRECT_URI`, `QUICKBOOKS_ENVIRONMENT` | QuickBooks OAuth callback & `sandbox`/`production` |
 
@@ -337,6 +341,8 @@ Route handlers live under `app/api/`, grouped by domain:
 | `files`          | File upload & sharing                         |
 | `drivers`        | Driver licensing                              |
 | `whatsapp`       | WhatsApp inbox (via `wacli`)                  |
+| `telegram`       | Telegram inbox (Bot API): status, chats, thread, reply |
+| `signal`         | Signal inbox (via `signal-cli`): status, chats, thread, reply |
 | `zello`          | Radio / Zello activity                        |
 | `flight-tracker`, `flight-radar` | Flight status / tracking      |
 | `ai-chatbot`     | AI assistant                                  |
@@ -361,6 +367,20 @@ issuer/private key for token auth) or in-browser settings. Relevant variables:
 Backed by the external `wacli` CLI. Set `WACLI_BIN` to the binary path. The CLI
 requires a one-time `wacli auth` and an always-on `wacli sync --follow` process
 to keep the inbox current.
+
+### Telegram
+Backed by the Telegram Bot API. Create a bot with [@BotFather](https://t.me/BotFather),
+set `TELEGRAM_BOT_TOKEN`, then message the bot (or add it to a group with group
+privacy disabled). Conversations accumulate as messages arrive; because the Bot
+API has no history endpoint, the module keeps an in-process store, so run the app
+as a long-lived server (not serverless) to retain it.
+
+### Signal
+Backed by the external [`signal-cli`](https://github.com/AsamK/signal-cli). Link or
+register an account (`signal-cli link` / `register`), set `SIGNAL_CLI_ACCOUNT` to its
+E.164 number, and `SIGNAL_CLI_BIN` if the binary isn't on `PATH`. Like WhatsApp this
+needs an always-on host; the module drains `signal-cli receive` into an in-process
+store as messages arrive.
 
 ### AI Chatbot
 Set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) to enable AI-assisted

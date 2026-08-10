@@ -99,6 +99,20 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     sortOrder: 14,
   },
   {
+    slug: 'telegram',
+    name: 'Telegram',
+    description: 'Send and receive Telegram messages and group chats via a connected bot.',
+    category: 'Communication',
+    sortOrder: 44,
+  },
+  {
+    slug: 'signal',
+    name: 'Signal',
+    description: 'Send and receive Signal direct messages and groups via a linked account.',
+    category: 'Communication',
+    sortOrder: 45,
+  },
+  {
     slug: 'phone',
     name: 'Phone',
     description: 'Track direct calling workflows, contact actions, and call activity.',
