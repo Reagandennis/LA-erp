@@ -431,6 +431,7 @@ function BrandProfileForm({
     website: initial?.website ?? '',
     primaryColor: initial?.primaryColor ?? '#03458f',
     isDefault: initial?.isDefault ?? false,
+    accountingProvider: initial?.accountingProvider ?? 'none',
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -457,6 +458,7 @@ function BrandProfileForm({
         website: form.website || null,
         primaryColor: form.primaryColor,
         isDefault: form.isDefault,
+        accountingProvider: form.accountingProvider,
       };
 
       const url = initial
@@ -624,6 +626,20 @@ function BrandProfileForm({
                   className="flex-1 px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold font-mono focus:ring-2 focus:ring-primary"
                 />
               </div>
+            </Field>
+            <Field label="Accounting sync">
+              <select
+                value={form.accountingProvider}
+                onChange={(e) => update({ accountingProvider: e.target.value })}
+                className="mt-2 w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
+              >
+                <option value="none">None</option>
+                <option value="quickbooks">QuickBooks</option>
+                <option value="wave">Wave</option>
+              </select>
+              <p className="mt-1 text-[11px] font-medium text-gray-400">
+                Invoices &amp; quotes on this brand sync to the selected accounting system when sent.
+              </p>
             </Field>
           </div>
           <Field label="Logo (PNG, JPG, SVG, WebP — max 1MB)">

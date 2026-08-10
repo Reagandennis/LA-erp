@@ -18,6 +18,7 @@ export interface BrandProfileSummary {
   primaryColor: string;
   isDefault: boolean;
   archived: boolean;
+  accountingProvider: string;
   hasLogo: boolean;
   logoMimeType: string | null;
   createdAt: string;
@@ -39,6 +40,7 @@ export interface BrandProfileWriteInput {
   primaryColor?: string;
   isDefault?: boolean;
   archived?: boolean;
+  accountingProvider?: string;
 }
 
 interface BrandProfileRecord {
@@ -59,6 +61,7 @@ interface BrandProfileRecord {
   primaryColor: string;
   isDefault: boolean;
   archived: boolean;
+  accountingProvider: string;
   createdById: number;
   createdAt: Date;
   updatedAt: Date;
@@ -81,6 +84,7 @@ function serialize(record: BrandProfileRecord): BrandProfileSummary {
     primaryColor: record.primaryColor,
     isDefault: record.isDefault,
     archived: record.archived,
+    accountingProvider: record.accountingProvider,
     hasLogo: record.logo !== null,
     logoMimeType: record.logoMimeType,
     createdAt: record.createdAt.toISOString(),
@@ -143,6 +147,7 @@ export async function createBrandProfile(
       primaryColor: input.primaryColor ?? '#03458f',
       isDefault: input.isDefault ?? false,
       archived: input.archived ?? false,
+      accountingProvider: input.accountingProvider ?? 'none',
       createdById,
     };
     if (data.isDefault) {
@@ -176,6 +181,7 @@ export async function updateBrandProfile(
     if (input.website !== undefined) data.website = input.website;
     if (input.primaryColor !== undefined) data.primaryColor = input.primaryColor;
     if (input.archived !== undefined) data.archived = input.archived;
+    if (input.accountingProvider !== undefined) data.accountingProvider = input.accountingProvider;
     if (input.isDefault === true) {
       await txClient.updateMany({ where: { isDefault: true, id: { not: id } }, data: { isDefault: false } });
       data.isDefault = true;

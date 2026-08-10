@@ -260,6 +260,8 @@ The seed step creates or updates the bootstrap administrator from these values.
 | `SIGNAL_CLI_BIN`, `SIGNAL_CLI_ACCOUNT` | Signal (path to `signal-cli`; linked/registered E.164 number) |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online integration |
 | `QUICKBOOKS_REDIRECT_URI`, `QUICKBOOKS_ENVIRONMENT` | QuickBooks OAuth callback & `sandbox`/`production` |
+| `WAVE_CLIENT_ID`, `WAVE_CLIENT_SECRET` | Wave (waveapps.com) accounting — per-brand sync |
+| `WAVE_REDIRECT_URI`, `WAVE_BUSINESS_ID` | Wave OAuth callback & optional business pin |
 
 Modules whose integration variables are unset degrade gracefully — they remain
 visible but report that they need configuration.
@@ -391,6 +393,19 @@ Set `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_REDIRECT_URI
 and `QUICKBOOKS_ENVIRONMENT` (`sandbox` or `production`). An admin (or a holder of
 the invoicing module) connects an account via OAuth from the app; the connection
 is stored per-organization and can be disconnected at any time.
+
+### Wave (waveapps.com)
+Accounting sync is **per-brand**: on each brand profile (Quotes → Settings → Brand
+profiles) an admin picks an **Accounting sync** provider — `None`, `QuickBooks`, or
+`Wave`. Brands set to Wave push their invoices (and quotes as estimates) to Wave
+when the document is **sent**, with a manual re-sync available; other brands keep
+using QuickBooks.
+
+Requires a **paid Wave plan** (free "Starter" accounts can't authorize third-party
+API access) and an OAuth app registered at
+[developer.waveapps.com](https://developer.waveapps.com). Set `WAVE_CLIENT_ID`,
+`WAVE_CLIENT_SECRET`, `WAVE_REDIRECT_URI` (and optionally `WAVE_BUSINESS_ID`), then
+click **Connect Wave** in the Invoices module.
 
 ---
 

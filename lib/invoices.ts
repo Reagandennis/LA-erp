@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from './prisma';
 import { syncInvoicePaymentToQuickBooks, type QuickBooksSyncResult } from './quickbooks';
+import { syncInvoiceToWave } from './wave';
 import { computeQuoteTotals } from './quotes';
 
 export type InvoiceStatus =
@@ -415,6 +416,10 @@ export async function sendInvoice(id: number): Promise<InvoiceDetail | { error: 
     where: { id },
     data: { status: existing.status === 'Approved' ? 'Sent' : existing.status, sentAt: existing.sentAt ?? new Date() },
   });
+  // Mirror to Wave for brands routed there. No-op for other brands / when Wave
+  // isn't configured or connected; a sync failure is stored on the invoice
+  // (waveSyncError) and never blocks sending.
+  await syncInvoiceToWave(id);
   const fresh = await prisma.invoice.findUnique({ where: { id }, include: invoiceInclude });
   return serializeDetail(fresh!);
 }

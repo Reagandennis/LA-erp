@@ -27,6 +27,7 @@ interface InvoicesClientProps {
   invoiceableQuotes: InvoiceableQuote[];
   organization: OrganizationBranding;
   quickBooks: { configured: boolean; connected: boolean };
+  wave: { configured: boolean; connected: boolean };
   approvers: ApproverOption[];
 }
 
@@ -77,6 +78,7 @@ export default function InvoicesClient({
   invoiceableQuotes,
   organization,
   quickBooks,
+  wave,
   approvers,
 }: InvoicesClientProps) {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(initialInvoices);
@@ -198,6 +200,23 @@ export default function InvoicesClient({
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 QuickBooks connected
+              </span>
+            )}
+            {wave.configured && !wave.connected && (
+              <a
+                href="/api/wave/connect"
+                className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-semibold text-sky-700 transition-colors hover:bg-sky-100"
+              >
+                Connect Wave
+              </a>
+            )}
+            {wave.connected && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2.5 text-xs font-semibold text-sky-700"
+                title="Invoices & quotes on Wave-routed brands are mirrored to Wave when sent"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+                Wave connected
               </span>
             )}
             {invoiceableQuotes.length > 0 && (

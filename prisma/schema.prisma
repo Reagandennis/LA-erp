@@ -33,6 +33,7 @@ model User {
   createdDeals                   Deal[]                          @relation("DealCreatedBy")
   createdCrmActivities           CrmActivity[]                   @relation("CrmActivityCreatedBy")
   quickbooksConnections          QuickBooksConnection[]          @relation("QuickBooksConnectedBy")
+  waveConnections                WaveConnection[]                @relation("WaveConnectedBy")
   createdQuotes                  Quote[]                         @relation("QuoteCreatedBy")
   approvableQuotes               Quote[]                         @relation("QuoteApprover")
   quoteNotifications             QuoteNotification[]
@@ -285,6 +286,8 @@ model Customer {
   entity               String        @default("LADYASKARI")
   // QuickBooks Online Customer.Id once mirrored there.
   quickbooksCustomerId String?
+  // Wave (waveapps.com) Customer id once mirrored there.
+  waveCustomerId       String?
   createdById          Int
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
@@ -412,6 +415,9 @@ model Quote {
   submittedAt    DateTime?
   decidedAt      DateTime?
   sentAt         DateTime?
+  // Wave (waveapps.com) Estimate id once mirrored there, and the last sync error.
+  waveEstimateId String?
+  waveSyncError  String?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   customer       Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
@@ -537,29 +543,32 @@ model QuoteSequence {
 }
 
 model BrandProfile {
-  id           Int       @id @default(autoincrement())
-  name         String
-  companyName  String?
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  region       String?
-  postalCode   String?
-  country      String?
-  email        String?
-  phone        String?
-  website      String?
-  logo         Bytes?
-  logoMimeType String?
-  primaryColor String    @default("#03458f")
-  isDefault    Boolean   @default(false)
-  archived     Boolean   @default(false)
-  createdById  Int
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  createdBy    User      @relation("BrandProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  quotes       Quote[]
-  invoices     Invoice[]
+  id                 Int       @id @default(autoincrement())
+  name               String
+  companyName        String?
+  addressLine1       String?
+  addressLine2       String?
+  city               String?
+  region             String?
+  postalCode         String?
+  country            String?
+  email              String?
+  phone              String?
+  website            String?
+  logo               Bytes?
+  logoMimeType       String?
+  primaryColor       String    @default("#03458f")
+  isDefault          Boolean   @default(false)
+  archived           Boolean   @default(false)
+  // Which accounting system invoices/quotes on this brand sync to.
+  // 'none' | 'quickbooks' | 'wave'
+  accountingProvider String    @default("none")
+  createdById        Int
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  createdBy          User      @relation("BrandProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  quotes             Quote[]
+  invoices           Invoice[]
 
   @@index([archived, name])
   @@index([isDefault])
@@ -595,6 +604,9 @@ model Invoice {
   paidAt              DateTime?
   // QuickBooks Online Invoice.Id once mirrored there.
   quickbooksInvoiceId String?
+  // Wave (waveapps.com) Invoice id once mirrored there, and the last sync error.
+  waveInvoiceId       String?
+  waveSyncError       String?
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   customer            Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
@@ -683,6 +695,18 @@ model QuickBooksConnection {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   connectedBy          User     @relation("QuickBooksConnectedBy", fields: [connectedById], references: [id], onDelete: Restrict)
+}
+
+model WaveConnection {
+  id                   Int      @id @default(autoincrement())
+  businessId           String
+  accessToken          String
+  refreshToken         String
+  accessTokenExpiresAt DateTime
+  connectedById        Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  connectedBy          User     @relation("WaveConnectedBy", fields: [connectedById], references: [id], onDelete: Restrict)
 }
 
 model Trip {
@@ -1128,7 +1152,7 @@ model CalendarEventNotification {
 }
 
 model ScheduleShift {
-  id             Int      @id @default(autoincrement())
+  id             Int       @id @default(autoincrement())
   employeeId     Int
   date           String // 'YYYY-MM-DD'
   type           String
@@ -1144,10 +1168,10 @@ model ScheduleShift {
   totalTasks     Int?
   publishedAt    DateTime?
   createdById    Int?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  employee       User     @relation("ScheduleEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  createdBy      User?    @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  employee       User      @relation("ScheduleEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy      User?     @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   // No longer @@unique([employeeId, date]) — an employee can have multiple
   // shifts on the same day (split shifts, overlapping coverage).

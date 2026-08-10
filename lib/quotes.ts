@@ -3,6 +3,7 @@ import 'server-only';
 import { Prisma } from '@prisma/client';
 
 import { prisma } from './prisma';
+import { syncQuoteToWave } from './wave';
 
 export type QuoteStatus =
   | 'Draft'
@@ -743,6 +744,10 @@ export async function markQuoteSent(params: {
     where: { id: params.id },
     data: { status: 'Sent', sentAt: new Date() },
   });
+
+  // Mirror to Wave (as an estimate) for brands routed there. No-op otherwise;
+  // a sync failure is stored on the quote (waveSyncError) and never blocks send.
+  await syncQuoteToWave(params.id);
 
   const refreshed = await getQuoteClient().findUnique({
     where: { id: params.id },

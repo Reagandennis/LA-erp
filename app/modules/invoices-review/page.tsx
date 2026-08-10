@@ -6,6 +6,7 @@ import { listCustomers } from '@/lib/customers';
 import { listInvoiceApproverCandidates, listInvoiceableQuotes, listInvoices } from '@/lib/invoices';
 import { getOrganizationSettings } from '@/lib/organization';
 import { getQuickBooksStatus } from '@/lib/quickbooks';
+import { getWaveStatus } from '@/lib/wave';
 import { listProducts } from '@/lib/products';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
@@ -23,7 +24,7 @@ export default async function InvoicesReviewPage() {
     redirect('/dashboard');
   }
 
-  const [invoices, customers, products, brandProfiles, organization, invoiceableQuotes, quickBooks, approvers] =
+  const [invoices, customers, products, brandProfiles, organization, invoiceableQuotes, quickBooks, wave, approvers] =
     await Promise.all([
       listInvoices(),
       listCustomers(),
@@ -32,6 +33,7 @@ export default async function InvoicesReviewPage() {
       getOrganizationSettings(),
       listInvoiceableQuotes(),
       getQuickBooksStatus(),
+      getWaveStatus(),
       listInvoiceApproverCandidates(auth.user.id),
     ]);
 
@@ -59,6 +61,7 @@ export default async function InvoicesReviewPage() {
         hasLogo: organization.hasLogo,
       }}
       quickBooks={{ configured: quickBooks.configured, connected: quickBooks.connected }}
+      wave={{ configured: wave.configured, connected: wave.connected }}
       approvers={approvers}
     />
   );

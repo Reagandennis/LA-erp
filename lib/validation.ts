@@ -418,6 +418,7 @@ export const brandProfileCreateSchema = z.object({
   website: z.string().trim().max(200).optional().nullable(),
   primaryColor: hexColorSchema.default('#03458f'),
   isDefault: z.boolean().optional(),
+  accountingProvider: z.enum(['none', 'quickbooks', 'wave']).optional(),
 });
 
 export const brandProfileUpdateSchema = brandProfileCreateSchema
