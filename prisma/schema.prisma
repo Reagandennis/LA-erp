@@ -1136,16 +1136,22 @@ model ScheduleShift {
   endTime        String?
   timeLabel      String?
   statusLabel    String?
+  role           String?
+  location       String?
+  breakMinutes   Int?
   note           String?
   tasksCompleted Int?
   totalTasks     Int?
+  publishedAt    DateTime?
   createdById    Int?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   employee       User     @relation("ScheduleEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
   createdBy      User?    @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
-  @@unique([employeeId, date])
+  // No longer @@unique([employeeId, date]) — an employee can have multiple
+  // shifts on the same day (split shifts, overlapping coverage).
+  @@index([employeeId, date])
   @@index([date])
 }
 
