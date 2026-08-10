@@ -11,6 +11,7 @@ import { prisma } from '@/lib/prisma';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { getAccessibleModulesForUser, userHasRole } from '@/lib/user';
 import { DashboardHighlights } from '@/app/ui/dashboard-highlights';
+import { moduleIcon } from '@/app/ui/module-icons';
 
 export default async function DashboardPage() {
   const auth = await getServerAuth();
@@ -105,9 +106,7 @@ export default async function DashboardPage() {
                     {module.category}
                   </div>
                   <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center text-primary group-hover:bg-secondary/10 group-hover:text-secondary transition-colors">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
+                    {moduleIcon(module.slug)}
                   </div>
                 </div>
                 <h4 className="text-xl font-bold text-primary mb-2 group-hover:translate-x-1 transition-transform">{module.name}</h4>

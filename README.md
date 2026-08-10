@@ -2,7 +2,7 @@
 
 **LA-ERP** is a modular, role-controlled operations platform that brings sales,
 finance, fleet, workforce, communication, and compliance into a single
-dashboard. It ships with **44 built-in modules** that administrators enable per
+dashboard. It ships with **43 built-in modules** that administrators enable per
 role, so every user sees only the tools they're meant to use.
 
 Built on **Next.js 16** (App Router), **React 19**, **TypeScript**, and
@@ -45,7 +45,7 @@ Built on **Next.js 16** (App Router), **React 19**, **TypeScript**, and
 - **Audit visibility** — authentication and admin actions are recorded to an
   audit log with server-side filtering and CSV export.
 - **Real-time** — live updates and in-app notifications across modules.
-- **Modular** — 44 modules across 13 categories, enabled per role.
+- **Modular** — 43 modules across 13 categories, enabled per role.
 - **Document generation** — branded PDF quotes and invoices via
   `@react-pdf/renderer`.
 
@@ -183,7 +183,7 @@ app/
   api/           Route handlers (see API overview)
   auth/          Sign-in flow
   dashboard/     Authenticated dashboard shell
-  modules/       Per-module front-ends (44 modules + _components)
+  modules/       Per-module front-ends (43 modules + _components)
   ui/            Shared UI primitives
   layout.tsx     Root layout
   globals.css    Tailwind entry
