@@ -2,6 +2,7 @@ import 'server-only';
 
 import { Prisma } from '@prisma/client';
 
+import { addDays, dateKey, parseDateKey } from './date-grid';
 import { prisma } from './prisma';
 
 export type TripStatus = 'Draft' | 'Planned' | 'Active' | 'Completed' | 'Cancelled';
@@ -11,6 +12,16 @@ export const TRIP_STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active', 'Compl
 export type TripItemType = 'flight' | 'car' | 'hotel' | 'location' | 'activity';
 
 export interface TripItineraryItemDraft {
+  category?: string;
+  body?: string | null;
+  timeLabel?: string | null;
+  providerName?: string | null;
+  bookingUrl?: string | null;
+  phone?: string | null;
+  placeName?: string | null;
+  address?: string | null;
+  details?: Record<string, string> | null;
+  dayId?: number | null;
   itemType?: TripItemType;
   description: string;
   subtitle?: string | null;
@@ -25,10 +36,30 @@ export interface TripItineraryItemDraft {
   confirmationCode?: string | null;
 }
 
+export interface TripDaySummary {
+  id: number;
+  /** "YYYY-MM-DD", or null while the trip's dates are still TBD. */
+  dateKey: string | null;
+  /** Dense 1..N — the ordering key and the "Day 3" label. */
+  dayNumber: number;
+  title: string | null;
+  summary: string | null;
+}
+
 export interface TripItineraryItemSummary {
   id: number;
+  dayId: number | null;
   position: number;
   itemType: TripItemType;
+  category: string;
+  body: string | null;
+  timeLabel: string | null;
+  providerName: string | null;
+  bookingUrl: string | null;
+  phone: string | null;
+  placeName: string | null;
+  address: string | null;
+  details: Record<string, string> | null;
   description: string;
   subtitle: string | null;
   quantity: number;
@@ -67,6 +98,7 @@ export interface TripSummary {
 
 export interface TripDetail extends TripSummary {
   items: TripItineraryItemSummary[];
+  days: TripDaySummary[];
 }
 
 interface TripRecord {
@@ -91,13 +123,33 @@ interface TripRecord {
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
   items: TripItineraryItemRecord[];
+  days: TripDayRecord[];
   _count?: { assignments: number };
+}
+
+interface TripDayRecord {
+  id: number;
+  tripId: number;
+  dateKey: string | null;
+  dayNumber: number;
+  title: string | null;
+  summary: string | null;
 }
 
 interface TripItineraryItemRecord {
   id: number;
+  dayId: number | null;
   position: number;
   itemType: string;
+  category: string;
+  body: string | null;
+  timeLabel: string | null;
+  providerName: string | null;
+  bookingUrl: string | null;
+  phone: string | null;
+  placeName: string | null;
+  address: string | null;
+  details: unknown;
   description: string;
   subtitle: string | null;
   quantity: Prisma.Decimal;
@@ -125,6 +177,9 @@ const tripInclude = {
       { position: 'asc' as const },
     ],
   },
+  days: {
+    orderBy: [{ dayNumber: 'asc' as const }],
+  },
   _count: { select: { assignments: true } },
 };
 
@@ -144,8 +199,18 @@ type TripItineraryItemCollectionClient = {
   createMany: (args: {
     data: Array<{
       tripId: number;
+      dayId?: number | null;
       position: number;
       itemType?: string;
+      category?: string;
+      body?: string | null;
+      timeLabel?: string | null;
+      providerName?: string | null;
+      bookingUrl?: string | null;
+      phone?: string | null;
+      placeName?: string | null;
+      address?: string | null;
+      details?: unknown;
       description: string;
       subtitle?: string | null;
       quantity: Prisma.Decimal;
@@ -165,7 +230,27 @@ type TripItineraryItemCollectionClient = {
     where: { id: number };
     data: Record<string, unknown>;
   }) => Promise<TripItineraryItemRecord>;
+  updateMany: (args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }) => Promise<{ count: number }>;
   delete: (args: { where: { id: number } }) => Promise<TripItineraryItemRecord>;
+  deleteMany: (args: { where: Record<string, unknown> }) => Promise<{ count: number }>;
+};
+
+type TripDayCollectionClient = {
+  findMany: (args: {
+    where: { tripId: number };
+    orderBy?: Array<{ dayNumber?: 'asc' | 'desc' }>;
+  }) => Promise<TripDayRecord[]>;
+  findUnique: (args: { where: { id: number } }) => Promise<TripDayRecord | null>;
+  create: (args: { data: Record<string, unknown> }) => Promise<TripDayRecord>;
+  update: (args: { where: { id: number }; data: Record<string, unknown> }) => Promise<TripDayRecord>;
+  updateMany: (args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }) => Promise<{ count: number }>;
+  delete: (args: { where: { id: number } }) => Promise<TripDayRecord>;
 };
 
 type TripSequenceCollectionClient = {
@@ -205,6 +290,7 @@ function txClients(tx: unknown) {
   const handle = tx as unknown as {
     trip: TripCollectionClient;
     tripItineraryItem: TripItineraryItemCollectionClient;
+    tripDay: TripDayCollectionClient;
     tripSequence: TripSequenceCollectionClient;
     trackingSequence: TrackingSequenceCollectionClient;
     quote: QuoteForTripUpdateClient;
@@ -212,6 +298,7 @@ function txClients(tx: unknown) {
   return {
     trip: handle.trip,
     tripItineraryItem: handle.tripItineraryItem,
+    tripDay: handle.tripDay,
     tripSequence: handle.tripSequence,
     trackingSequence: handle.trackingSequence,
     quote: handle.quote,
@@ -232,8 +319,21 @@ function asDecimal(value: number | Prisma.Decimal): Prisma.Decimal {
 function serializeItem(item: TripItineraryItemRecord): TripItineraryItemSummary {
   return {
     id: item.id,
+    dayId: item.dayId,
     position: item.position,
     itemType: (item.itemType as TripItemType) ?? 'activity',
+    category: item.category ?? 'activity',
+    body: item.body,
+    timeLabel: item.timeLabel,
+    providerName: item.providerName,
+    bookingUrl: item.bookingUrl,
+    phone: item.phone,
+    placeName: item.placeName,
+    address: item.address,
+    details:
+      item.details && typeof item.details === 'object' && !Array.isArray(item.details)
+        ? (item.details as Record<string, string>)
+        : null,
     description: item.description,
     subtitle: item.subtitle,
     quantity: toNumber(item.quantity) ?? 0,
@@ -287,8 +387,22 @@ function serializeSummary(record: TripRecord): TripSummary {
   };
 }
 
+function serializeDay(day: TripDayRecord): TripDaySummary {
+  return {
+    id: day.id,
+    dateKey: day.dateKey,
+    dayNumber: day.dayNumber,
+    title: day.title,
+    summary: day.summary,
+  };
+}
+
 function serializeDetail(record: TripRecord): TripDetail {
-  return { ...serializeSummary(record), items: record.items.map(serializeItem) };
+  return {
+    ...serializeSummary(record),
+    items: record.items.map(serializeItem),
+    days: (record.days ?? []).map(serializeDay),
+  };
 }
 
 async function reserveSequence(
@@ -506,9 +620,20 @@ export async function addTripItems(params: {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
 
+  const dayIds = new Set((existing.days ?? []).map((day) => day.id));
+  if (params.items.some((item) => item.dayId != null && !dayIds.has(item.dayId))) {
+    return { error: 'Day not found on this trip', status: 400 };
+  }
+
   return prisma.$transaction(async (tx) => {
     const { trip, tripItineraryItem } = txClients(tx);
-    const startPosition = existing.items.length;
+    // One past the highest position in use, not the item count. Deleting an
+    // item leaves a gap, so counting would hand the new item a position that
+    // an existing one already holds.
+    const startPosition = existing.items.reduce(
+      (highest, item) => Math.max(highest, item.position + 1),
+      0,
+    );
     await tripItineraryItem.createMany({
       data: params.items.map((item, idx) => {
         const scheduledAt = parseScheduledAt(item.scheduledAt);
@@ -516,8 +641,18 @@ export async function addTripItems(params: {
         const reminderMinutesBefore = item.reminderMinutesBefore ?? null;
         return {
           tripId: params.tripId,
+          dayId: item.dayId ?? null,
           position: startPosition + idx,
           itemType: item.itemType ?? 'activity',
+          category: item.category ?? 'activity',
+          body: item.body ?? null,
+          timeLabel: item.timeLabel ?? null,
+          providerName: item.providerName ?? null,
+          bookingUrl: item.bookingUrl ?? null,
+          phone: item.phone ?? null,
+          placeName: item.placeName ?? null,
+          address: item.address ?? null,
+          details: item.details ?? undefined,
           description: item.description,
           subtitle: item.subtitle ?? null,
           quantity: asDecimal(item.quantity),
@@ -539,6 +674,16 @@ export async function addTripItems(params: {
 }
 
 export interface TripItineraryItemUpdateInput {
+  category?: string;
+  body?: string | null;
+  timeLabel?: string | null;
+  providerName?: string | null;
+  bookingUrl?: string | null;
+  phone?: string | null;
+  placeName?: string | null;
+  address?: string | null;
+  details?: Record<string, string> | null;
+  dayId?: number | null;
   itemType?: TripItemType;
   description?: string;
   subtitle?: string | null;
@@ -568,10 +713,25 @@ export async function updateTripItem(params: {
   const item = existing.items.find((i) => i.id === params.itemId);
   if (!item) return { error: 'Item not found', status: 404 };
 
+  const nextDayId = params.input.dayId;
+  if (nextDayId != null && !(existing.days ?? []).some((day) => day.id === nextDayId)) {
+    return { error: 'Day not found on this trip', status: 400 };
+  }
+
   return prisma.$transaction(async (tx) => {
     const { trip, tripItineraryItem } = txClients(tx);
     const data: Record<string, unknown> = {};
+    if (params.input.dayId !== undefined) data.dayId = params.input.dayId;
     if (params.input.itemType !== undefined) data.itemType = params.input.itemType;
+    if (params.input.category !== undefined) data.category = params.input.category;
+    if (params.input.body !== undefined) data.body = params.input.body;
+    if (params.input.timeLabel !== undefined) data.timeLabel = params.input.timeLabel;
+    if (params.input.providerName !== undefined) data.providerName = params.input.providerName;
+    if (params.input.bookingUrl !== undefined) data.bookingUrl = params.input.bookingUrl;
+    if (params.input.phone !== undefined) data.phone = params.input.phone;
+    if (params.input.placeName !== undefined) data.placeName = params.input.placeName;
+    if (params.input.address !== undefined) data.address = params.input.address;
+    if (params.input.details !== undefined) data.details = params.input.details ?? null;
     if (params.input.description !== undefined) data.description = params.input.description;
     if (params.input.subtitle !== undefined) data.subtitle = params.input.subtitle;
     if (params.input.quantity !== undefined) data.quantity = asDecimal(params.input.quantity);
@@ -751,4 +911,340 @@ export async function listOwnerCandidates(excludeUserId: number) {
     select: { id: true, name: true, email: true },
     orderBy: { name: 'asc' },
   });
+}
+
+// ── Itinerary days ─────────────────────────────────────────────────────────
+//
+// Days are first-class rows now. They used to be derived on the client by
+// bucketing items on `scheduledAt`, which meant a day with no events could not
+// exist — "Add another day" lived in React state and vanished on refresh.
+
+const MAX_TRIP_DAYS = 60;
+
+/** Shift a "YYYY-MM-DD" key by whole days, staying in local calendar terms. */
+function shiftDateKey(key: string, days: number): string | null {
+  const parsed = parseDateKey(key);
+  return parsed ? dateKey(addDays(parsed, days)) : null;
+}
+
+type DayGuard =
+  | { error: string; status: number }
+  | { trip: TripRecord; days: TripDayRecord[] };
+
+async function loadTripForDayEdit(
+  tripId: number,
+  userId: number,
+  isAdmin: boolean,
+): Promise<DayGuard> {
+  const trip = await tripClient.findUnique({ where: { id: tripId }, include: tripInclude });
+  if (!trip) return { error: 'Trip not found', status: 404 };
+  if (!canEditTrip(trip, userId, isAdmin)) {
+    return { error: `Cannot edit a trip in status "${trip.status}"`, status: 400 };
+  }
+  const days = [...(trip.days ?? [])].sort((a, b) => a.dayNumber - b.dayNumber);
+  return { trip, days };
+}
+
+/**
+ * Rewrite `dayNumber` to a dense 1..N in the given order.
+ *
+ * Deliberately not a unique constraint on `(tripId, dayNumber)`: Postgres
+ * checks uniqueness per row, so any bulk shift would transiently collide and
+ * force a two-phase negative-offset dance. Renumbering after the fact is
+ * simpler and idempotent.
+ */
+async function renumberDays(
+  client: TripDayCollectionClient,
+  ordered: Array<{ id: number; dayNumber: number }>,
+): Promise<void> {
+  for (let index = 0; index < ordered.length; index += 1) {
+    const target = index + 1;
+    if (ordered[index].dayNumber !== target) {
+      await client.update({ where: { id: ordered[index].id }, data: { dayNumber: target } });
+    }
+  }
+}
+
+async function refreshDetail(client: TripCollectionClient, tripId: number): Promise<TripDetail> {
+  const fresh = await client.findUnique({ where: { id: tripId }, include: tripInclude });
+  return serializeDetail(fresh!);
+}
+
+export async function createTripDay(params: {
+  tripId: number;
+  userId: number;
+  isAdmin: boolean;
+  /** Insert directly after this day. Omit to append. */
+  afterDayId?: number | null;
+  /** Insert before every existing day. */
+  atStart?: boolean;
+  dateKey?: string | null;
+  title?: string | null;
+}): Promise<TripDetail | { error: string; status?: number }> {
+  const guard = await loadTripForDayEdit(params.tripId, params.userId, params.isAdmin);
+  if ('error' in guard) return guard;
+  const { days } = guard;
+
+  if (days.length >= MAX_TRIP_DAYS) {
+    return { error: `A trip cannot have more than ${MAX_TRIP_DAYS} days`, status: 400 };
+  }
+
+  let index = days.length;
+  if (params.atStart) {
+    index = 0;
+  } else if (params.afterDayId != null) {
+    const at = days.findIndex((day) => day.id === params.afterDayId);
+    if (at === -1) return { error: 'Day not found on this trip', status: 400 };
+    index = at + 1;
+  }
+
+  // Suggest a date from whichever neighbour we can see. Other days keep their
+  // own dates — an insert should not silently reschedule the rest of the trip.
+  let dateKey = params.dateKey ?? null;
+  if (dateKey === null) {
+    const before = index > 0 ? days[index - 1] : null;
+    const after = index < days.length ? days[index] : null;
+    if (before?.dateKey) dateKey = shiftDateKey(before.dateKey, 1);
+    else if (after?.dateKey) dateKey = shiftDateKey(after.dateKey, -1);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const { trip, tripDay } = txClients(tx);
+    const created = await tripDay.create({
+      data: {
+        tripId: params.tripId,
+        dateKey,
+        dayNumber: days.length + 1,
+        title: params.title ?? null,
+      },
+    });
+    const ordered = [...days];
+    ordered.splice(index, 0, created);
+    await renumberDays(tripDay, ordered);
+    return refreshDetail(trip, params.tripId);
+  });
+}
+
+export async function updateTripDay(params: {
+  tripId: number;
+  dayId: number;
+  userId: number;
+  isAdmin: boolean;
+  title?: string | null;
+  summary?: string | null;
+  dateKey?: string | null;
+}): Promise<TripDetail | { error: string; status?: number }> {
+  const guard = await loadTripForDayEdit(params.tripId, params.userId, params.isAdmin);
+  if ('error' in guard) return guard;
+  if (!guard.days.some((day) => day.id === params.dayId)) {
+    return { error: 'Day not found on this trip', status: 404 };
+  }
+
+  const data: Record<string, unknown> = {};
+  if (params.title !== undefined) data.title = params.title;
+  if (params.summary !== undefined) data.summary = params.summary;
+  if (params.dateKey !== undefined) data.dateKey = params.dateKey;
+  if (Object.keys(data).length === 0) return { error: 'Nothing to update', status: 400 };
+
+  return prisma.$transaction(async (tx) => {
+    const { trip, tripDay } = txClients(tx);
+    await tripDay.update({ where: { id: params.dayId }, data });
+    return refreshDetail(trip, params.tripId);
+  });
+}
+
+export async function deleteTripDay(params: {
+  tripId: number;
+  dayId: number;
+  userId: number;
+  isAdmin: boolean;
+  /** `unschedule` (default) keeps the events; `delete` removes them too. */
+  mode?: 'unschedule' | 'delete';
+}): Promise<TripDetail | { error: string; status?: number }> {
+  const guard = await loadTripForDayEdit(params.tripId, params.userId, params.isAdmin);
+  if ('error' in guard) return guard;
+  if (!guard.days.some((day) => day.id === params.dayId)) {
+    return { error: 'Day not found on this trip', status: 404 };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const { trip, tripDay, tripItineraryItem } = txClients(tx);
+
+    if (params.mode === 'delete') {
+      await tripItineraryItem.deleteMany({ where: { tripId: params.tripId, dayId: params.dayId } });
+    } else {
+      // Default: events survive and drop into the Unscheduled tray. Deleting a
+      // day should never silently destroy the work that was on it.
+      await tripItineraryItem.updateMany({
+        where: { tripId: params.tripId, dayId: params.dayId },
+        data: { dayId: null },
+      });
+    }
+
+    await tripDay.delete({ where: { id: params.dayId } });
+    await renumberDays(
+      tripDay,
+      guard.days.filter((day) => day.id !== params.dayId),
+    );
+    return refreshDetail(trip, params.tripId);
+  });
+}
+
+export async function duplicateTripDay(params: {
+  tripId: number;
+  dayId: number;
+  userId: number;
+  isAdmin: boolean;
+  includeEvents?: boolean;
+}): Promise<TripDetail | { error: string; status?: number }> {
+  const guard = await loadTripForDayEdit(params.tripId, params.userId, params.isAdmin);
+  if ('error' in guard) return guard;
+  const { trip: record, days } = guard;
+
+  if (days.length >= MAX_TRIP_DAYS) {
+    return { error: `A trip cannot have more than ${MAX_TRIP_DAYS} days`, status: 400 };
+  }
+  const index = days.findIndex((day) => day.id === params.dayId);
+  if (index === -1) return { error: 'Day not found on this trip', status: 404 };
+  const source = days[index];
+  const sourceItems = record.items.filter((item) => item.dayId === params.dayId);
+
+  return prisma.$transaction(async (tx) => {
+    const { trip, tripDay, tripItineraryItem } = txClients(tx);
+    const created = await tripDay.create({
+      data: {
+        tripId: params.tripId,
+        dateKey: source.dateKey ? shiftDateKey(source.dateKey, 1) : null,
+        dayNumber: days.length + 1,
+        title: source.title ? `${source.title} (copy)` : null,
+        summary: source.summary,
+      },
+    });
+
+    if (params.includeEvents !== false && sourceItems.length > 0) {
+      await tripItineraryItem.createMany({
+        data: sourceItems.map((item, offset) => ({
+          tripId: params.tripId,
+          dayId: created.id,
+          position: offset,
+          itemType: item.itemType,
+          category: item.category,
+          body: item.body,
+          timeLabel: item.timeLabel,
+          providerName: item.providerName,
+          bookingUrl: item.bookingUrl,
+          phone: item.phone,
+          placeName: item.placeName,
+          address: item.address,
+          details: item.details ?? undefined,
+          description: item.description,
+          subtitle: item.subtitle,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          sourceQuoteItemId: null,
+          // The copy lands on a new date, so the old instant would be wrong.
+          // It stays untimed until the user schedules it.
+          scheduledAt: null,
+          endsAt: null,
+          durationMinutes: item.durationMinutes,
+          reminderMinutesBefore: item.reminderMinutesBefore,
+          reminderAt: null,
+          imageUrl: item.imageUrl,
+          confirmationCode: item.confirmationCode,
+        })),
+      });
+    }
+
+    const ordered = [...days];
+    ordered.splice(index + 1, 0, created);
+    await renumberDays(tripDay, ordered);
+    return refreshDetail(trip, params.tripId);
+  });
+}
+
+export async function reorderTripDays(params: {
+  tripId: number;
+  userId: number;
+  isAdmin: boolean;
+  dayIds: number[];
+}): Promise<TripDetail | { error: string; status?: number }> {
+  const guard = await loadTripForDayEdit(params.tripId, params.userId, params.isAdmin);
+  if ('error' in guard) return guard;
+  const { days } = guard;
+
+  const known = new Set(days.map((day) => day.id));
+  if (params.dayIds.length !== days.length || params.dayIds.some((id) => !known.has(id))) {
+    return { error: 'The day order must list every day on this trip exactly once', status: 400 };
+  }
+  if (new Set(params.dayIds).size !== params.dayIds.length) {
+    return { error: 'The day order contains duplicates', status: 400 };
+  }
+
+  const byId = new Map(days.map((day) => [day.id, day]));
+  const ordered = params.dayIds.map((id) => byId.get(id)!);
+
+  return prisma.$transaction(async (tx) => {
+    const { trip, tripDay } = txClients(tx);
+    await renumberDays(tripDay, ordered);
+    return refreshDetail(trip, params.tripId);
+  });
+}
+
+/**
+ * Set the day and order of items in one shot.
+ *
+ * Takes complete per-day orderings rather than a `{itemId, toDay, toIndex}`
+ * delta: that shape is idempotent, so a lost response followed by a retry is
+ * harmless, it validates trivially, and a single call covers a cross-day move.
+ */
+export async function reorderTripItems(params: {
+  tripId: number;
+  userId: number;
+  isAdmin: boolean;
+  days: Array<{ dayId: number | null; itemIds: number[] }>;
+}): Promise<{ ok: true } | { error: string; status?: number }> {
+  const existing = await tripClient.findUnique({
+    where: { id: params.tripId },
+    include: tripInclude,
+  });
+  if (!existing) return { error: 'Trip not found', status: 404 };
+  if (!canEditTrip(existing, params.userId, params.isAdmin)) {
+    return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
+  }
+
+  const tripItemIds = new Set(existing.items.map((item) => item.id));
+  const tripDayIds = new Set((existing.days ?? []).map((day) => day.id));
+  const seen = new Set<number>();
+
+  for (const group of params.days) {
+    if (group.dayId !== null && !tripDayIds.has(group.dayId)) {
+      return { error: 'Day not found on this trip', status: 400 };
+    }
+    for (const itemId of group.itemIds) {
+      // Never let a reorder reach across trips.
+      if (!tripItemIds.has(itemId)) {
+        return { error: 'Item not found on this trip', status: 400 };
+      }
+      if (seen.has(itemId)) {
+        return { error: 'An item appears more than once in the new order', status: 400 };
+      }
+      seen.add(itemId);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const { tripItineraryItem } = txClients(tx);
+    for (const group of params.days) {
+      for (let index = 0; index < group.itemIds.length; index += 1) {
+        await tripItineraryItem.update({
+          where: { id: group.itemIds[index] },
+          data: { dayId: group.dayId, position: index },
+        });
+      }
+    }
+  });
+
+  // Deliberately not the refreshed trip: the client is mid-drag with its own
+  // optimistic state, and re-hydrating would fight it and flash the list.
+  return { ok: true };
 }

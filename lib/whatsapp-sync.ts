@@ -1,0 +1,220 @@
+import 'server-only';
+
+import { type ChildProcess, execFile, spawn } from 'child_process';
+
+import { listAccountsForProvider } from './messaging-accounts';
+import { webhookSecret } from './messaging-webhook-secret';
+
+/**
+ * Supervisor for the per-account `wacli sync --follow` processes.
+ *
+ * WhatsApp is the only provider that needs a long-lived process per linked
+ * account: wacli mirrors the account into its own store, and new inbound
+ * messages only land there while `sync --follow` is running. Telegram serves
+ * history on demand, and Signal is drained per request, so neither needs this.
+ *
+ * One process per linked user is the real operational cost of per-user
+ * WhatsApp. Processes are restarted with backoff if they exit, and stopped when
+ * the account is unlinked. Everything is keyed by the wacli account name.
+ */
+
+interface SyncProcess {
+  account: string;
+  userId?: number;
+  child: ChildProcess;
+  startedAt: number;
+  restarts: number;
+  /** Set when we killed it deliberately, so `close` doesn't restart it. */
+  stopping: boolean;
+}
+
+declare global {
+  var whatsappSyncGlobal: Map<string, SyncProcess> | undefined;
+  var whatsappSyncTimersGlobal: Map<string, NodeJS.Timeout> | undefined;
+}
+
+function processes(): Map<string, SyncProcess> {
+  globalThis.whatsappSyncGlobal ??= new Map();
+  return globalThis.whatsappSyncGlobal;
+}
+
+function timers(): Map<string, NodeJS.Timeout> {
+  globalThis.whatsappSyncTimersGlobal ??= new Map();
+  return globalThis.whatsappSyncTimersGlobal;
+}
+
+const BIN = (process.env.WACLI_BIN ?? '').trim() || 'wacli';
+const BASE_BACKOFF_MS = 5_000;
+const MAX_BACKOFF_MS = 5 * 60 * 1000;
+/** Treat a process that survived this long as healthy and reset its backoff. */
+const HEALTHY_AFTER_MS = 60_000;
+
+export interface SyncState {
+  account: string;
+  running: boolean;
+  restarts: number;
+  uptimeMs: number;
+}
+
+export function syncStatus(account: string): SyncState {
+  const proc = processes().get(account);
+  return {
+    account,
+    running: Boolean(proc && !proc.child.killed),
+    restarts: proc?.restarts ?? 0,
+    uptimeMs: proc ? Date.now() - proc.startedAt : 0,
+  };
+}
+
+/**
+ * Start `sync --follow` for one account. No-op if it is already running.
+ *
+ * `--webhook` is what makes WhatsApp live: wacli POSTs each incoming message
+ * straight to /api/messaging/webhook, which writes it to Postgres and pushes an
+ * SSE event. `userId` is required for that — without it the process still syncs
+ * its local mirror, but nothing reaches the console until the next backfill.
+ */
+export function startSync(account: string, userId?: number, restarts = 0): void {
+  if (!account) return;
+  const existing = processes().get(account);
+  if (existing && !existing.child.killed) return;
+
+  const args = ['--account', account, 'sync', '--follow', '--download-media'];
+  if (userId) {
+    const base = (process.env.APP_INTERNAL_URL ?? '').trim() || 'http://127.0.0.1:3000';
+    args.push(
+      '--webhook',
+      `${base}/api/messaging/webhook?token=${webhookSecret()}&user=${userId}`,
+    );
+  }
+
+  const child = spawn(BIN, args, { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
+
+  const proc: SyncProcess = { account, child, startedAt: Date.now(), restarts, stopping: false, userId };
+  processes().set(account, proc);
+
+  // wacli keeps progress and errors on stderr; surface only the tail on exit so
+  // a chatty sync doesn't flood the server log.
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderr = (stderr + chunk.toString('utf8')).slice(-2000);
+  });
+
+  child.on('error', (err) => {
+    console.error(`[whatsapp-sync] ${account} failed to spawn: ${err.message}`);
+  });
+
+  child.on('close', (code) => {
+    processes().delete(account);
+    if (proc.stopping) return;
+
+    const lived = Date.now() - proc.startedAt;
+    const nextRestarts = lived > HEALTHY_AFTER_MS ? 0 : restarts + 1;
+    const delay = Math.min(BASE_BACKOFF_MS * 2 ** nextRestarts, MAX_BACKOFF_MS);
+    console.error(
+      `[whatsapp-sync] ${account} exited (code ${code}); restarting in ${Math.round(delay / 1000)}s. ${stderr.trim().slice(-300)}`,
+    );
+
+    const timer = setTimeout(() => {
+      timers().delete(account);
+      startSync(account, proc.userId, nextRestarts);
+    }, delay);
+    // Don't hold the event loop open on a restart timer.
+    timer.unref?.();
+    timers().set(account, timer);
+  });
+}
+
+/**
+ * Kill any `wacli … sync` still running for this account from a previous server
+ * process.
+ *
+ * When the app is killed, its children are re-parented to init and keep running.
+ * They hold wacli's store lock — so the new process can never start its own sync
+ * — and they post to the webhook with the previous run's secret, which is now
+ * rejected. Reaping them on boot is what makes a restart or deploy recover.
+ */
+function reapOrphans(account: string): Promise<void> {
+  return new Promise((resolve) => {
+    execFile('pgrep', ['-f', `wacli --account ${account} sync`], (err, stdout) => {
+      if (err || !stdout.trim()) return resolve();
+      const ours = new Set([...processes().values()].map((p) => p.child.pid));
+      for (const line of stdout.trim().split('\n')) {
+        const pid = Number(line.trim());
+        // Never signal a child this process is already supervising.
+        if (!Number.isInteger(pid) || pid === process.pid || ours.has(pid)) continue;
+        try {
+          process.kill(pid, 'SIGTERM');
+          console.log(`[whatsapp-sync] reaped orphaned sync process ${pid} for ${account}`);
+        } catch {
+          // Already gone, or not ours to signal.
+        }
+      }
+      // Give the lock a moment to clear before the caller respawns.
+      setTimeout(resolve, 1500);
+    });
+  });
+}
+
+/** Stop every supervised sync — used when the server itself is shutting down. */
+export function stopAllSync(): void {
+  for (const account of [...processes().keys()]) stopSync(account);
+}
+
+declare global {
+  var whatsappShutdownHookedGlobal: boolean | undefined;
+}
+
+/**
+ * Kill our sync children when the server exits.
+ *
+ * This lives here rather than in instrumentation.ts because that file is also
+ * compiled for the Edge runtime, where `process.once`/`process.exit` don't
+ * exist — Next flags them even inside a nodejs-only branch.
+ */
+export function installShutdownHooks(): void {
+  if (globalThis.whatsappShutdownHookedGlobal) return;
+  globalThis.whatsappShutdownHookedGlobal = true;
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      stopAllSync();
+      process.exit(0);
+    });
+  }
+  process.once('exit', stopAllSync);
+}
+
+/** Stop one account's sync and cancel any pending restart. */
+export function stopSync(account: string): void {
+  const timer = timers().get(account);
+  if (timer) {
+    clearTimeout(timer);
+    timers().delete(account);
+  }
+  const proc = processes().get(account);
+  if (!proc) return;
+  proc.stopping = true;
+  proc.child.kill('SIGTERM');
+  processes().delete(account);
+}
+
+/**
+ * Reconcile running processes against the linked accounts in the database:
+ * start what's missing, stop what's no longer linked. Safe to call repeatedly.
+ */
+export async function reconcileSyncProcesses(): Promise<SyncState[]> {
+  const accounts = await listAccountsForProvider('whatsapp');
+  const wanted = new Set(accounts.map((a) => a.handle).filter(Boolean));
+
+  for (const account of accounts) {
+    if (!account.handle) continue;
+    // Clear any leftover process from a previous run before claiming the lock.
+    if (!processes().has(account.handle)) await reapOrphans(account.handle);
+    startSync(account.handle, account.userId);
+  }
+  for (const account of [...processes().keys()]) {
+    if (!wanted.has(account)) stopSync(account);
+  }
+  return [...wanted].map(syncStatus);
+}

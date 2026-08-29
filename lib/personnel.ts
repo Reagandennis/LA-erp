@@ -1,5 +1,13 @@
 import 'server-only';
 
+import { computeStatus, type LicenseStatus } from '@/lib/drivers';
+import {
+  ENGAGEMENT_TYPES,
+  PERSONNEL_ROLES,
+  type EngagementType,
+  type PersonnelRole,
+} from '@/lib/people-views';
+import { syncPersonnelResources } from '@/lib/personnel-sync';
 import { prisma } from '@/lib/prisma';
 
 export const DEPARTMENTS = [
@@ -21,6 +29,22 @@ function pickDepartment(value: unknown): Department {
 }
 function pickStatus(value: unknown): PersonnelStatus {
   return (PERSONNEL_STATUSES as readonly string[]).includes(value as string) ? (value as PersonnelStatus) : 'Active';
+}
+function pickEngagement(value: unknown): EngagementType {
+  return (ENGAGEMENT_TYPES as readonly string[]).includes(value as string)
+    ? (value as EngagementType)
+    : 'Employee';
+}
+/** Keep only recognised roles, deduped and in canonical order. */
+function normalizeRoles(value: unknown): PersonnelRole[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (typeof raw !== 'string') continue;
+    const match = PERSONNEL_ROLES.find((r) => r.toLowerCase() === raw.trim().toLowerCase());
+    if (match) seen.add(match);
+  }
+  return PERSONNEL_ROLES.filter((r) => seen.has(r));
 }
 function trimOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -49,6 +73,16 @@ function parseDate(value: unknown): Date | null {
 
 // --- Serialized shape ------------------------------------------------------
 
+export type PersonnelLicence = {
+  id: number;
+  licenseNumber: string;
+  category: string;
+  expiryDate: string;
+  status: LicenseStatus;
+  daysRemaining: number;
+  hasDocument: boolean;
+};
+
 export type PersonnelSummary = {
   id: number;
   name: string;
@@ -61,6 +95,15 @@ export type PersonnelSummary = {
   manager: string | null;
   joinDate: string | null;
   skills: string[];
+  roles: string[];
+  engagement: string;
+  supplierName: string | null;
+  callSign: string | null;
+  grade: string | null;
+  /** Driving licences held by this person, soonest expiry first. */
+  licenses: PersonnelLicence[];
+  /** Which legacy assignable resources mirror this person. */
+  resource: { driverId: number | null; officerId: number | null };
   notes: string | null;
   hasPhoto: boolean;
   user: { id: number; name: string; email: string } | null;
@@ -79,6 +122,23 @@ const SELECT = {
   manager: true,
   joinDate: true,
   skills: true,
+  roles: true,
+  engagement: true,
+  supplierName: true,
+  callSign: true,
+  grade: true,
+  licenses: {
+    orderBy: { expiryDate: 'asc' },
+    select: {
+      id: true,
+      licenseNumber: true,
+      category: true,
+      expiryDate: true,
+      documentName: true,
+    },
+  },
+  driverProfile: { select: { id: true } },
+  officerProfile: { select: { id: true } },
   notes: true,
   photoName: true,
   createdAt: true,
@@ -97,6 +157,20 @@ type PersonnelRow = {
   manager: string | null;
   joinDate: Date | null;
   skills: string[];
+  roles: string[];
+  engagement: string;
+  supplierName: string | null;
+  callSign: string | null;
+  grade: string | null;
+  licenses: {
+    id: number;
+    licenseNumber: string;
+    category: string;
+    expiryDate: Date;
+    documentName: string | null;
+  }[];
+  driverProfile: { id: number } | null;
+  officerProfile: { id: number } | null;
   notes: string | null;
   photoName: string | null;
   createdAt: Date;
@@ -116,6 +190,28 @@ function serialize(row: PersonnelRow): PersonnelSummary {
     manager: row.manager,
     joinDate: row.joinDate?.toISOString() ?? null,
     skills: row.skills ?? [],
+    roles: row.roles ?? [],
+    engagement: row.engagement,
+    supplierName: row.supplierName,
+    callSign: row.callSign,
+    grade: row.grade,
+    licenses: (row.licenses ?? []).map((l) => {
+      // Reuse the single source of truth for licence expiry state.
+      const { status, daysRemaining } = computeStatus(l.expiryDate);
+      return {
+        id: l.id,
+        licenseNumber: l.licenseNumber,
+        category: l.category,
+        expiryDate: l.expiryDate.toISOString(),
+        status,
+        daysRemaining,
+        hasDocument: Boolean(l.documentName),
+      };
+    }),
+    resource: {
+      driverId: row.driverProfile?.id ?? null,
+      officerId: row.officerProfile?.id ?? null,
+    },
     notes: row.notes,
     hasPhoto: Boolean(row.photoName),
     user: row.user,
@@ -125,9 +221,24 @@ function serialize(row: PersonnelRow): PersonnelSummary {
 
 // --- Reads -----------------------------------------------------------------
 
-export async function listPersonnel(): Promise<PersonnelSummary[]> {
-  const rows = await prisma.personnel.findMany({ orderBy: [{ name: 'asc' }], select: SELECT });
+/**
+ * All personnel, or only those holding `role`. The role pages
+ * (drivers, cpos, airport-greeters, security-advisors) all come through here.
+ */
+export async function listPersonnel(options?: { role?: PersonnelRole | null }): Promise<PersonnelSummary[]> {
+  const role = options?.role ?? null;
+  const rows = await prisma.personnel.findMany({
+    where: role ? { roles: { has: role } } : undefined,
+    orderBy: [{ name: 'asc' }],
+    select: SELECT,
+  });
   return rows.map(serialize);
+}
+
+/** A single person, for the detail drawer and licence editing. */
+export async function getPersonnelById(id: number): Promise<PersonnelSummary | null> {
+  const row = await prisma.personnel.findUnique({ where: { id }, select: SELECT });
+  return row ? serialize(row) : null;
 }
 
 export type UserOption = { id: number; name: string; email: string; linkedToId: number | null };
@@ -176,6 +287,11 @@ export async function createPersonnel(input: {
   manager?: string | null;
   joinDate?: string | null;
   skills?: unknown;
+  roles?: unknown;
+  engagement?: string;
+  supplierName?: string | null;
+  callSign?: string | null;
+  grade?: string | null;
   notes?: string | null;
   photo?: PhotoInput | null;
 }): Promise<PersonnelSummary> {
@@ -195,6 +311,11 @@ export async function createPersonnel(input: {
       manager: trimOrNull(input.manager),
       joinDate: parseDate(input.joinDate),
       skills: normalizeSkills(input.skills),
+      roles: normalizeRoles(input.roles),
+      engagement: pickEngagement(input.engagement),
+      supplierName: trimOrNull(input.supplierName),
+      callSign: trimOrNull(input.callSign),
+      grade: trimOrNull(input.grade),
       notes: trimOrNull(input.notes),
       userId: linkedUserId,
       createdById: input.createdById,
@@ -202,7 +323,8 @@ export async function createPersonnel(input: {
     },
     select: SELECT,
   });
-  return serialize(row);
+  await syncPersonnelResources(row.id);
+  return (await getPersonnelById(row.id)) ?? serialize(row);
 }
 
 export async function updatePersonnel(
@@ -219,6 +341,11 @@ export async function updatePersonnel(
     manager?: string | null;
     joinDate?: string | null;
     skills?: unknown;
+    roles?: unknown;
+    engagement?: string;
+    supplierName?: string | null;
+    callSign?: string | null;
+    grade?: string | null;
     notes?: string | null;
   },
 ): Promise<PersonnelSummary | null> {
@@ -239,11 +366,17 @@ export async function updatePersonnel(
   if (patch.manager !== undefined) data.manager = trimOrNull(patch.manager);
   if (patch.joinDate !== undefined) data.joinDate = parseDate(patch.joinDate);
   if (patch.skills !== undefined) data.skills = normalizeSkills(patch.skills);
+  if (patch.roles !== undefined) data.roles = normalizeRoles(patch.roles);
+  if (patch.engagement !== undefined) data.engagement = pickEngagement(patch.engagement);
+  if (patch.supplierName !== undefined) data.supplierName = trimOrNull(patch.supplierName);
+  if (patch.callSign !== undefined) data.callSign = trimOrNull(patch.callSign);
+  if (patch.grade !== undefined) data.grade = trimOrNull(patch.grade);
   if (patch.notes !== undefined) data.notes = trimOrNull(patch.notes);
   if (patch.userId !== undefined) data.userId = await resolveUserId(patch.userId, id);
 
   const row = await prisma.personnel.update({ where: { id }, data, select: SELECT });
-  return serialize(row);
+  await syncPersonnelResources(row.id);
+  return (await getPersonnelById(row.id)) ?? serialize(row);
 }
 
 export async function deletePersonnel(id: number): Promise<boolean> {

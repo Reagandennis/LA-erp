@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import MessageMediaView, { type MessageMedia } from './message-media';
+import MessagingLinkPanel from './messaging-link-panel';
+
 /**
  * Generic two-pane messaging console shared by the polling-based integrations
  * (Telegram, Signal). It talks to /api/<service>/{status,chats,thread,reply},
@@ -10,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  */
 
 export interface MessagingConsoleConfig {
-  service: 'telegram' | 'signal';
+  service: 'telegram' | 'signal' | 'whatsapp';
   title: string;
   /** Shown under the title as the resting subtitle. */
   subtitle: string;
@@ -18,6 +21,18 @@ export interface MessagingConsoleConfig {
   searchPlaceholder: string;
   /** Label describing the account identifier, e.g. "Bot" or "Linked number". */
   connectionNoun: string;
+  /** Hint for the "start a new chat" field — the address form this provider takes. */
+  newChatPlaceholder: string;
+}
+
+export interface MessagingConsoleProps {
+  config: MessagingConsoleConfig;
+  /**
+   * Optional alternative to the QR flow, shown beneath it — Telegram offers
+   * phone/code sign-in for accounts with two-step verification, which cannot
+   * complete a QR login.
+   */
+  signIn?: (props: { onSignedIn: () => void }) => React.ReactNode;
 }
 
 interface Status {
@@ -45,6 +60,7 @@ interface Message {
   fromMe: boolean;
   text: string;
   timestamp: string;
+  media?: MessageMedia | null;
 }
 
 const inputClass =
@@ -82,7 +98,7 @@ function GroupIcon() {
   );
 }
 
-export default function MessagingConsole({ config }: { config: MessagingConsoleConfig }) {
+export default function MessagingConsole({ config, signIn }: MessagingConsoleProps) {
   const base = `/api/${config.service}`;
   const [status, setStatus] = useState<Status | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -93,7 +109,14 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [newChatOpen, setNewChatOpen] = useState(false);
+  const [newChatTarget, setNewChatTarget] = useState('');
+  const [newChatError, setNewChatError] = useState<string | null>(null);
+  const [creatingChat, setCreatingChat] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  /** Mirrors the open chat so the SSE handler doesn't need to re-subscribe. */
+  const selectedRef = useRef<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -119,10 +142,12 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
   useEffect(() => {
     void loadStatus();
     void loadChats();
+    // Updates arrive over SSE; this slow tick only covers a dropped stream or a
+    // status change (link/unlink) that produces no message event.
     const t = setInterval(() => {
       void loadStatus();
       void loadChats();
-    }, 8000);
+    }, 60_000);
     return () => clearInterval(t);
   }, [loadStatus, loadChats]);
 
@@ -159,15 +184,35 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
       setThread([]);
       return;
     }
-    let active = true;
     setThread([]);
     void loadThread(effectiveSelected);
-    const t = setInterval(() => active && void loadThread(effectiveSelected), 4000);
-    return () => {
-      active = false;
-      clearInterval(t);
-    };
   }, [effectiveSelected, loadThread]);
+
+  /**
+   * Live updates. The server pushes only the affected chat ids, so we refetch
+   * from the mirror rather than trusting the event payload — a dropped or
+   * duplicated event can then never corrupt what's on screen.
+   */
+  useEffect(() => {
+    const source = new EventSource('/api/messaging/stream', { withCredentials: true });
+    source.addEventListener('messaging', (event) => {
+      let chatIds: string[] = [];
+      try {
+        chatIds = (JSON.parse((event as MessageEvent).data) as { chatIds?: string[] }).chatIds ?? [];
+      } catch {
+        return;
+      }
+      void loadChats();
+      if (selectedRef.current && chatIds.includes(selectedRef.current)) {
+        void loadThread(selectedRef.current);
+      }
+    });
+    return () => source.close();
+  }, [loadChats, loadThread]);
+
+  useEffect(() => {
+    selectedRef.current = effectiveSelected;
+  }, [effectiveSelected]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -194,6 +239,67 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
       }
     } catch {
       setError('Could not send the message.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /**
+   * Open a conversation with someone not yet in the list. Nothing is sent —
+   * this just creates the local chat so the composer has somewhere to go.
+   */
+  const startNewChat = async () => {
+    const target = newChatTarget.trim();
+    if (!target || creatingChat) return;
+    setCreatingChat(true);
+    setNewChatError(null);
+    try {
+      const r = await fetch('/api/messaging/new-chat', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: config.service, target }),
+      });
+      const d = (await r.json().catch(() => null)) as { chatId?: string; error?: string } | null;
+      if (!r.ok || !d?.chatId) {
+        setNewChatError(d?.error ?? 'Could not start that chat.');
+        return;
+      }
+      await loadChats();
+      setSelectedId(d.chatId);
+      setNewChatTarget('');
+      setNewChatOpen(false);
+    } catch {
+      setNewChatError('Could not reach the server.');
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
+  /** Upload one attachment; the caption is whatever is already in the box. */
+  const sendFile = async (file: File) => {
+    if (!effectiveSelected) return;
+    setError(null);
+    setSending(true);
+    try {
+      const form = new FormData();
+      form.append('chatId', effectiveSelected);
+      form.append('caption', text.trim());
+      form.append('file', file);
+      const r = await fetch(`${base}/send-media`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      const d = (await r.json().catch(() => null)) as { error?: string } | null;
+      if (!r.ok) {
+        setError(d?.error ?? 'Could not send the attachment.');
+      } else {
+        setText('');
+        await loadThread(effectiveSelected);
+      }
+    } catch {
+      setError('Could not send the attachment.');
     } finally {
       setSending(false);
     }
@@ -244,18 +350,81 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
         </div>
       )}
 
+      {status?.available && !status.authenticated ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
+          <MessagingLinkPanel
+            provider={config.service}
+            title={config.title}
+            onLinked={() => void loadStatus().then(() => loadChats())}
+          >
+            {signIn?.({ onSignedIn: () => void loadStatus().then(() => loadChats()) })}
+          </MessagingLinkPanel>
+        </div>
+      ) : (
       <div className="flex min-h-0 flex-1">
         <aside
           className={`${selectedId ? 'hidden md:flex' : 'flex'} w-full flex-col border-r border-gray-100 bg-white md:w-80 lg:w-96`}
         >
           <div className="border-b border-gray-100 p-3">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={config.searchPlaceholder}
-              className={inputClass}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={config.searchPlaceholder}
+                className={inputClass}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setNewChatOpen((v) => !v);
+                  setNewChatError(null);
+                }}
+                disabled={!status?.authenticated}
+                title="Start a new chat"
+                aria-label="Start a new chat"
+                className="shrink-0 rounded-xl bg-gray-50 p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-40"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+              </button>
+            </div>
+
+            {newChatOpen && (
+              <div className="mt-2">
+                <input
+                  type="text"
+                  autoFocus
+                  value={newChatTarget}
+                  placeholder={config.newChatPlaceholder}
+                  onChange={(e) => setNewChatTarget(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void startNewChat();
+                    if (e.key === 'Escape') setNewChatOpen(false);
+                  }}
+                  className={inputClass}
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void startNewChat()}
+                    disabled={!newChatTarget.trim() || creatingChat}
+                    className="rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                  >
+                    {creatingChat ? 'Opening…' : 'Start chat'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewChatOpen(false)}
+                    className="text-xs text-gray-500 transition hover:text-gray-700"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {newChatError && <p className="mt-2 text-xs text-rose-600">{newChatError}</p>}
+              </div>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {filtered.length === 0 ? (
@@ -346,7 +515,17 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
                               {m.senderName}
                             </p>
                           )}
-                          <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                          {m.media && (
+                            <div className={m.text ? 'mb-1.5' : ''}>
+                              <MessageMediaView
+                                service={config.service}
+                                chatId={m.chatId}
+                                media={m.media}
+                                out={out}
+                              />
+                            </div>
+                          )}
+                          {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
                           <div className={`mt-0.5 text-right text-[10px] ${out ? 'text-white/70' : 'text-gray-400'}`}>
                             {timeOf(m.timestamp)}
                           </div>
@@ -358,6 +537,29 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
               </div>
 
               <div className="flex items-center gap-2 border-t border-gray-100 bg-white p-3">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const picked = e.target.files?.[0];
+                    // Reset immediately so re-picking the same file still fires.
+                    e.target.value = '';
+                    if (picked) void sendFile(picked);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={!canSend || sending}
+                  title="Attach a file"
+                  aria-label="Attach a file"
+                  className="shrink-0 rounded-xl p-2.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                  </svg>
+                </button>
                 <input
                   type="text"
                   value={text}
@@ -392,6 +594,7 @@ export default function MessagingConsole({ config }: { config: MessagingConsoleC
           )}
         </section>
       </div>
+      )}
     </div>
   );
 }

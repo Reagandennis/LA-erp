@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { MAPS_API_KEY, MAPS_MAP_ID, loadGoogleMaps, onMapsAuthFailure } from '@/lib/google-maps';
+
 export interface MapDevice {
   from: string;
   lat: number;
@@ -12,33 +14,6 @@ export interface MapDevice {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-let mapsPromise: Promise<void> | null = null;
-function loadGoogleMaps(key: string): Promise<void> {
-  if (typeof window === 'undefined') return Promise.reject(new Error('no-window'));
-  if ((window as any).google?.maps) return Promise.resolve();
-  if (mapsPromise) return mapsPromise;
-  mapsPromise = new Promise<void>((resolve, reject) => {
-    // Use the documented callback param — it fires only once google.maps (incl. Map)
-    // is fully ready. Relying on script onload races the async library load and throws.
-    const cb = '__zelloGmapsReady';
-    const timer = setTimeout(() => reject(new Error('maps-timeout')), 12000);
-    (window as any)[cb] = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const s = document.createElement('script');
-    // `marker` library is required for AdvancedMarkerElement.
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=marker&v=weekly&callback=${cb}`;
-    s.async = true;
-    s.onerror = () => {
-      clearTimeout(timer);
-      reject(new Error('maps-failed'));
-    };
-    document.head.appendChild(s);
-  });
-  return mapsPromise;
-}
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
@@ -56,7 +31,7 @@ export default function ZelloMap({
   /** Bump this to re-frame the map around all current devices. */
   fitNonce?: number;
 }) {
-  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const key = MAPS_API_KEY;
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
@@ -72,17 +47,18 @@ export default function ZelloMap({
       return;
     }
     let cancelled = false;
+    // Google refuses a bad key only through this hook, long after the script loads.
+    const unsubscribe = onMapsAuthFailure(() => {
+      if (!cancelled) setError(true);
+    });
     loadGoogleMaps(key)
       .then(() => {
         if (cancelled || !divRef.current) return;
         const g = (window as any).google;
-        // AdvancedMarkerElement requires a Map ID. Use a configured one in
-        // production; fall back to Google's DEMO_MAP_ID for local/dev.
-        const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID';
         mapRef.current = new g.maps.Map(divRef.current, {
-          center: { lat: 1.2921, lng: 36.8219 }, // Nairobi
+          center: { lat: -1.2921, lng: 36.8219 }, // Nairobi
           zoom: 6,
-          mapId,
+          mapId: MAPS_MAP_ID,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
@@ -93,6 +69,7 @@ export default function ZelloMap({
       .catch(() => setError(true));
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [key]);
 
@@ -128,7 +105,7 @@ export default function ZelloMap({
           map,
           position: pos,
           title: d.from,
-          content: pin.element,
+          content: pin,
           gmpClickable: true,
         });
         m.__info = new g.maps.InfoWindow({ content });
@@ -136,7 +113,7 @@ export default function ZelloMap({
         markers.set(d.from, m);
       } else {
         m.position = pos;
-        m.content = pin.element;
+        m.content = pin;
         m.__info?.setContent(content);
       }
       bounds.extend(pos);
@@ -194,7 +171,7 @@ export default function ZelloMap({
     return (
       <div className="flex h-80 items-center justify-center rounded-2xl border border-gray-100 bg-gray-50 px-6 text-center text-sm text-gray-400">
         {key
-          ? 'Map could not load — make sure the Google Maps JavaScript API is enabled and this origin is allowed on the key.'
+          ? 'Map could not load — Google rejected the Maps API key, or the Maps JavaScript API is not enabled for it.'
           : 'Map unavailable — set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env.'}
       </div>
     );

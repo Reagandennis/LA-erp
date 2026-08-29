@@ -30,9 +30,10 @@ interface Envelope<T> {
 }
 
 /** Run wacli with the given args (no shell — args are passed as an array). */
-function run<T>(args: string[], timeoutMs = 30_000): Promise<T> {
-  // `--json` must precede the subcommand (it's a global/persistent flag).
-  const fullArgs = ['--json', ...args];
+function run<T>(args: string[], timeoutMs = 30_000, account?: string): Promise<T> {
+  // `--json` and `--account` are global flags and must precede the subcommand.
+  // Scoping by account keeps each user on their own isolated wacli store.
+  const fullArgs = account ? ['--json', '--account', account, ...args] : ['--json', ...args];
   return new Promise<T>((resolve, reject) => {
     execFile(
       BIN,
@@ -81,9 +82,9 @@ interface DoctorData {
   store: { messages: number; chats: number; contacts: number; groups: number; last_sync_at: string };
 }
 
-export async function getStatus(): Promise<WacliStatus> {
+export async function getStatus(account: string): Promise<WacliStatus> {
   try {
-    const d = await run<DoctorData>(['doctor'], 10_000);
+    const d = await run<DoctorData>(['doctor'], 10_000, account);
     return {
       available: true,
       authenticated: Boolean(d.authenticated),
@@ -136,8 +137,8 @@ interface RawChat {
 }
 
 /** List chats (direct + groups). Newsletters/status are filtered out by default. */
-export async function listChats(limit = 500): Promise<WacliChat[]> {
-  const rows = await run<RawChat[]>(['chats', 'list', '--limit', String(limit), '--no-archived']);
+export async function listChats(account: string, limit = 500): Promise<WacliChat[]> {
+  const rows = await run<RawChat[]>(['chats', 'list', '--limit', String(limit), '--no-archived'], 30_000, account);
   return (rows ?? [])
     .filter((c) => c.kind === 'dm' || c.kind === 'group')
     .map((c) => ({
@@ -182,7 +183,7 @@ interface RawMessage {
 }
 
 /** Messages of one chat, oldest-first (chat order). */
-export async function listThread(jid: string, limit = 100): Promise<WacliMessage[]> {
+export async function listThread(account: string, jid: string, limit = 100): Promise<WacliMessage[]> {
   const data = await run<{ messages: RawMessage[] }>([
     'messages',
     'list',
@@ -191,7 +192,7 @@ export async function listThread(jid: string, limit = 100): Promise<WacliMessage
     '--limit',
     String(limit),
     '--asc',
-  ]);
+  ], 30_000, account);
   return (data?.messages ?? [])
     .filter((m) => !m.DeletedForMe)
     .map((m) => ({
@@ -216,11 +217,12 @@ export interface SendResult {
 }
 
 /** Send a text message to a chat or group by JID. */
-export async function sendText(jid: string, message: string): Promise<SendResult> {
+export async function sendText(account: string, jid: string, message: string): Promise<SendResult> {
   try {
     await run<unknown>(
       ['--lock-wait', '15s', 'send', 'text', '--to', jid, '--message', message],
       60_000,
+      account,
     );
     return { ok: true };
   } catch (e) {
@@ -233,4 +235,103 @@ export function jidToNumber(jid: string): string {
   const at = jid.indexOf('@');
   const local = at === -1 ? jid : jid.slice(0, at);
   return jid.endsWith('@s.whatsapp.net') ? local : jid;
+}
+
+// --- Media ----------------------------------------------------------------
+
+/**
+ * Send a file. wacli derives the WhatsApp bubble type (image/video/audio/
+ * document) from the MIME, so `--as auto` is left implicit.
+ *
+ * wacli takes a filesystem path rather than bytes, so the upload is spooled to
+ * a private temp file and removed immediately afterwards.
+ */
+export async function sendMedia(
+  account: string,
+  jid: string,
+  file: { bytes: Buffer; mimeType: string; fileName: string },
+  caption = '',
+): Promise<SendResult> {
+  const { mkdtemp, writeFile, rm } = await import('fs/promises');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+
+  let dir: string | null = null;
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'laerp-wa-'));
+    // basename() strips any path separators a caller-supplied name might carry.
+    const safeName = (await import('path')).basename(file.fileName) || 'upload';
+    const path = join(dir, safeName);
+    await writeFile(path, file.bytes, { mode: 0o600 });
+
+    const args = ['--lock-wait', '15s', 'send', 'file', '--to', jid, '--file', path];
+    if (caption) args.push('--caption', caption);
+    if (file.mimeType) args.push('--mime', file.mimeType);
+
+    await run<unknown>(args, 120_000, account);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'send failed' };
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+export interface FetchedMedia {
+  bytes: Buffer;
+  mimeType: string;
+  fileName: string | null;
+}
+
+/**
+ * Download one message's media.
+ *
+ * `--read-only` is important here: it writes the file without opening the
+ * WhatsApp session store, so a download can't contend with the SQLite write
+ * lock held by `wacli sync --follow`.
+ */
+export async function getMedia(account: string, jid: string, messageId: string): Promise<FetchedMedia | null> {
+  const { mkdtemp, readFile, readdir, rm } = await import('fs/promises');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+
+  let dir: string | null = null;
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'laerp-wa-dl-'));
+    await run<unknown>(
+      ['--read-only', 'media', 'download', '--chat', jid, '--id', messageId, '--output', dir],
+      120_000,
+      account,
+    );
+    const entries = await readdir(dir);
+    if (entries.length === 0) return null;
+
+    const fileName = entries[0]!;
+    const bytes = await readFile(join(dir, fileName));
+    return { bytes, mimeType: mimeFromName(fileName), fileName };
+  } catch {
+    return null;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** wacli names the downloaded file by extension; map that back to a MIME type. */
+function mimeFromName(name: string): string {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
+  const table: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    ogg: 'audio/ogg',
+    opus: 'audio/ogg',
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+    pdf: 'application/pdf',
+  };
+  return table[ext] ?? 'application/octet-stream';
 }

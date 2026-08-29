@@ -12,6 +12,16 @@ const INLINE_SAFE = new Set([
   'text/plain',
 ]);
 
+/**
+ * Whether a response of this type may render in the browser rather than being
+ * forced to download. Exported so callers can decide *before* offering a
+ * preview — offering one for a type that ends up as an attachment opens a blank
+ * tab and silently downloads instead.
+ */
+export function isInlineSafe(mime: string): boolean {
+  return INLINE_SAFE.has(mime.split(';')[0].trim().toLowerCase());
+}
+
 export function fileResponse(input: {
   content: Buffer | Uint8Array;
   mime: string;

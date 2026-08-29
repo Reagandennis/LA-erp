@@ -36,6 +36,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     manager?: string | null;
     joinDate?: string | null;
     skills?: unknown;
+    roles?: unknown;
+    engagement?: string;
+    supplierName?: string | null;
+    callSign?: string | null;
+    grade?: string | null;
     notes?: string | null;
   } = {};
   if (typeof body.name === 'string') patch.name = body.name;
@@ -48,6 +53,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (typeof body.manager === 'string' || body.manager === null) patch.manager = body.manager;
   if (typeof body.joinDate === 'string' || body.joinDate === null) patch.joinDate = body.joinDate;
   if (Array.isArray(body.skills)) patch.skills = body.skills;
+  if (Array.isArray(body.roles)) patch.roles = body.roles;
+  if (typeof body.engagement === 'string') patch.engagement = body.engagement;
+  if (typeof body.supplierName === 'string' || body.supplierName === null) patch.supplierName = body.supplierName;
+  if (typeof body.callSign === 'string' || body.callSign === null) patch.callSign = body.callSign;
+  if (typeof body.grade === 'string' || body.grade === null) patch.grade = body.grade;
   if (typeof body.notes === 'string' || body.notes === null) patch.notes = body.notes;
   if (typeof body.userId === 'number' || body.userId === null) patch.userId = body.userId;
 

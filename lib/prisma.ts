@@ -30,6 +30,10 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     driver?: unknown;
     officer?: unknown;
     tripAssignment?: unknown;
+    personnel?: unknown;
+    driverLicense?: unknown;
+    traveler?: unknown;
+    tripTraveler?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -47,7 +51,11 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.vehicle &&
       candidate.driver &&
       candidate.officer &&
-      candidate.tripAssignment,
+      candidate.tripAssignment &&
+      candidate.personnel &&
+      candidate.driverLicense &&
+      candidate.traveler &&
+      candidate.tripTraveler,
   );
 }
 

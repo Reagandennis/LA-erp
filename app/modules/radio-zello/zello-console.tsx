@@ -105,6 +105,12 @@ export default function ZelloConsole() {
   // Default true so SSR and first client render match; corrected after mount.
   const [voice, setVoice] = useState(true);
   const [channels, setChannels] = useState<string[]>([]);
+  // Channel creation is admin-only; canManage comes from /api/zello/roster.
+  const [canManage, setCanManage] = useState(false);
+  const [showNewChannel, setShowNewChannel] = useState(false);
+  const [newChannel, setNewChannel] = useState('');
+  const [creatingChannel, setCreatingChannel] = useState(false);
+  const [newChannelError, setNewChannelError] = useState<string | null>(null);
   const [devices, setDevices] = useState<MapDevice[]>([]);
   // Device-tracking map controls: focus a single device / re-frame all of them.
   const [mapFocus, setMapFocus] = useState<{ from: string; n: number } | null>(null);
@@ -131,8 +137,9 @@ export default function ZelloConsole() {
     fetch('/api/zello/roster', { credentials: 'include' })
       .then((r) => r.json())
       .catch(() => null)
-      .then((d: { channels?: { name: string }[] } | null) => {
+      .then((d: { channels?: { name: string }[]; canManage?: boolean } | null) => {
         if (d?.channels?.length) setChannels(d.channels.map((c) => c.name).filter(Boolean));
+        setCanManage(Boolean(d?.canManage));
       });
     let saved: Partial<ZelloConfig> = {};
     try {
@@ -417,6 +424,37 @@ export default function ZelloConsole() {
     }
   };
 
+  // Create a channel on the Zello Work network, then adopt it locally. The
+  // server re-checks admin rights, so a non-admin reaching this only sees a 403.
+  const createChannel = async () => {
+    const name = newChannel.trim();
+    if (!name || creatingChannel) return;
+    setCreatingChannel(true);
+    setNewChannelError(null);
+    try {
+      const res = await fetch('/api/zello/channels', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = (await res.json().catch(() => null)) as { error?: string; name?: string } | null;
+      if (!res.ok) {
+        setNewChannelError(data?.error ?? 'Could not create the channel.');
+        return;
+      }
+      const created = data?.name ?? name;
+      setChannels((cur) => (cur.includes(created) ? cur : [...cur, created].sort()));
+      setNewChannel('');
+      setShowNewChannel(false);
+      pickChannel(created);
+    } catch {
+      setNewChannelError('Could not reach the server.');
+    } finally {
+      setCreatingChannel(false);
+    }
+  };
+
   const disconnect = () => {
     channelRef.current?.disconnect();
     channelRef.current = null;
@@ -547,8 +585,9 @@ export default function ZelloConsole() {
           </div>
         )}
 
-        {channels.length > 0 && (
-          <div className="flex flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-3 sm:flex-row sm:items-center sm:gap-3">
+        {(channels.length > 0 || canManage) && (
+          <div className="rounded-2xl border border-gray-100 bg-white p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             <span className="px-1 text-sm font-medium text-gray-600 sm:px-2">Channel</span>
             <div className="relative flex-1">
               <select
@@ -576,6 +615,55 @@ export default function ZelloConsole() {
               <span className="px-1 text-xs font-medium text-emerald-600 sm:px-2">switch live</span>
             )}
             <span className="px-1 text-xs text-gray-400 sm:px-2">{channels.length} channels</span>
+            {canManage && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewChannel((v) => !v);
+                  setNewChannelError(null);
+                }}
+                className="rounded-xl bg-gray-50 px-3.5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                {showNewChannel ? 'Cancel' : 'New channel'}
+              </button>
+            )}
+          </div>
+
+          {canManage && showNewChannel && (
+            <div className="mt-3 border-t border-gray-100 pt-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  type="text"
+                  value={newChannel}
+                  autoFocus
+                  placeholder="Channel name"
+                  maxLength={40}
+                  onChange={(e) => setNewChannel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void createChannel();
+                    if (e.key === 'Escape') setShowNewChannel(false);
+                  }}
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  onClick={() => void createChannel()}
+                  disabled={!newChannel.trim() || creatingChannel}
+                  className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40 sm:w-auto"
+                >
+                  {creatingChannel ? 'Creating…' : 'Create'}
+                </button>
+              </div>
+              {newChannelError ? (
+                <p className="mt-2 px-1 text-xs text-rose-600">{newChannelError}</p>
+              ) : (
+                <p className="mt-2 px-1 text-xs text-gray-400">
+                  Creates the channel on your Zello Work network. Letters, numbers, spaces, dots,
+                  hyphens and underscores.
+                </p>
+              )}
+            </div>
+          )}
           </div>
         )}
 

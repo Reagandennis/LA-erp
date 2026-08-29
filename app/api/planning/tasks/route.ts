@@ -14,6 +14,7 @@ type TaskRecord = {
   description: string | null;
   priority: string;
   status: string;
+  startDate: Date | null;
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
@@ -38,6 +39,7 @@ type PersonalTodoCollectionClient = {
       description: string | null;
       priority: string;
       status: string;
+      startDate: Date | null;
       dueDate: Date | null;
       completed: boolean;
       completedAt: Date | null;
@@ -64,6 +66,7 @@ function serializeTask(task: TaskRecord) {
     description: task.description,
     priority: task.priority,
     status: task.status,
+    startDate: task.startDate?.toISOString() ?? null,
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -129,10 +132,15 @@ export async function POST(request: NextRequest) {
   }
 
   const dueDate = parseDueDate(validation.data.dueDate);
+  const startDate = parseDueDate(validation.data.startDate);
   const isCompleted = validation.data.completed ?? false;
 
   if (validation.data.dueDate && !dueDate) {
     return NextResponse.json({ error: 'Invalid due date' }, { status: 400 });
+  }
+
+  if (validation.data.startDate && !startDate) {
+    return NextResponse.json({ error: 'Invalid start date' }, { status: 400 });
   }
 
   const task = await personalTodoClient.create({
@@ -145,6 +153,7 @@ export async function POST(request: NextRequest) {
           : null,
       priority: validation.data.priority,
       status: validation.data.status,
+      startDate,
       dueDate,
       completed: isCompleted,
       completedAt: isCompleted ? new Date() : null,

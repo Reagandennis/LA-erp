@@ -1,24 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
-import { userHasModule, userHasRole } from '@/lib/user';
+import { counts } from '@/lib/messaging-repo';
+import { resolveMessagingRequest } from '@/lib/messaging-routes';
 import { getStatus } from '@/lib/wacli';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-type AuthUser = Parameters<typeof userHasRole>[0];
-function canUse(user: AuthUser): boolean {
-  return userHasRole(user, ADMIN_ROLE_NAME) || userHasModule(user, 'whatsapp');
-}
-
-/** Pairing / sync status of the linked WhatsApp (wacli) session. */
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
-  if (response || !auth) return response;
-  if (!canUse(auth.user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const { ctx, response } = await resolveMessagingRequest(request, 'whatsapp');
+  if (response || !ctx) return response;
 
-  return NextResponse.json(await getStatus());
+  // Not linked yet: report that cleanly rather than probing a store that
+  // doesn't exist, so the UI can show the QR panel.
+  if (!ctx.account) {
+    return NextResponse.json({
+      available: true,
+      authenticated: false,
+      connected: false,
+      linkedJid: null,
+      lastSyncAt: null,
+      counts: { messages: 0, chats: 0, contacts: 0, groups: 0 },
+      hint: 'Scan the QR code with WhatsApp to link your account.',
+    });
+  }
+  const status = await getStatus(ctx.account.handle);
+  const mirrored = await counts(ctx.account.id);
+  return NextResponse.json({
+    ...status,
+    counts: { ...status.counts, chats: mirrored.chats, messages: mirrored.messages },
+  });
 }

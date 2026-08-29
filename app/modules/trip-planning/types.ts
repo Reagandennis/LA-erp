@@ -12,10 +12,31 @@ export const TRIP_ITEM_TYPES: { value: TripItemType; label: string }[] = [
   { value: 'activity', label: 'Activity' },
 ];
 
+export interface TripDaySummary {
+  id: number;
+  /** "YYYY-MM-DD", or null while the trip's dates are TBD. */
+  dateKey: string | null;
+  /** Dense 1..N — the ordering key and the "Day 3" label. */
+  dayNumber: number;
+  title: string | null;
+  summary: string | null;
+}
+
 export interface TripItineraryItemSummary {
   id: number;
+  dayId: number | null;
   position: number;
+  /** Legacy 5-value type, kept for one release. New code reads `category`. */
   itemType: TripItemType;
+  category: string;
+  body: string | null;
+  timeLabel: string | null;
+  providerName: string | null;
+  bookingUrl: string | null;
+  phone: string | null;
+  placeName: string | null;
+  address: string | null;
+  details: Record<string, string> | null;
   description: string;
   subtitle: string | null;
   quantity: number;
@@ -63,6 +84,7 @@ export interface TripSummary {
 
 export interface TripDetail extends TripSummary {
   items: TripItineraryItemSummary[];
+  days: TripDaySummary[];
 }
 
 export interface OwnerOption {

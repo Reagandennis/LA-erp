@@ -17,5 +17,7 @@ export async function GET(request: NextRequest) {
   }
 
   const roster = await getZelloRoster();
-  return NextResponse.json(roster);
+  // canManage drives the console's "New channel" control. It is a UI hint only —
+  // POST /api/zello/channels enforces admin on its own.
+  return NextResponse.json({ ...roster, canManage: userHasRole(auth.user, ADMIN_ROLE_NAME) });
 }

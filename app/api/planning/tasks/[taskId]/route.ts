@@ -9,6 +9,7 @@ type TaskUpdateInput = {
   description?: string | null;
   priority?: string;
   status?: string;
+  startDate?: string | null;
   dueDate?: string | null;
   completed?: boolean;
   deleted?: boolean;
@@ -20,6 +21,7 @@ type TaskRecord = {
   description: string | null;
   priority: string;
   status: string;
+  startDate: Date | null;
   dueDate: Date | null;
   completed: boolean;
   completedAt: Date | null;
@@ -36,6 +38,7 @@ type PersonalTodoDetailClient = {
       description?: string | null;
       priority?: string;
       status?: string;
+      startDate?: Date | null;
       dueDate?: Date | null;
       completed?: boolean;
       completedAt?: Date | null;
@@ -68,6 +71,7 @@ function serializeTask(task: TaskRecord) {
     description: task.description,
     priority: task.priority,
     status: task.status,
+    startDate: task.startDate?.toISOString() ?? null,
     dueDate: task.dueDate?.toISOString() ?? null,
     completed: task.completed,
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -93,6 +97,31 @@ function normalizeUpdateInput(input: TaskUpdateInput) {
     }
   }
 
+  let startDate: Date | null | undefined;
+
+  if (input.startDate === undefined) {
+    startDate = undefined;
+  } else {
+    startDate = parseDueDate(input.startDate);
+
+    if (input.startDate && !startDate) {
+      return {
+        error: 'Invalid start date',
+        data: null,
+      };
+    }
+  }
+
+  // Only checkable when the caller sends both — `updateMany` is a partial
+  // update, so a start-only PUT can't see the stored due date without a read.
+  // The drag path always sends the pair, which is the case that matters.
+  if (startDate && dueDate && startDate.getTime() > dueDate.getTime()) {
+    return {
+      error: 'Start date must be on or before the due date',
+      data: null,
+    };
+  }
+
   return {
     error: null,
     data: {
@@ -105,6 +134,7 @@ function normalizeUpdateInput(input: TaskUpdateInput) {
             : null,
       priority: input.priority,
       status: input.status,
+      startDate,
       dueDate,
       completed: input.completed,
       completedAt:
@@ -157,24 +187,38 @@ export async function PUT(
     return NextResponse.json({ error: 'Invalid input' }, { status: 400 });
   }
 
-  const updateResult = await personalTodoClient.updateMany({
-    where: {
-      id: taskId,
-      userId: auth.user.id,
-    },
-    data: normalized.data,
-  });
+  let updateResult: { count: number };
+  let task: TaskRecord | null;
 
-  if (updateResult.count === 0) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+  try {
+    updateResult = await personalTodoClient.updateMany({
+      where: {
+        id: taskId,
+        userId: auth.user.id,
+      },
+      data: normalized.data,
+    });
+
+    if (updateResult.count === 0) {
+      return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+    }
+
+    task = await personalTodoClient.findFirst({
+      where: {
+        id: taskId,
+        userId: auth.user.id,
+      },
+    });
+  } catch (error) {
+    // Surface the reason instead of a bare 500. A stale Prisma client — a dev
+    // server still running from before a migration — reports the new column as
+    // an unknown argument here, which is otherwise invisible from the client.
+    console.error('[planning/tasks] update failed', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Could not update the task' },
+      { status: 500 },
+    );
   }
-
-  const task = await personalTodoClient.findFirst({
-    where: {
-      id: taskId,
-      userId: auth.user.id,
-    },
-  });
 
   if (!task) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 });

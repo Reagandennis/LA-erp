@@ -1,12 +1,6 @@
 
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { ScheduleTab } from './_components/ScheduleTab';
-
-function isAdmin(user: any) {
-  return user?.roles?.some((r: any) => r.name === 'admin');
-}
-  // (moved hooks and effect into component)
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -21,33 +15,7 @@ type PunchEntry = {
 
 type ShiftStatus = 'out' | 'in' | 'break';
 
-type LeaveRequest = {
-  id: string;
-  type: 'Annual' | 'Sick' | 'Compassionate' | 'Unpaid' | 'Study';
-  startDate: string;
-  endDate: string;
-  reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
-  submittedAt: string;
-};
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
 const STORAGE_KEY = 'clock-in-out-entries';
-const LEAVE_STORAGE_KEY = 'clock-in-out-leaves';
-
-const PUBLIC_HOLIDAYS: { date: string; name: string }[] = [
-  { date: '2026-01-01', name: "New Year's Day" },
-  { date: '2026-04-03', name: 'Good Friday' },
-  { date: '2026-04-06', name: 'Easter Monday' },
-  { date: '2026-05-01', name: 'Labour Day' },
-  { date: '2026-06-01', name: 'Madaraka Day' },
-  { date: '2026-10-10', name: 'Huduma Day' },
-  { date: '2026-10-20', name: 'Mashujaa Day' },
-  { date: '2026-12-12', name: 'Jamhuri Day' },
-  { date: '2026-12-25', name: 'Christmas Day' },
-  { date: '2026-12-26', name: 'Boxing Day' },
-];
 
 const WEEKLY_SCHEDULE: { day: string; start: string; end: string; breakDuration: string }[] = [
   { day: 'Monday',    start: '08:00', end: '17:00', breakDuration: '1h' },
@@ -59,9 +27,7 @@ const WEEKLY_SCHEDULE: { day: string; start: string; end: string; breakDuration:
   { day: 'Sunday',   start: '—',     end: '—',     breakDuration: '—' },
 ];
 
-const LEAVE_ALLOWANCES: Record<string, number> = {
-  Annual: 21, Sick: 14, Compassionate: 5, Unpaid: 30, Study: 7,
-};
+
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -86,12 +52,6 @@ const toDateKey = (date: Date) =>
   `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 
 const isSameDay = (a: Date, b: Date) => toDateKey(a) === toDateKey(b);
-
-const daysBetween = (start: string, end: string) => {
-  const s = new Date(start);
-  const e = new Date(end);
-  return Math.max(1, Math.round((e.getTime() - s.getTime()) / 86_400_000) + 1);
-};
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -283,16 +243,11 @@ function deriveStatus(entries: PunchEntry[]): ShiftStatus {
   return 'out';
 }
 
-function calcUsedLeave(leaveRequests: LeaveRequest[], type: LeaveRequest['type']) {
-  return leaveRequests
-    .filter(r => r.type === type && r.status === 'Approved')
-    .reduce((s, r) => s + daysBetween(r.startDate, r.endDate), 0);
-}
+
 
 export default function ClockInOutPage() {
   // Auth state for user role
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [scheduleReadOnly, setScheduleReadOnly] = useState(false);
 
   useEffect(() => {
     fetch('/api/auth/session')
@@ -300,37 +255,26 @@ export default function ClockInOutPage() {
       .then(data => {
         if (data?.user) {
           setCurrentUser(data.user);
-          setScheduleReadOnly(!isAdmin(data.user));
-        }
+          }
       });
   }, []);
   // Use null as sentinel so we know we haven't hydrated yet
   const [now, setNow] = useState<Date | null>(null);
   const [entries, setEntries] = useState<PunchEntry[]>([]);
   const [note, setNote] = useState('');
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [activeTab, setActiveTab] = useState<'punch' | 'schedule' | 'schedule-view' | 'leave' | 'holidays'>('punch');
-  const [leaveForm, setLeaveForm] = useState({
-    type: 'Annual' as LeaveRequest['type'],
-    startDate: '',
-    endDate: '',
-    reason: '',
-  });
-  const [leaveFormOpen, setLeaveFormOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'punch' | 'schedule'>('punch');
 
   // Hydrate from localStorage and start the clock only after mount
   // so the first server-rendered HTML and first client render match.
   useEffect(() => {
     setNow(new Date());
     setEntries(readLocalStorage<PunchEntry>(STORAGE_KEY));
-    setLeaveRequests(readLocalStorage<LeaveRequest>(LEAVE_STORAGE_KEY));
 
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   useEffect(() => { writeLocalStorage(STORAGE_KEY, entries); }, [entries]);
-  useEffect(() => { writeLocalStorage(LEAVE_STORAGE_KEY, leaveRequests); }, [leaveRequests]);
 
   const status = useMemo<ShiftStatus>(() => deriveStatus(entries), [entries]);
 
@@ -350,42 +294,17 @@ export default function ClockInOutPage() {
 
   const weeklyTotalSec = weeklySummary.reduce((s, d) => s + d.workSec, 0);
 
-  const submitLeave = () => {
-    if (!leaveForm.startDate || !leaveForm.endDate || !leaveForm.reason.trim()) return;
-    const req: LeaveRequest = {
-      id: `leave-${Date.now()}`,
-      type: leaveForm.type,
-      startDate: leaveForm.startDate,
-      endDate: leaveForm.endDate,
-      reason: leaveForm.reason.trim(),
-      status: 'Pending',
-      submittedAt: new Date().toISOString(),
-    };
-    setLeaveRequests(cur => [req, ...cur]);
-    setLeaveForm({ type: 'Annual', startDate: '', endDate: '', reason: '' });
-    setLeaveFormOpen(false);
-  };
-
-  const usedLeave = (type: LeaveRequest['type']) => calcUsedLeave(leaveRequests, type);
-
   const todayKey = now ? toDateKey(now) : '';
-  const limitKey = now ? toDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 60)) : '';
-  const upcomingHolidays = now ? PUBLIC_HOLIDAYS.filter(h => h.date >= todayKey && h.date <= limitKey) : [];
-
-  const upcomingLeave = leaveRequests
-    .filter(r => r.endDate >= todayKey && r.status !== 'Rejected')
-    .sort((a, b) => a.startDate.localeCompare(b.startDate))
-    .slice(0, 3);
 
   const statusLabel = status === 'in' ? 'Clocked in' : status === 'break' ? 'On break' : 'Clocked out';
   const statusColor = status === 'in' ? 'text-emerald-700' : status === 'break' ? 'text-amber-600' : 'text-gray-500';
 
+  // Planning others — the board, leave approvals, shift patterns and holidays —
+  // moved to the Shift Planning module. What stays here is the time clock and a
+  // read-only look at your own week.
   const tabs = [
     { id: 'punch',    label: 'Time Clock' },
-    { id: 'schedule', label: 'Weekly Schedule' },
-    { id: 'schedule-view', label: 'Schedule' },
-    { id: 'leave',    label: 'Leave' },
-    { id: 'holidays', label: 'Holidays' },
+    { id: 'schedule', label: 'My Week' },
   ] as const;
 
   return (
@@ -515,198 +434,6 @@ export default function ClockInOutPage() {
         )}
 
         {/* ── TAB: Schedule View ── */}
-        {activeTab === 'schedule-view' && (
-          <ScheduleTab readOnly={scheduleReadOnly} />
-        )}
-
-        {/* ── TAB: Leave ── */}
-        {activeTab === 'leave' && (
-          <div className="space-y-6">
-            <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-              {(Object.keys(LEAVE_ALLOWANCES) as LeaveRequest['type'][]).map(type => {
-                const allowed = LEAVE_ALLOWANCES[type];
-                const used = usedLeave(type);
-                const remaining = Math.max(0, allowed - used);
-                const pct = (used / allowed) * 100;
-                return (
-                  <div key={type} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">{type}</p>
-                    <p className="mt-2 text-2xl font-bold text-gray-900">{remaining}<span className="text-sm font-normal text-gray-400">/{allowed}d</span></p>
-                    <div className="mt-2 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-1.5 rounded-full bg-emerald-400 transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                    <p className="mt-1 text-[10px] text-gray-400">{used} used</p>
-                  </div>
-                );
-              })}
-            </section>
-
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Leave Requests</h3>
-              <button
-                type="button"
-                onClick={() => setLeaveFormOpen(v => !v)}
-                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-              >
-                {leaveFormOpen ? 'Cancel' : '+ Request Leave'}
-              </button>
-            </div>
-
-            {leaveFormOpen && (
-              <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm space-y-4">
-                <h4 className="font-semibold text-emerald-800">New Leave Request</h4>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="leave-type" className="text-xs font-semibold text-gray-600">Leave Type</label>
-                    <select
-                      id="leave-type"
-                      value={leaveForm.type}
-                      onChange={e => setLeaveForm(f => ({ ...f, type: e.target.value as LeaveRequest['type'] }))}
-                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                    >
-                      {(Object.keys(LEAVE_ALLOWANCES) as LeaveRequest['type'][]).map(t => (
-                        <option key={t} value={t}>{t} Leave ({Math.max(0, LEAVE_ALLOWANCES[t] - usedLeave(t))}d remaining)</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div />
-                  <div>
-                    <label htmlFor="leave-start" className="text-xs font-semibold text-gray-600">Start Date</label>
-                    <input id="leave-start" type="date" value={leaveForm.startDate} onChange={e => setLeaveForm(f => ({ ...f, startDate: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                  </div>
-                  <div>
-                    <label htmlFor="leave-end" className="text-xs font-semibold text-gray-600">End Date</label>
-                    <input id="leave-end" type="date" value={leaveForm.endDate} onChange={e => setLeaveForm(f => ({ ...f, endDate: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label htmlFor="leave-reason" className="text-xs font-semibold text-gray-600">Reason</label>
-                    <textarea id="leave-reason" value={leaveForm.reason} onChange={e => setLeaveForm(f => ({ ...f, reason: e.target.value }))}
-                      placeholder="Brief reason for leave…" rows={2}
-                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-none" />
-                  </div>
-                </div>
-                {leaveForm.startDate && leaveForm.endDate && (
-                  <p className="text-xs text-emerald-700 font-medium">Duration: {daysBetween(leaveForm.startDate, leaveForm.endDate)} day(s)</p>
-                )}
-                <button type="button" onClick={submitLeave}
-                  disabled={!leaveForm.startDate || !leaveForm.endDate || !leaveForm.reason.trim()}
-                  className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-                  Submit Request
-                </button>
-              </section>
-            )}
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-              {leaveRequests.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-6">No leave requests yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {leaveRequests.map(req => {
-                    const statusColors: Record<LeaveRequest['status'], string> = {
-                      Pending: 'bg-amber-100 text-amber-700', Approved: 'bg-emerald-100 text-emerald-700', Rejected: 'bg-red-100 text-red-700',
-                    };
-                    const typeColors: Record<LeaveRequest['type'], string> = {
-                      Annual: 'bg-blue-100 text-blue-700', Sick: 'bg-rose-100 text-rose-700',
-                      Compassionate: 'bg-purple-100 text-purple-700', Unpaid: 'bg-gray-100 text-gray-600', Study: 'bg-cyan-100 text-cyan-700',
-                    };
-                    return (
-                      <div key={req.id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-gray-100 bg-slate-50 px-4 py-3">
-                        <div className="flex items-start gap-3">
-                          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold mt-0.5 ${typeColors[req.type]}`}>{req.type}</span>
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">
-                              {new Date(req.startDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                              {' — '}
-                              {new Date(req.endDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                              <span className="ml-2 text-xs font-normal text-gray-400">({daysBetween(req.startDate, req.endDate)}d)</span>
-                            </p>
-                            <p className="text-xs text-gray-500 mt-0.5">{req.reason}</p>
-                          </div>
-                        </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-semibold shrink-0 ${statusColors[req.status]}`}>{req.status}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
-            {upcomingLeave.length > 0 && (
-              <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-                <h4 className="text-sm font-bold text-amber-800 mb-3">⏳ Upcoming Leave</h4>
-                <div className="space-y-2">
-                  {upcomingLeave.map(req => (
-                    <div key={req.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                      <span className="font-medium text-gray-800">{req.type} Leave</span>
-                      <span className="text-gray-600">
-                        {new Date(req.startDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        {' – '}
-                        {new Date(req.endDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${req.status === 'Approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{req.status}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
-
-        {/* ── TAB: Holidays ── */}
-        {activeTab === 'holidays' && (
-          <div className="space-y-6">
-            {upcomingHolidays.length > 0 && (
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm flex items-center gap-4">
-                <span className="text-3xl">🎉</span>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-blue-500">Next public holiday</p>
-                  <p className="text-lg font-bold text-gray-900 mt-0.5">{upcomingHolidays[0].name}</p>
-                  <p className="text-sm text-gray-500">
-                    {new Date(upcomingHolidays[0].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-                    {' · '}
-                    {now ? Math.ceil((new Date(upcomingHolidays[0].date + 'T12:00:00').getTime() - now.getTime()) / 86_400_000) : '?'} days away
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-lg font-semibold text-gray-900">Kenya Public Holidays 2026</h3>
-                <span className="text-xs text-gray-400">{PUBLIC_HOLIDAYS.length} holidays</span>
-              </div>
-              <div className="space-y-3">
-                {PUBLIC_HOLIDAYS.map(h => {
-                  const hDate = new Date(h.date + 'T12:00:00');
-                  const isPast = h.date < todayKey;
-                  const isToday2 = h.date === todayKey;
-                  return (
-                    <div key={h.date} className={`flex items-center justify-between rounded-xl px-4 py-3 ${
-                      isToday2 ? 'bg-emerald-50 border border-emerald-200' : isPast ? 'bg-gray-50 border border-gray-100 opacity-50' : 'bg-slate-50 border border-slate-100'
-                    }`}>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xl">{isToday2 ? '🎯' : isPast ? '✓' : '📅'}</span>
-                        <div>
-                          <p className={`text-sm font-semibold ${isPast ? 'text-gray-500 line-through' : 'text-gray-900'}`}>{h.name}</p>
-                          <p className="text-xs text-gray-500">{hDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-                        </div>
-                      </div>
-                      {!isPast && !isToday2 && (
-                        <span className="text-xs font-semibold text-gray-400">
-                          {now ? Math.ceil((hDate.getTime() - now.getTime()) / 86_400_000) : '?'}d away
-                        </span>
-                      )}
-                      {isToday2 && <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white">Today!</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          </div>
-        )}
-
       </div>
     </div>
   );

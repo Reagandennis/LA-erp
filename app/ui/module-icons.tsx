@@ -146,6 +146,14 @@ export const MODULE_ICONS: Record<string, ReactNode> = {
   ),
 
   // --- Operations ---
+  // Passport / travel document with a person.
+  travelers: (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 3h10a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2z" />
+      <circle cx="11" cy="10" r="2.2" strokeWidth={2} />
+      <path strokeLinecap="round" strokeWidth={2} d="M8.4 15.4a3 3 0 015.2 0" />
+    </svg>
+  ),
   handover: (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
@@ -228,6 +236,13 @@ export const MODULE_ICONS: Record<string, ReactNode> = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
+  'shift-planning': (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path strokeLinecap="round" d="M3 10h18M8 3v4M16 3v4" />
+      <path strokeLinecap="round" d="M7.5 14h3M13.5 14h3M7.5 17.5h3" />
+    </svg>
+  ),
   'clock-in-out': (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
@@ -255,6 +270,36 @@ export const MODULE_ICONS: Record<string, ReactNode> = {
   personnel: (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a3 3 0 10-2.5-1.35M5 9a3 3 0 102.5-1.35" />
+    </svg>
+  ),
+  // Steering wheel.
+  drivers: (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" strokeWidth={2} />
+      <circle cx="12" cy="12" r="3" strokeWidth={2} />
+      <path strokeLinecap="round" strokeWidth={2} d="M12 3v6m-8.6 4.5l5.8 1M20.6 13.5l-5.8 1M12 15v6" />
+    </svg>
+  ),
+  // Protective shield over a person.
+  cpos: (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3l7 3v5.5c0 4.2-2.9 7.7-7 8.5-4.1-.8-7-4.3-7-8.5V6l7-3z" />
+      <circle cx="12" cy="10" r="2" strokeWidth={2} />
+      <path strokeLinecap="round" strokeWidth={2} d="M8.6 16a3.6 3.6 0 016.8 0" />
+    </svg>
+  ),
+  // Greeting hand beside an aeroplane tail.
+  'airport-greeters': (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.5 21V10.2a1.4 1.4 0 012.8 0v4.3m0-1.4a1.4 1.4 0 012.8 0v1.4m0-.7a1.4 1.4 0 012.8 0V17a4 4 0 01-4 4h-4.4a4 4 0 01-3.3-1.8L4 15.6a1.4 1.4 0 012.2-1.7l1.5 1.6" />
+      <path strokeLinecap="round" strokeWidth={2} d="M6 7l4-3 4 3M10 4v5" />
+    </svg>
+  ),
+  // Shield with a checked clipboard - advisory rather than operational.
+  'security-advisors': (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3l7 3v5.5c0 4.2-2.9 7.7-7 8.5-4.1-.8-7-4.3-7-8.5V6l7-3z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 11.5l2 2 4-4" />
     </svg>
   ),
 };

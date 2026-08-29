@@ -50,4 +50,30 @@ describe('validation schemas', () => {
 
     expect(result.success).toBe(false);
   });
+
+  it('accepts a personal todo update that only moves the start date', () => {
+    // A Gantt edge-drag sends nothing else, so the "at least one field"
+    // refinement has to count startDate.
+    const result = personalTodoUpdateSchema.safeParse({
+      startDate: '2026-08-28T00:00:00.000Z',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('allows a start date to be cleared', () => {
+    const result = personalTodoUpdateSchema.safeParse({ startDate: null });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a start date on personal todo creation', () => {
+    const result = personalTodoCreateSchema.safeParse({
+      title: 'Draft the report',
+      startDate: '2026-08-24T00:00:00.000Z',
+      dueDate: '2026-08-28T00:00:00.000Z',
+    });
+
+    expect(result.success).toBe(true);
+  });
 });

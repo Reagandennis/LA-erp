@@ -75,6 +75,7 @@ export const personalTodoCreateSchema = z.object({
     .nullable(),
   priority: personalTodoPrioritySchema.default('medium'),
   status: personalTodoStatusSchema.default('Backlog'),
+  startDate: z.string().trim().optional().nullable(),
   dueDate: z.string().trim().optional().nullable(),
   completed: z.boolean().optional(),
 });
@@ -90,6 +91,7 @@ export const personalTodoUpdateSchema = z
       .nullable(),
     priority: personalTodoPrioritySchema.optional(),
     status: personalTodoStatusSchema.optional(),
+    startDate: z.string().trim().optional().nullable(),
     dueDate: z.string().trim().optional().nullable(),
     completed: z.boolean().optional(),
     deleted: z.boolean().optional(),
@@ -100,6 +102,7 @@ export const personalTodoUpdateSchema = z
       value.description !== undefined ||
       value.priority !== undefined ||
       value.status !== undefined ||
+      value.startDate !== undefined ||
       value.dueDate !== undefined ||
       value.completed !== undefined ||
       value.deleted !== undefined,
@@ -271,6 +274,81 @@ export const tripStatusSchema = z.enum(['Draft', 'Planned', 'Active', 'Completed
 
 const REMINDER_MINUTES_OPTIONS = [5, 15, 30, 60, 1440] as const;
 
+export const tripItemCategorySchema = z.enum([
+  'activity',
+  'lodging',
+  'flight',
+  'transportation',
+  'cruise',
+  'tour',
+  'booking',
+  'information',
+]);
+
+/**
+ * Category-specific fields. Each category declares exactly the keys its form
+ * offers, so a lodging field can never be saved onto a flight — the type safety
+ * a Json column would otherwise lose, recovered at the only boundary that
+ * matters. `.strict()` rejects unknown keys outright.
+ */
+const detailShapes = {
+  flight: {
+    flightNumber: true, cabin: true, departAirport: true, arriveAirport: true,
+    terminal: true, gate: true, seat: true, baggage: true,
+  },
+  lodging: {
+    roomType: true, nights: true, guests: true, checkInTime: true,
+    checkOutTime: true, boardBasis: true,
+  },
+  transportation: {
+    mode: true, vehicle: true, pickupLocation: true, dropoffLocation: true,
+    driverName: true, driverPhone: true,
+  },
+  cruise: {
+    shipName: true, portOfCall: true, cabin: true, deck: true,
+    embarkTime: true, disembarkTime: true,
+  },
+  tour: {
+    meetingPoint: true, durationText: true, groupSize: true, languages: true,
+    guideName: true, inclusions: true,
+  },
+  booking: { bookingRef: true, ticketType: true, partySize: true, dressCode: true },
+  activity: { durationText: true, whatToBring: true },
+  information: {},
+} as const;
+
+const detailValue = z.string().trim().max(200);
+
+function detailSchemaFor(keys: Record<string, true>) {
+  const shape: Record<string, z.ZodTypeAny> = {};
+  for (const key of Object.keys(keys)) shape[key] = detailValue.optional();
+  return z.object(shape).strict();
+}
+
+export const tripItemDetailsSchema = z.union([
+  detailSchemaFor(detailShapes.flight),
+  detailSchemaFor(detailShapes.lodging),
+  detailSchemaFor(detailShapes.transportation),
+  detailSchemaFor(detailShapes.cruise),
+  detailSchemaFor(detailShapes.tour),
+  detailSchemaFor(detailShapes.booking),
+  detailSchemaFor(detailShapes.activity),
+  z.object({}).strict(),
+]);
+
+/** The shared, cross-category fields promoted to real columns. */
+const tripItemSharedFields = {
+  category: tripItemCategorySchema.optional(),
+  body: z.string().trim().max(6000).optional().nullable(),
+  timeLabel: z.string().trim().max(40).optional().nullable(),
+  providerName: z.string().trim().max(160).optional().nullable(),
+  bookingUrl: z.string().trim().max(2048).optional().nullable(),
+  phone: z.string().trim().max(60).optional().nullable(),
+  placeName: z.string().trim().max(200).optional().nullable(),
+  address: z.string().trim().max(400).optional().nullable(),
+  details: tripItemDetailsSchema.optional().nullable(),
+};
+
 export const tripItemTypeSchema = z.enum([
   'flight',
   'car',
@@ -280,6 +358,8 @@ export const tripItemTypeSchema = z.enum([
 ]);
 
 const tripItineraryItemDraftSchema = z.object({
+  ...tripItemSharedFields,
+  dayId: z.number().int().positive().optional().nullable(),
   itemType: tripItemTypeSchema.optional(),
   description: z.string().trim().min(1, 'Item description is required').max(280),
   subtitle: z.string().trim().max(1000).optional().nullable(),
@@ -334,6 +414,8 @@ export const tripItineraryItemAddSchema = z.object({
 
 export const tripItineraryItemUpdateSchema = z
   .object({
+    ...tripItemSharedFields,
+    dayId: z.number().int().positive().optional().nullable(),
     itemType: tripItemTypeSchema.optional(),
     description: z.string().trim().min(1).max(280).optional(),
     subtitle: z.string().trim().max(1000).optional().nullable(),
@@ -359,6 +441,51 @@ export const tripItineraryItemUpdateSchema = z
     (value) => Object.keys(value).length > 0,
     'At least one field must be updated',
   );
+
+/** "YYYY-MM-DD". Matches the TripDay.dateKey convention. */
+const dateKeySchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
+
+export const tripDayCreateSchema = z.object({
+  afterDayId: z.number().int().positive().optional().nullable(),
+  atStart: z.boolean().optional(),
+  dateKey: dateKeySchema.optional().nullable(),
+  title: z.string().trim().max(160).optional().nullable(),
+});
+
+export const tripDayUpdateSchema = z
+  .object({
+    title: z.string().trim().max(160).optional().nullable(),
+    summary: z.string().trim().max(4000).optional().nullable(),
+    dateKey: dateKeySchema.optional().nullable(),
+  })
+  .refine(
+    (value) =>
+      value.title !== undefined || value.summary !== undefined || value.dateKey !== undefined,
+    'At least one field must be updated',
+  );
+
+export const tripDayDuplicateSchema = z.object({
+  includeEvents: z.boolean().optional(),
+});
+
+export const tripDayReorderSchema = z.object({
+  dayIds: z.array(z.number().int().positive()).min(1).max(60),
+});
+
+export const tripItemReorderSchema = z.object({
+  days: z
+    .array(
+      z.object({
+        dayId: z.number().int().positive().nullable(),
+        itemIds: z.array(z.number().int().positive()).max(200),
+      }),
+    )
+    .min(1)
+    .max(60),
+});
 
 export const tripFromQuoteSchema = z.object({
   ownerId: z.number().int().positive().optional().nullable(),
@@ -482,4 +609,105 @@ export const invoicePaymentSchema = z.object({
 export const invoiceFromQuoteSchema = z.object({
   quoteId: z.number().int().positive('Quote is required'),
   dueInDays: z.number().int().gte(0).lte(365).optional(),
+});
+
+/* ------------------------------------------------------------------- map module */
+
+export const mapHexColorSchema = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, 'Use a #rrggbb colour');
+
+export const mapStrokeDashSchema = z.enum(['solid', 'dashed', 'dotted']);
+
+export const mapStyleSchema = z.object({
+  stroke: mapHexColorSchema,
+  strokeWidth: z.number().int().min(0).max(20),
+  strokeDash: mapStrokeDashSchema,
+  fill: mapHexColorSchema,
+  fillOpacity: z.number().min(0).max(1),
+});
+
+/** A GeoJSON geometry. Coordinates are checked structurally by lib/geo-geometry. */
+export const mapGeometrySchema = z.object({
+  type: z.enum([
+    'Point',
+    'MultiPoint',
+    'LineString',
+    'MultiLineString',
+    'Polygon',
+    'MultiPolygon',
+  ]),
+  coordinates: z.array(z.unknown()),
+});
+
+export const mapGeofenceGeometrySchema = z.union([
+  z.object({ type: z.literal('Polygon'), coordinates: z.array(z.unknown()) }),
+  z.object({
+    type: z.literal('Circle'),
+    center: z.tuple([z.number(), z.number()]),
+    radius: z.number().positive(),
+  }),
+]);
+
+export const mapCategoryCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(60),
+  color: mapHexColorSchema.default('#03458f'),
+  icon: z.string().trim().min(1).max(32).default('pin'),
+  scope: z.enum(['feature', 'device', 'both']).default('both'),
+});
+
+export const mapCategoryUpdateSchema = mapCategoryCreateSchema
+  .partial()
+  .extend({ sortOrder: z.number().int().min(0).optional() });
+
+export const mapLayerCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(80),
+  categoryId: z.number().int().positive().nullable().optional(),
+});
+
+export const mapLayerUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  visible: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+  categoryId: z.number().int().positive().nullable().optional(),
+  style: mapStyleSchema.optional(),
+});
+
+export const mapFeatureCreateSchema = z.object({
+  name: z.string().trim().max(120).default(''),
+  description: z.string().trim().max(2000).nullable().optional(),
+  geometry: mapGeometrySchema,
+  categoryId: z.number().int().positive().nullable().optional(),
+  icon: z.string().trim().max(32).nullable().optional(),
+  style: mapStyleSchema.partial().nullable().optional(),
+});
+
+export const mapFeatureUpdateSchema = mapFeatureCreateSchema.partial();
+
+export const mapGeofenceCreateSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Name is required').max(80),
+    shape: z.enum(['polygon', 'circle', 'rectangle']),
+    geometry: mapGeofenceGeometrySchema,
+    style: mapStyleSchema.optional(),
+    categoryId: z.number().int().positive().nullable().optional(),
+  })
+  .refine((v) => (v.shape === 'circle') === (v.geometry.type === 'Circle'), {
+    message: 'A circle zone needs a centre and radius; other shapes need a polygon.',
+    path: ['geometry'],
+  });
+
+export const mapGeofenceUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  geometry: mapGeofenceGeometrySchema.optional(),
+  style: mapStyleSchema.optional(),
+  visible: z.boolean().optional(),
+  categoryId: z.number().int().positive().nullable().optional(),
+});
+
+export const mapDeviceTagUpdateSchema = z.object({
+  device: z.string().trim().min(1).max(120),
+  categoryId: z.number().int().positive().nullable().optional(),
+  icon: z.string().trim().max(32).nullable().optional(),
+  label: z.string().trim().max(80).nullable().optional(),
 });

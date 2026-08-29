@@ -22,6 +22,9 @@ export type ScheduleShiftSummary = {
   id: number;
   employeeId: number;
   date: string;
+  /** The pattern this shift came from, when it was created from one. Drives
+   *  the colour it is drawn in, so the board reads at a glance. */
+  templateId: string | null;
   block: ShiftBlock;
 };
 
@@ -35,6 +38,7 @@ type Row = {
   id: number;
   employeeId: number;
   date: string;
+  templateId: string | null;
   type: string;
   startTime: string | null;
   endTime: string | null;
@@ -53,6 +57,7 @@ function serialize(row: Row): ScheduleShiftSummary {
     id: row.id,
     employeeId: row.employeeId,
     date: row.date,
+    templateId: row.templateId,
     block: {
       type: row.type as ShiftType,
       startTime: row.startTime,
@@ -73,6 +78,7 @@ const SELECT = {
   id: true,
   employeeId: true,
   date: true,
+  templateId: true,
   type: true,
   startTime: true,
   endTime: true,
@@ -123,6 +129,7 @@ export async function createShift(input: {
   employeeId: number;
   date: string;
   block: ShiftBlock;
+  templateId?: string | null;
 }): Promise<ScheduleShiftSummary> {
   if (!isValidDateKey(input.date)) throw new Error('Invalid date');
 
@@ -136,6 +143,7 @@ export async function createShift(input: {
     data: {
       employeeId: input.employeeId,
       date: input.date,
+      templateId: input.templateId ?? null,
       createdById: input.adminId,
       ...blockToData(input.block),
     },

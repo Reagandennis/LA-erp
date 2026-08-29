@@ -25,6 +25,7 @@ export default async function SignalPage() {
         subtitle: 'Direct messages & groups',
         searchPlaceholder: 'Search contacts & groups…',
         connectionNoun: 'Linked number',
+        newChatPlaceholder: '+254712345678',
       }}
     />
   );

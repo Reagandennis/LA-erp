@@ -239,3 +239,68 @@ export async function getZelloRoster(): Promise<ZelloRoster> {
     online: users.filter((u) => u.online).length,
   };
 }
+
+// --- Channel management ----------------------------------------------------
+
+export interface ZelloChannelCreateResult {
+  ok: boolean;
+  configured: boolean;
+  error: string | null;
+  name: string;
+}
+
+/**
+ * Zello Work channel names. Deliberately conservative — letters, digits,
+ * space, dot, hyphen and underscore, 1-40 chars. Zello itself may accept more;
+ * widen this if a legitimate name is rejected.
+ */
+const CHANNEL_NAME_RE = /^[A-Za-z0-9 ._-]{1,40}$/;
+
+export function isValidZelloChannelName(name: string): boolean {
+  return CHANNEL_NAME_RE.test(name);
+}
+
+export const CHANNEL_NAME_RULE =
+  'Channel names may use letters, numbers, spaces, dots, hyphens and underscores (max 40 characters).';
+
+/**
+ * Create a channel on the Zello Work network (`PUT /channel/add?name=…`).
+ *
+ * This is a WRITE against the live network, using the shared service account in
+ * ZELLO_USERNAME/ZELLO_PASSWORD — gate callers on admin, not on module access.
+ * Zello answers `{ code, status }` like the rest of the Server API; anything
+ * other than code "200" is surfaced verbatim so duplicate-name and permission
+ * errors reach the operator unchanged.
+ */
+export async function createZelloChannel(rawName: string): Promise<ZelloChannelCreateResult> {
+  const name = rawName.trim();
+  const fail = { ok: false, configured: true, name };
+
+  if (!isValidZelloChannelName(name)) {
+    return { ...fail, error: CHANNEL_NAME_RULE };
+  }
+
+  const session = await authenticate();
+  if ('error' in session) {
+    if (session.error === 'not-configured') {
+      return { ...fail, configured: false, error: 'Zello is not configured on this server.' };
+    }
+    return { ...fail, error: session.error };
+  }
+
+  const { base, cookie } = session;
+  try {
+    const res = await fetch(`${base}/channel/add?name=${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { cookie },
+      cache: 'no-store',
+    });
+    const data = (await res.json().catch(() => null)) as { code?: string; status?: string } | null;
+    if (!data || data.code !== '200') {
+      return { ...fail, error: data?.status ?? 'Zello rejected the new channel.' };
+    }
+    return { ok: true, configured: true, error: null, name };
+  } catch {
+    return { ...fail, error: 'Could not reach the Zello Work network.' };
+  }
+}

@@ -4,7 +4,7 @@ import { getServerAuth } from '@/lib/auth';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
 
-import MessagingConsole from '../_components/messaging-console';
+import TelegramConsole from './telegram-console';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,15 +17,5 @@ export default async function TelegramPage() {
     redirect('/dashboard');
   }
 
-  return (
-    <MessagingConsole
-      config={{
-        service: 'telegram',
-        title: 'Telegram',
-        subtitle: 'Bot conversations & groups',
-        searchPlaceholder: 'Search chats & groups…',
-        connectionNoun: 'Bot',
-      }}
-    />
-  );
+  return <TelegramConsole />;
 }

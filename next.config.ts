@@ -4,7 +4,11 @@ const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://accounts.google.com https://maps.googleapis.com",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://maps.gstatic.com https://*.googleapis.com",
+  // Raster map tiles are plain <img> loads, so every basemap host must be listed here.
+  "img-src 'self' data: blob: https://maps.gstatic.com https://*.googleapis.com " +
+    'https://*.tile.openstreetmap.org https://*.tile.opentopomap.org ' +
+    'https://server.arcgisonline.com https://*.basemaps.cartocdn.com ' +
+    'https://*.tile-cyclosm.openstreetmap.fr https://tileserver.memomaps.de',
   "connect-src 'self' https://*.googleapis.com https://accounts.google.com",
   "frame-src https://accounts.google.com",
   "frame-ancestors 'none'",

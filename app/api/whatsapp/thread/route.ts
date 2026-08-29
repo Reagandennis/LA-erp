@@ -1,33 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
-import { userHasModule, userHasRole } from '@/lib/user';
-import { listThread } from '@/lib/wacli';
+import { listThread, markRead } from '@/lib/messaging-repo';
+import { resolveMessagingRequest } from '@/lib/messaging-routes';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-type AuthUser = Parameters<typeof userHasRole>[0];
-function canUse(user: AuthUser): boolean {
-  return userHasRole(user, ADMIN_ROLE_NAME) || userHasModule(user, 'whatsapp');
-}
-
-/** Messages for one chat (oldest-first), from the local WhatsApp mirror. */
+/**
+ * One thread (oldest-first) from the mirror. `before` pages backwards through
+ * history so the console can lazy-load older messages instead of everything.
+ */
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
-  if (response || !auth) return response;
-  if (!canUse(auth.user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const { ctx, response } = await resolveMessagingRequest(request, 'whatsapp');
+  if (response || !ctx) return response;
+  if (!ctx.account) return NextResponse.json({ messages: [] });
 
   const { searchParams } = new URL(request.url);
-  const jid = (searchParams.get('jid') ?? '').trim();
-  if (!jid) return NextResponse.json({ error: 'A chat jid is required.' }, { status: 400 });
-  const limit = Math.min(Math.max(Number(searchParams.get('limit')) || 100, 1), 500);
+  // `jid` is accepted as an alias so older links keep working.
+  const id = (searchParams.get('id') ?? searchParams.get('jid') ?? '').trim();
+  if (!id) return NextResponse.json({ error: 'A chat id is required.' }, { status: 400 });
+  const limit = Math.min(Math.max(Number(searchParams.get('limit')) || 200, 1), 500);
+  const beforeRaw = searchParams.get('before');
+  const before = beforeRaw ? new Date(beforeRaw) : undefined;
 
-  try {
-    return NextResponse.json({ messages: await listThread(jid, limit) });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'wacli error', messages: [] }, { status: 502 });
-  }
+  const messages = await listThread(
+    ctx.account.id,
+    id,
+    limit,
+    before && !Number.isNaN(before.getTime()) ? before : undefined,
+  );
+  // Opening a thread clears its unread badge.
+  if (!before) await markRead(ctx.account.id, id);
+  return NextResponse.json({ messages });
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { requireAdminRequest } from '@/lib/request-auth';
 import { deleteDriverLicense, updateDriverLicense } from '@/lib/drivers';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,10 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ licenseId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  // Admin-only, matching POST and DELETE. This previously accepted any
+  // authenticated user, so anyone logged in could rewrite any licence's
+  // holder, number and expiry date.
+  const { auth, response } = await requireAdminRequest(request);
   if (response || !auth) return response;
 
   const { licenseId: raw } = await params;
@@ -30,6 +33,7 @@ export async function PATCH(
   const patch: {
     driverName?: string;
     licenseNumber?: string;
+    personnelId?: number | null;
     category?: string;
     expiryDate?: Date;
     lastVerified?: Date | null;
@@ -38,6 +42,7 @@ export async function PATCH(
 
   if (typeof body.driverName === 'string') patch.driverName = body.driverName;
   if (typeof body.licenseNumber === 'string') patch.licenseNumber = body.licenseNumber;
+  if (typeof body.personnelId === 'number' || body.personnelId === null) patch.personnelId = body.personnelId;
   if (typeof body.category === 'string') patch.category = body.category;
   if (typeof body.expiryDate === 'string' && body.expiryDate) {
     const d = new Date(body.expiryDate);

@@ -32,6 +32,10 @@ export async function POST(request: NextRequest) {
   const expiryRaw = String(formData.get('expiryDate') ?? '');
   const lastVerifiedRaw = String(formData.get('lastVerified') ?? '');
   const notes = String(formData.get('notes') ?? '');
+  // Licences are now added from the person, which passes their id through.
+  const personnelRaw = formData.get('personnelId');
+  const parsedPersonnelId = personnelRaw != null && String(personnelRaw) !== '' ? Number(String(personnelRaw)) : null;
+  const personnelId = Number.isInteger(parsedPersonnelId) && (parsedPersonnelId as number) > 0 ? parsedPersonnelId : null;
 
   if (!driverName.trim() || !licenseNumber.trim()) {
     return NextResponse.json({ error: 'Driver name and license number are required' }, { status: 400 });
@@ -61,6 +65,7 @@ export async function POST(request: NextRequest) {
     const item = await createDriverLicense({
       userId: auth.user.id,
       driverName,
+      personnelId,
       licenseNumber,
       category,
       expiryDate,

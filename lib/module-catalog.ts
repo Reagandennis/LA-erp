@@ -49,6 +49,43 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     category: 'Workforce',
     sortOrder: 7,
   },
+  // The four role directories. sortOrder is only compared within a category, so
+  // these sit straight after Personnel in the Workforce group despite the numbers.
+  {
+    slug: 'drivers',
+    name: 'Drivers',
+    description: 'Personnel who can be assigned as a driver, with licence compliance.',
+    category: 'Workforce',
+    sortOrder: 46,
+  },
+  {
+    slug: 'cpos',
+    name: 'Close Protection Officers',
+    description: 'Personnel who can be assigned as a CPO, with call sign and grade.',
+    category: 'Workforce',
+    sortOrder: 47,
+  },
+  {
+    slug: 'airport-greeters',
+    name: 'Airport Greeters',
+    description: 'Personnel who meet and escort travellers through airports.',
+    category: 'Workforce',
+    sortOrder: 48,
+  },
+  {
+    slug: 'security-advisors',
+    name: 'Security Advisors',
+    description: 'Personnel who advise on risk, planning, and protective posture.',
+    category: 'Workforce',
+    sortOrder: 49,
+  },
+  {
+    slug: 'travelers',
+    name: 'Travelers',
+    description: 'The people we protect — principals, family, and accompanying guests.',
+    category: 'Operations',
+    sortOrder: 50,
+  },
   {
     slug: 'vendors-suppliers',
     name: 'Vendors/Suppliers',
@@ -272,6 +309,13 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     description: 'Capture attendance, shift start and finish, and time punches.',
     category: 'Time',
     sortOrder: 37,
+  },
+  {
+    slug: 'shift-planning',
+    name: 'Shift Planning',
+    description: 'Plan shifts, manage teams, approve leave, and set public holidays.',
+    category: 'Time',
+    sortOrder: 38,
   },
   {
     slug: 'weather',

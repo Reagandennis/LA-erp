@@ -1,24 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
-import { userHasModule, userHasRole } from '@/lib/user';
+import { counts } from '@/lib/messaging-repo';
+import { resolveMessagingRequest } from '@/lib/messaging-routes';
 import { getStatus } from '@/lib/signal-cli';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-type AuthUser = Parameters<typeof userHasRole>[0];
-function canUse(user: AuthUser): boolean {
-  return userHasRole(user, ADMIN_ROLE_NAME) || userHasModule(user, 'signal');
-}
-
-/** signal-cli availability / linked-account status. */
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
-  if (response || !auth) return response;
-  if (!canUse(auth.user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-
-  return NextResponse.json(await getStatus());
+  const { ctx, response } = await resolveMessagingRequest(request, 'signal');
+  if (response || !ctx) return response;
+  const status = await getStatus(ctx.account?.handle ?? null);
+  // Counts come from the mirror so the header matches what the console shows.
+  if (ctx.account) status.counts = await counts(ctx.account.id);
+  return NextResponse.json(status);
 }

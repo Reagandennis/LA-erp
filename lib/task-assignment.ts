@@ -74,6 +74,8 @@ export type VehicleSummary = {
 export type DriverSummary = {
   id: number;
   name: string;
+  /** Master personnel record, when this resource mirrors one. */
+  personnelId: number | null;
   phone: string | null;
   licenseNumber: string | null;
   status: string;
@@ -85,6 +87,8 @@ export type DriverSummary = {
 export type OfficerSummary = {
   id: number;
   name: string;
+  /** Master personnel record, when this resource mirrors one. */
+  personnelId: number | null;
   callSign: string | null;
   grade: string;
   phone: string | null;
@@ -140,6 +144,7 @@ const VEHICLE_SELECT = {
 const DRIVER_SELECT = {
   id: true,
   name: true,
+  personnelId: true,
   phone: true,
   licenseNumber: true,
   status: true,
@@ -151,6 +156,7 @@ const DRIVER_SELECT = {
 const OFFICER_SELECT = {
   id: true,
   name: true,
+  personnelId: true,
   callSign: true,
   grade: true,
   phone: true,
@@ -181,6 +187,7 @@ function serializeVehicle(row: VehicleRow): VehicleSummary {
 
 type DriverRow = {
   id: number; name: string; phone: string | null; licenseNumber: string | null;
+  personnelId: number | null;
   status: string; notes: string | null; photoName: string | null; createdAt: Date;
 };
 function serializeDriver(row: DriverRow): DriverSummary {
@@ -190,6 +197,7 @@ function serializeDriver(row: DriverRow): DriverSummary {
 
 type OfficerRow = {
   id: number; name: string; callSign: string | null; grade: string;
+  personnelId: number | null;
   phone: string | null; status: string; notes: string | null;
   photoName: string | null; createdAt: Date;
 };
@@ -229,12 +237,22 @@ export async function listVehicles(): Promise<VehicleSummary[]> {
 }
 
 export async function listDrivers(): Promise<DriverSummary[]> {
-  const rows = await prisma.driver.findMany({ orderBy: [{ name: 'asc' }], select: DRIVER_SELECT });
+  // Retired mirrors are kept so historical assignments never dangle, but they
+  // are not offered for new work.
+  const rows = await prisma.driver.findMany({
+    where: { retiredAt: null },
+    orderBy: [{ name: 'asc' }],
+    select: DRIVER_SELECT,
+  });
   return rows.map(serializeDriver);
 }
 
 export async function listOfficers(): Promise<OfficerSummary[]> {
-  const rows = await prisma.officer.findMany({ orderBy: [{ name: 'asc' }], select: OFFICER_SELECT });
+  const rows = await prisma.officer.findMany({
+    where: { retiredAt: null },
+    orderBy: [{ name: 'asc' }],
+    select: OFFICER_SELECT,
+  });
   return rows.map(serializeOfficer);
 }
 

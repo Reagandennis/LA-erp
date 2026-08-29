@@ -256,8 +256,9 @@ The seed step creates or updates the bootstrap administrator from these values.
 | `OPENSKY_USERNAME`, `OPENSKY_PASSWORD` | Flight Tracker (OpenSky)  |
 | `ZELLO_*`                         | Radio / Zello (see below) |
 | `WACLI_BIN`                       | WhatsApp (path to the `wacli` binary) |
-| `TELEGRAM_BOT_TOKEN`              | Telegram (bot token from @BotFather) |
-| `SIGNAL_CLI_BIN`, `SIGNAL_CLI_ACCOUNT` | Signal (path to `signal-cli`; linked/registered E.164 number) |
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | Telegram (app credentials from my.telegram.org) |
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | Telegram (app credentials from my.telegram.org) |
+| `SIGNAL_CLI_BIN`                  | Signal (path to `signal-cli`; accounts are linked per user) |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online integration |
 | `QUICKBOOKS_REDIRECT_URI`, `QUICKBOOKS_ENVIRONMENT` | QuickBooks OAuth callback & `sandbox`/`production` |
 | `WAVE_CLIENT_ID`, `WAVE_CLIENT_SECRET` | Wave (waveapps.com) accounting — per-brand sync |
@@ -365,24 +366,55 @@ issuer/private key for token auth) or in-browser settings. Relevant variables:
 `ZELLO_API_KEY`, `ZELLO_ISSUER`, `ZELLO_PRIVATE_KEY`, `ZELLO_RETENTION_DAYS`,
 `ZELLO_TRANSCRIBE_MODEL`.
 
-### WhatsApp
-Backed by the external `wacli` CLI. Set `WACLI_BIN` to the binary path. The CLI
-requires a one-time `wacli auth` and an always-on `wacli sync --follow` process
-to keep the inbox current.
+### Messaging (WhatsApp · Telegram · Signal)
 
-### Telegram
-Backed by the Telegram Bot API. Create a bot with [@BotFather](https://t.me/BotFather),
-set `TELEGRAM_BOT_TOKEN`, then message the bot (or add it to a group with group
-privacy disabled). Conversations accumulate as messages arrive; because the Bot
-API has no history endpoint, the module keeps an in-process store, so run the app
-as a long-lived server (not serverless) to retain it.
+All three work the same way: **each user links their own account** by scanning a
+QR code from inside the module — no server CLI, no shared inbox. A conversation
+is only ever visible to the person whose account received it, and there is no
+admin override on the message routes.
 
-### Signal
-Backed by the external [`signal-cli`](https://github.com/AsamK/signal-cli). Link or
-register an account (`signal-cli link` / `register`), set `SIGNAL_CLI_ACCOUNT` to its
-E.164 number, and `SIGNAL_CLI_BIN` if the binary isn't on `PATH`. Like WhatsApp this
-needs an always-on host; the module drains `signal-cli receive` into an in-process
-store as messages arrive.
+| Provider | Linked with | Server prerequisite |
+| --- | --- | --- |
+| WhatsApp | QR → WhatsApp → Linked devices | the `wacli` binary (`WACLI_BIN` if not on PATH) |
+| Signal | QR → Signal → Linked devices | the `signal-cli` binary (`SIGNAL_CLI_BIN` if not on PATH) |
+| Telegram | QR → Telegram → Devices, or phone + code | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` from [my.telegram.org](https://my.telegram.org) |
+
+Photos, video, audio and documents work in both directions on all three;
+attachments are streamed through `GET /api/<provider>/media` behind the same
+permission check, never inlined into the thread JSON.
+
+**Architecture.** Conversations are mirrored into Postgres (`MessagingChat` /
+`MessagingMessage`) and the UI reads only from there, so opening a module is a
+single indexed query rather than a CLI round-trip. Providers write into the
+mirror from background ingest, never on a request path:
+
+| Provider | How messages arrive | Live? |
+| --- | --- | --- |
+| WhatsApp | `wacli sync --follow --webhook` POSTs each message to `/api/messaging/webhook` | yes, push |
+| Telegram | MTProto update stream on the signed-in client | yes, push |
+| Signal | background `receive` loop every 10s (the queue has no push channel) | ~10s |
+
+New messages reach the browser over SSE at `/api/messaging/stream`; the event
+carries only the affected chat ids and the client refetches from Postgres, so a
+dropped or duplicated event can't corrupt the view. The old 4s/8s polling is
+gone — a 60s tick remains only as a safety net for a dropped stream.
+
+This also fixes a correctness bug: `signal-cli receive` *pops* messages off the
+server queue, and it used to run inside every HTTP request. A request that died
+mid-drain lost those messages permanently. Ingest now writes them to Postgres
+before anything else can interrupt.
+
+**Operational note.** WhatsApp still needs a long-lived `wacli sync --follow`
+process *per linked account*. `instrumentation.ts` starts one for every linked
+account at boot and restarts them with backoff; they stop when an account is
+unlinked. Plan host memory accordingly: N linked users means N wacli processes.
+Telegram holds one MTProto connection per signed-in user; Signal spawns a short
+`receive` per tick.
+
+Telegram accounts with two-step verification cannot complete a QR login — the
+module offers phone → code → password sign-in for those. Telegram serves history
+from its own servers, so it survives restarts; Signal's queue is drain-once, so
+its history is what the app has seen while running.
 
 ### AI Chatbot
 Set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) to enable AI-assisted

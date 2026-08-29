@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { fileResponse } from '@/lib/file-response';
 import { getPersonnelPhoto, setPersonnelPhoto } from '@/lib/personnel';
+import { PEOPLE_MODULE_SLUGS } from '@/lib/people-views';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 import { requireRequestAuth } from '@/lib/request-auth';
@@ -10,7 +11,6 @@ import { userHasModule, userHasRole } from '@/lib/user';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const PERSONNEL_MODULE = 'personnel';
 
 function parseId(value: string) {
   const n = Number(value);
@@ -18,7 +18,10 @@ function parseId(value: string) {
 }
 
 function canView(user: Parameters<typeof userHasRole>[0]) {
-  return userHasRole(user, ADMIN_ROLE_NAME) || userHasModule(user, PERSONNEL_MODULE);
+  // Any of the five people modules may render this avatar.
+  return (
+    userHasRole(user, ADMIN_ROLE_NAME) || PEOPLE_MODULE_SLUGS.some((slug) => userHasModule(user, slug))
+  );
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

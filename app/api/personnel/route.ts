@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { isPersonnelRole, PEOPLE_MODULE_SLUGS } from '@/lib/people-views';
 import { createPersonnel, listPersonnel, listUserOptions } from '@/lib/personnel';
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  // Serves all five people modules, so any of their grants is enough. This
+  // was previously bare `requireRequestAuth`, which handed the full staff
+  // directory to every logged-in user regardless of module access.
+  const { auth, response } = await requireModuleRequest(request, ...PEOPLE_MODULE_SLUGS);
   if (response || !auth) return response;
 
-  const [items, users] = await Promise.all([listPersonnel(), listUserOptions()]);
+  const roleParam = request.nextUrl.searchParams.get('role');
+  const role = isPersonnelRole(roleParam) ? roleParam : null;
+
+  const [items, users] = await Promise.all([listPersonnel({ role }), listUserOptions()]);
   return NextResponse.json({ items, users });
 }
 
@@ -36,6 +43,11 @@ export async function POST(request: NextRequest) {
       manager: body.manager ?? null,
       joinDate: typeof body.joinDate === 'string' ? body.joinDate : null,
       skills: body.skills,
+      roles: body.roles,
+      engagement: typeof body.engagement === 'string' ? body.engagement : undefined,
+      supplierName: body.supplierName ?? null,
+      callSign: body.callSign ?? null,
+      grade: body.grade ?? null,
       notes: body.notes ?? null,
       userId: typeof body.userId === 'number' ? body.userId : null,
     });

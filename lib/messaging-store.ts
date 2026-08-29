@@ -23,13 +23,33 @@ export interface StoredChat {
   unread: boolean;
 }
 
+export type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker';
+
+/**
+ * Provider-agnostic descriptor for an attachment.
+ *
+ * `ref` is an opaque, provider-specific token that `GET /api/<service>/media`
+ * can resolve back into bytes — a signal-cli attachment id, a Telegram message
+ * id, a wacli message id. It is never a filesystem path: the media route
+ * resolves it through the provider, so a crafted value can't escape the store.
+ */
+export interface StoredMedia {
+  kind: MediaKind;
+  ref: string;
+  mimeType: string | null;
+  fileName: string | null;
+  sizeBytes: number | null;
+}
+
 export interface StoredMessage {
   id: string;
   chatId: string;
   senderName: string;
   fromMe: boolean;
+  /** Caption when the message carries media, otherwise the message body. */
   text: string;
   timestamp: string;
+  media?: StoredMedia | null;
 }
 
 const MAX_MESSAGES_PER_CHAT = 500;

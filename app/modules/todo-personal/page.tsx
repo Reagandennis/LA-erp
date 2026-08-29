@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import CalendarClient, { type CalendarExtraEvent } from '@/app/modules/calendar/calendar-client';
+import { useBanner } from '@/app/ui/banner';
+import { dateKeyFromIso, dayFromIso, isoFromDateKey } from '@/lib/date-grid';
+import GanttChart from './gantt-chart';
 import KanbanBoard from './kanban-board';
 
 
@@ -59,6 +62,7 @@ type Task = {
   list: string;
   dueDate: string | null;
   dueDateIso?: string | null;
+  startDateIso?: string | null;
   status: string;
   assignees: number;
   completed?: boolean;
@@ -119,12 +123,26 @@ type ApiTask = {
   description: string | null;
   priority: string;
   status?: string;
+  startDate?: string | null;
   dueDate: string | null;
   completed: boolean;
   deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+/** The fields a re-render would actually be able to show. */
+const taskFingerprint = (task: Task) =>
+  [
+    task.id,
+    task.title,
+    task.status,
+    task.priority,
+    task.startDateIso ?? '',
+    task.dueDateIso ?? '',
+    task.completed ? '1' : '0',
+    task.deletedAt ?? '',
+  ].join('\u0000');
 
 const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
   try {
@@ -153,6 +171,7 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
         list: task.isShared ? 'Shared' : 'Personal',
         dueDate,
         dueDateIso: task.dueDate,
+        startDateIso: task.startDate ?? null,
         status,
         assignees: 0,
         completed: task.completed,
@@ -683,6 +702,7 @@ export default function TodoPersonalPage() {
 
   const [description, setDescription] = useState<string>('');
   const [dueTime, setDueTime] = useState<string>('');
+  const banner = useBanner();
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
   const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string>('');
@@ -910,8 +930,8 @@ export default function TodoPersonalPage() {
     setEditedTask((current) => (current ? { ...current, description: value } : current));
   };
   const handleEditDueDateChange = (value: string) => {
-    const isoValue = value ? new Date(value).toISOString() : null;
-    const displayValue = value ? new Date(value).toLocaleDateString() : null;
+    const isoValue = isoFromDateKey(value);
+    const displayValue = dayFromIso(isoValue)?.toLocaleDateString() ?? null;
     setEditedTask((current) =>
       current
         ? {
@@ -920,6 +940,11 @@ export default function TodoPersonalPage() {
             dueDate: displayValue,
           }
         : current,
+    );
+  };
+  const handleEditStartDateChange = (value: string) => {
+    setEditedTask((current) =>
+      current ? { ...current, startDateIso: isoFromDateKey(value) } : current,
     );
   };
   const handleSaveTaskChanges = async () => {
@@ -937,7 +962,7 @@ export default function TodoPersonalPage() {
         // Merge time into due-date ISO string
         let finalDueDate = updatedTask.dueDateIso ?? null;
         if (finalDueDate && dueTime) {
-          const base = finalDueDate.slice(0, 10);
+          const base = dateKeyFromIso(finalDueDate) ?? '';
           const merged = new Date(`${base}T${dueTime}:00`);
           if (!Number.isNaN(merged.getTime())) finalDueDate = merged.toISOString();
         }
@@ -950,6 +975,7 @@ export default function TodoPersonalPage() {
             description: updatedTask.description ?? null,
             priority: updatedTask.priority.toLowerCase(),
             status: updatedTask.status,
+            startDate: updatedTask.startDateIso ?? null,
             dueDate: finalDueDate,
           }),
         });
@@ -1020,19 +1046,106 @@ export default function TodoPersonalPage() {
   const DONE_COLUMN_RE = /done|complete|closed|review|shipped/i;
   const isTaskOverdue = (task: Task) => {
     if (DONE_COLUMN_RE.test(task.status)) return false;
-    const raw = task.dueDateIso ?? task.dueDate ?? '';
-    if (!raw) return false;
-    const due = new Date(raw);
-    if (Number.isNaN(due.getTime())) return false;
+    const due = dayFromIso(task.dueDateIso);
+    if (!due) return false;
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     return due < startOfToday;
   };
-  const handleGanttTaskOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
-    const taskId = event.currentTarget.dataset.taskId;
-    if (!taskId) return;
+  const handleTaskOpenById = (taskId: string) => {
     const task = tasks.find((item) => item.id === taskId);
     if (task) openTaskDrawer(task);
+  };
+
+  /**
+   * Ids with a write in flight. The 10s poll below replaces the whole task
+   * list, so without this an optimistic drag would be reverted to the pre-drag
+   * server copy for the second or two before its PUT lands.
+   */
+  const pendingWritesRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Bumped on every optimistic edit. A poll that was already in flight when the
+   * edit happened carries pre-edit data, and `pendingWritesRef` alone wouldn't
+   * catch it — that request can land after the PUT has resolved and the id has
+   * been cleared. Comparing the epoch across the fetch discards those replies.
+   */
+  const writeEpochRef = useRef(0);
+
+  const mergeFetchedTasks = useCallback((nextTasks: Task[], epochAtFetch: number) => {
+    if (epochAtFetch !== writeEpochRef.current) return;
+    setTasks((current) => {
+      const pending = pendingWritesRef.current;
+      const merged =
+        pending.size === 0
+          ? nextTasks
+          : (() => {
+              const local = new Map(current.map((task) => [task.id, task]));
+              return nextTasks.map((task) =>
+                pending.has(task.id) ? local.get(task.id) ?? task : task,
+              );
+            })();
+
+      // Keep the old array when nothing visible changed. Without this the poll
+      // hands every view a fresh array every 10s and the whole page re-renders
+      // on a timer, defeating the memoised timeline geometry.
+      if (
+        merged.length === current.length &&
+        merged.every((task, index) => taskFingerprint(task) === taskFingerprint(current[index]))
+      ) {
+        return current;
+      }
+      return merged;
+    });
+  }, []);
+
+  const handleGanttReschedule = (taskId: string, startKey: string, dueKey: string) => {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const startIso = isoFromDateKey(startKey);
+    const dueIso = isoFromDateKey(dueKey);
+    if (!startIso || !dueIso) return;
+
+    const previous = {
+      startDateIso: task.startDateIso ?? null,
+      dueDateIso: task.dueDateIso ?? null,
+      dueDate: task.dueDate,
+    };
+    const optimistic = {
+      startDateIso: startIso,
+      dueDateIso: dueIso,
+      dueDate: dayFromIso(dueIso)?.toLocaleDateString() ?? null,
+    };
+
+    writeEpochRef.current += 1;
+    setTasks((current) =>
+      current.map((item) => (item.id === taskId ? { ...item, ...optimistic } : item)),
+    );
+
+    if (!task.dbId) return;
+    pendingWritesRef.current.add(taskId);
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/planning/tasks/${task.dbId}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate: startIso, dueDate: dueIso }),
+        });
+        if (!response.ok) {
+          throw new Error('Save failed');
+        }
+      } catch {
+        setTasks((current) =>
+          current.map((item) => (item.id === taskId ? { ...item, ...previous } : item)),
+        );
+        banner.error('Could not save the new dates — the task has been put back.');
+      } finally {
+        pendingWritesRef.current.delete(taskId);
+      }
+    })();
   };
   useEffect(() => {
     const controller = new AbortController();
@@ -1048,9 +1161,10 @@ export default function TodoPersonalPage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      const epochAtFetch = writeEpochRef.current;
       fetchTasks()
         .then((nextTasks) => {
-          setTasks(nextTasks);
+          mergeFetchedTasks(nextTasks, epochAtFetch);
         })
         .catch(() => {
           // ignore
@@ -1058,7 +1172,7 @@ export default function TodoPersonalPage() {
     }, 10000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [mergeFetchedTasks]);
 
   useEffect(() => {
     let isActive = true;
@@ -1465,18 +1579,35 @@ export default function TodoPersonalPage() {
                   <p className="text-sm font-semibold text-gray-900">Timeline Date</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <input
-                    type="date"
-                    value={editedTask.dueDateIso ? editedTask.dueDateIso.slice(0, 10) : ''}
-                    onChange={(event) => handleEditDueDateChange(event.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <input
-                    type="time"
-                    value={dueTime}
-                    onChange={(event) => setDueTime(event.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
+                  <label className="text-xs font-medium text-gray-500">
+                    Start
+                    <input
+                      type="date"
+                      value={dateKeyFromIso(editedTask.startDateIso) ?? ''}
+                      max={dateKeyFromIso(editedTask.dueDateIso) ?? undefined}
+                      onChange={(event) => handleEditStartDateChange(event.target.value)}
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </label>
+                  <label className="text-xs font-medium text-gray-500">
+                    Due
+                    <input
+                      type="date"
+                      value={dateKeyFromIso(editedTask.dueDateIso) ?? ''}
+                      min={dateKeyFromIso(editedTask.startDateIso) ?? undefined}
+                      onChange={(event) => handleEditDueDateChange(event.target.value)}
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </label>
+                  <label className="text-xs font-medium text-gray-500 sm:col-span-2">
+                    Due time
+                    <input
+                      type="time"
+                      value={dueTime}
+                      onChange={(event) => setDueTime(event.target.value)}
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </label>
                 </div>
               </div>
 
@@ -1727,227 +1858,12 @@ export default function TodoPersonalPage() {
     </>
   );
 
-  const renderGanttView = (tasks: Task[]) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // Use ISO dates for reliable parsing
-    const dueDates = tasks
-      .map((task) => {
-        const raw = task.dueDateIso ?? task.dueDate;
-        if (!raw) return null;
-        const d = new Date(raw);
-        d.setHours(0, 0, 0, 0);
-        return Number.isNaN(d.getTime()) ? null : d;
-      })
-      .filter((d): d is Date => d !== null);
-
-    // Timeline starts 2 days before earliest due date (or today), ends 4 days after latest
-    const earliestDue = dueDates.length > 0 ? new Date(Math.min(...dueDates.map((d) => d.getTime()))) : new Date(today);
-    const latestDue  = dueDates.length > 0 ? new Date(Math.max(...dueDates.map((d) => d.getTime()))) : new Date(today);
-
-    const ganttStartDate = new Date(earliestDue);
-    ganttStartDate.setDate(ganttStartDate.getDate() - 3);
-
-    const ganttEndDate = new Date(latestDue);
-    ganttEndDate.setDate(ganttEndDate.getDate() + 5);
-
-    const ganttDays = Math.max(10, Math.ceil((ganttEndDate.getTime() - ganttStartDate.getTime()) / 86_400_000) + 1);
-
-    const days = Array.from({ length: ganttDays }, (_, i) => {
-      const date = new Date(ganttStartDate);
-      date.setDate(date.getDate() + i);
-      return date;
-    });
-
-    // Each column is exactly (1 / ganttDays * 100)% wide.
-    // Bar ENDS on the due date column; spans BAR_SPAN_DAYS wide (or fewer if near start).
-    const COL_PCT = 100 / ganttDays;
-    const BAR_SPAN_DAYS = 4;
-
-    const getTaskPosition = (task: Task) => {
-      const raw = task.dueDateIso ?? task.dueDate;
-      if (!raw) return null;
-      const dueDay = new Date(raw);
-      dueDay.setHours(0, 0, 0, 0);
-      if (Number.isNaN(dueDay.getTime())) return null;
-
-      // Index of the due-date column (0-based)
-      const dueIndex = Math.round((dueDay.getTime() - ganttStartDate.getTime()) / 86_400_000);
-      if (dueIndex < 0 || dueIndex >= ganttDays) return null;
-
-      const spanCols = Math.min(BAR_SPAN_DAYS, dueIndex + 1); // can't go before column 0
-      const startCol = dueIndex - spanCols + 1;
-
-      return {
-        left: `${startCol * COL_PCT}%`,
-        width: `${spanCols * COL_PCT}%`,
-        isOverdue: dueDay < today,
-      };
-    };
-
-    const GANTT_BAR_COLORS: Record<string, string> = {
-      Backlog: '#94a3b8',
-      'In progress': '#6366f1',
-      'In review': '#10b981',
-    };
-    const PRIORITY_BAR_COLORS: Record<string, string> = {
-      High: '#f43f5e',
-      Medium: '#f59e0b',
-      Low: '#38bdf8',
-    };
-
-    const todayIndex = Math.round((today.getTime() - ganttStartDate.getTime()) / 86_400_000);
-    const todayPosition = (todayIndex / ganttDays) * 100;
-
-    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const ROW_H = 56;
-
-    return (
-      <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.2)]">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Timeline</h3>
-            <p className="text-xs text-slate-500">Task schedule across time.</p>
-          </div>
-          <div className="flex items-center gap-4 text-[11px] text-slate-500">
-            {Object.entries(GANTT_BAR_COLORS).map(([label, color]) => (
-              <span key={label} className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color }} />
-                {label}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Table */}
-        <div className="overflow-x-auto rounded-2xl border border-slate-100">
-          <div className="flex" style={{ minWidth: `${Math.max(900, 192 + ganttDays * 48)}px` }}>
-
-            {/* Left sidebar */}
-            <div className="w-48 shrink-0 border-r border-slate-100 bg-[#f8fafc]">
-              {/* Header row */}
-              <div className="flex h-12 items-center border-b border-slate-100 px-4">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Task</span>
-              </div>
-              {tasks.map((task) => {
-                const barColor = GANTT_BAR_COLORS[task.status] ?? PRIORITY_BAR_COLORS[task.priority] ?? '#94a3b8';
-                return (
-                  <button
-                    key={task.id}
-                    type="button"
-                    data-task-id={task.id}
-                    className="flex w-full items-center gap-2.5 border-b border-slate-100 px-4 transition-colors hover:bg-slate-50 cursor-pointer text-left"
-                    style={{ height: ROW_H }}
-                    onClick={handleGanttTaskOpen}
-                  >
-                    <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: barColor }} />
-                    <p className="truncate text-[13px] font-medium text-slate-800">{task.title}</p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Timeline grid */}
-            <div className="relative flex-1">
-              {/* Today line */}
-              {todayPosition >= 0 && todayPosition <= 100 && (
-                <div
-                  className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-indigo-500"
-                  style={{ left: `${todayPosition}%` }}
-                >
-                  <span className="absolute -top-1 left-1 rounded bg-indigo-500 px-1 py-0.5 text-[9px] font-bold text-white leading-none">
-                    Today
-                  </span>
-                </div>
-              )}
-
-              {/* Date header */}
-              <div className="flex h-12 border-b border-slate-100 bg-[#f8fafc]">
-                {days.map((date) => {
-                  const isToday =
-                    date.getFullYear() === today.getFullYear() &&
-                    date.getMonth() === today.getMonth() &&
-                    date.getDate() === today.getDate();
-                  return (
-                    <div
-                      key={date.toISOString()}
-                      className={`flex flex-1 flex-col items-center justify-center border-r border-slate-100 last:border-r-0 ${
-                        isToday ? 'bg-indigo-50' : ''
-                      }`}
-                    >
-                      <span className={`text-[9px] font-medium uppercase ${isToday ? 'text-indigo-400' : 'text-slate-400'}`}>
-                        {weekDays[date.getDay()]}
-                      </span>
-                      <span className={`text-[11px] font-bold ${isToday ? 'text-indigo-600' : 'text-slate-700'}`}>
-                        {date.getDate()}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Rows */}
-              {tasks.map((task) => {
-                return (
-                  <div
-                    key={task.id}
-                    className="relative flex border-b border-slate-100 last:border-b-0"
-                    style={{ height: ROW_H }}
-                  >
-                    {/* Grid lines */}
-                    {days.map((date) => (
-                      <div
-                        key={date.toISOString()}
-                        className="flex-1 border-r border-slate-100/70 last:border-r-0"
-                      />
-                    ))}
-                    {/* Bar */}
-                    {(() => {
-                      const pos = getTaskPosition(task);
-                      if (!pos) return null;
-                      const barColor = GANTT_BAR_COLORS[task.status] ?? PRIORITY_BAR_COLORS[task.priority] ?? '#94a3b8';
-                      const barBg = pos.isOverdue ? '#f43f5e' : barColor;
-                      return (
-                        <div className="absolute inset-y-0 flex items-center" style={{ left: pos.left, width: pos.width }}>
-                          <button
-                            type="button"
-                            data-task-id={task.id}
-                            className="relative mx-1 flex h-8 w-full items-center overflow-hidden rounded-lg px-3 text-[11px] font-semibold text-white shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-all hover:brightness-110"
-                            style={{ backgroundColor: barBg }}
-                            title={task.title}
-                            onClick={handleGanttTaskOpen}
-                          >
-                            <span className="truncate drop-shadow-sm">{task.title}</span>
-                          </button>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                );
-              })}
-
-              {tasks.length === 0 && (
-                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
-                  No tasks to display on the timeline.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const renderCalendarView = (tasks: Task[]) => {
     // Personal tasks shown by their due date, overlaid on the full calendar.
     const taskEvents: CalendarExtraEvent[] = tasks
       .map((task) => {
-        const raw = task.dueDateIso ?? task.dueDate ?? '';
-        if (!raw) return null;
-        const parsed = new Date(raw);
-        if (Number.isNaN(parsed.getTime())) return null;
+        const parsed = dayFromIso(task.dueDateIso);
+        if (!parsed) return null;
         return {
           key: String(task.id),
           title: task.title,
@@ -2053,7 +1969,9 @@ export default function TodoPersonalPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
+      {/* The timeline wants every pixel it can get; the other views read
+          better in a fixed column. */}
+      <div className={`mx-auto ${activeView === 'gantt' ? 'max-w-none' : 'max-w-7xl'}`}>
         {notifications.length > 0 && (
           <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/5 px-5 py-4 text-primary">
             <p className="text-sm font-semibold mb-2">Shared with you</p>
@@ -2146,7 +2064,16 @@ export default function TodoPersonalPage() {
         {/* Content Area */}
         {activeView === 'kanban' && renderKanbanView(tasks.filter((t) => taskMatchesScope(t, scope)))}
         {activeView === 'list' && renderListView(tasks.filter((t) => taskMatchesScope(t, scope)))}
-        {activeView === 'gantt' && renderGanttView(tasks.filter((t) => taskMatchesScope(t, scope)))}
+        {activeView === 'gantt' && (
+          <GanttChart
+            tasks={orderedKanbanTasks(tasks.filter((t) => taskMatchesScope(t, scope)))}
+            columns={kanbanColumns}
+            columnColors={columnColors}
+            isTaskOverdue={(task) => isTaskOverdue(task as Task)}
+            onOpenTask={handleTaskOpenById}
+            onReschedule={handleGanttReschedule}
+          />
+        )}
         {activeView === 'calendar' && renderCalendarView(tasks.filter((t) => taskMatchesScope(t, scope)))}
         {activeView === 'dashboard' && renderDashboardView(tasks.filter((t) => !t.deletedAt))}
 
@@ -2246,20 +2173,37 @@ export default function TodoPersonalPage() {
 
                 {/* Due date */}
                 <div className="mb-6 pb-6 border-b border-gray-200">
-                  <p className="text-sm font-semibold text-gray-900 mb-3">Due Date</p>
+                  <p className="text-sm font-semibold text-gray-900 mb-3">Dates</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="date"
-                      value={editedTask.dueDateIso ? editedTask.dueDateIso.slice(0, 10) : ''}
-                      onChange={(e) => handleEditDueDateChange(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                    <input
-                      type="time"
-                      value={dueTime}
-                      onChange={(e) => setDueTime(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
+                    <label className="text-xs font-medium text-gray-500">
+                      Start
+                      <input
+                        type="date"
+                        value={dateKeyFromIso(editedTask.startDateIso) ?? ''}
+                        max={dateKeyFromIso(editedTask.dueDateIso) ?? undefined}
+                        onChange={(e) => handleEditStartDateChange(e.target.value)}
+                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-gray-500">
+                      Due
+                      <input
+                        type="date"
+                        value={dateKeyFromIso(editedTask.dueDateIso) ?? ''}
+                        min={dateKeyFromIso(editedTask.startDateIso) ?? undefined}
+                        onChange={(e) => handleEditDueDateChange(e.target.value)}
+                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-gray-500 col-span-2">
+                      Due time
+                      <input
+                        type="time"
+                        value={dueTime}
+                        onChange={(e) => setDueTime(e.target.value)}
+                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </label>
                   </div>
                 </div>
 

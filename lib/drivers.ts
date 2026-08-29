@@ -18,6 +18,8 @@ export const EXPIRING_SOON_DAYS = 30;
 export type DriverLicenseSummary = {
   id: number;
   driverName: string;
+  /** Owning personnel record; null for legacy rows that never matched a person. */
+  personnelId: number | null;
   licenseNumber: string;
   category: string;
   expiryDate: string;
@@ -60,6 +62,7 @@ export function computeStatus(expiry: Date): { status: LicenseStatus; daysRemain
 type LicenseRow = {
   id: number;
   driverName: string;
+  personnelId: number | null;
   licenseNumber: string;
   category: string;
   expiryDate: Date;
@@ -77,6 +80,7 @@ function serialize(row: LicenseRow): DriverLicenseSummary {
   return {
     id: row.id,
     driverName: row.driverName,
+    personnelId: row.personnelId,
     licenseNumber: row.licenseNumber,
     category: row.category,
     expiryDate: row.expiryDate.toISOString(),
@@ -95,6 +99,7 @@ function serialize(row: LicenseRow): DriverLicenseSummary {
 const LICENSE_SELECT = {
   id: true,
   driverName: true,
+  personnelId: true,
   licenseNumber: true,
   category: true,
   expiryDate: true,
@@ -127,6 +132,7 @@ export function computeStats(items: DriverLicenseSummary[]): DriverLicenseStats 
 export async function createDriverLicense(input: {
   userId: number;
   driverName: string;
+  personnelId?: number | null;
   licenseNumber: string;
   category: string;
   expiryDate: Date;
@@ -150,6 +156,7 @@ export async function createDriverLicense(input: {
       lastVerified: input.lastVerified ?? null,
       notes: input.notes?.trim() || null,
       createdById: input.userId,
+      personnelId: input.personnelId ?? null,
       ...(input.document
         ? {
             documentName: input.document.name,
@@ -168,6 +175,7 @@ export async function updateDriverLicense(
   id: number,
   patch: {
     driverName?: string;
+    personnelId?: number | null;
     licenseNumber?: string;
     category?: string;
     expiryDate?: Date;
@@ -183,6 +191,7 @@ export async function updateDriverLicense(
     const v = patch.driverName.trim();
     if (v) data.driverName = v;
   }
+  if (patch.personnelId !== undefined) data.personnelId = patch.personnelId;
   if (patch.licenseNumber !== undefined) {
     const v = patch.licenseNumber.trim();
     if (v) data.licenseNumber = v;
@@ -239,4 +248,42 @@ export async function getDriverLicenseDocument(
     mime: row.documentMime ?? 'application/octet-stream',
     content: Buffer.from(row.documentContent),
   };
+}
+
+// --- Person-scoped licences ------------------------------------------------
+
+/**
+ * Licences held by one person, soonest expiry first. Editing a licence now
+ * happens on the person; the standalone compliance module is a read-only
+ * watchlist over the same rows.
+ */
+export async function listLicensesForPersonnel(personnelId: number): Promise<DriverLicenseSummary[]> {
+  const rows = await prisma.driverLicense.findMany({
+    where: { personnelId },
+    orderBy: [{ expiryDate: 'asc' }],
+    select: LICENSE_SELECT,
+  });
+  return rows.map(serialize);
+}
+
+/** Attach an orphaned licence to a person (or detach it with null). */
+export async function linkLicenseToPersonnel(
+  licenseId: number,
+  personnelId: number | null,
+): Promise<DriverLicenseSummary | null> {
+  const existing = await prisma.driverLicense.findUnique({ where: { id: licenseId }, select: { id: true } });
+  if (!existing) return null;
+
+  // Keep the denormalised display name true to the person we just linked.
+  const person = personnelId
+    ? await prisma.personnel.findUnique({ where: { id: personnelId }, select: { name: true } })
+    : null;
+  if (personnelId && !person) return null;
+
+  const row = await prisma.driverLicense.update({
+    where: { id: licenseId },
+    data: { personnelId, ...(person ? { driverName: person.name } : {}) },
+    select: LICENSE_SELECT,
+  });
+  return serialize(row);
 }

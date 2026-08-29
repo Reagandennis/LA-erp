@@ -34,6 +34,14 @@ model User {
   createdCrmActivities           CrmActivity[]                   @relation("CrmActivityCreatedBy")
   quickbooksConnections          QuickBooksConnection[]          @relation("QuickBooksConnectedBy")
   waveConnections                WaveConnection[]                @relation("WaveConnectedBy")
+  messagingAccounts              MessagingAccount[]              @relation("MessagingAccountOwner")
+  shiftTemplatesCreated          ShiftTemplate[]                 @relation("ShiftTemplateCreatedBy")
+  shiftTemplateMemberships       ShiftTemplateMember[]           @relation("ShiftTemplateMemberUser")
+  teamsCreated                   Team[]                          @relation("TeamCreatedBy")
+  teamMemberships                TeamMember[]                    @relation("TeamMemberUser")
+  leaveRequests                  LeaveRequest[]                  @relation("LeaveRequestUser")
+  leaveDecisions                 LeaveRequest[]                  @relation("LeaveRequestDecidedBy")
+  publicHolidaysCreated          PublicHoliday[]                 @relation("PublicHolidayCreatedBy")
   createdQuotes                  Quote[]                         @relation("QuoteCreatedBy")
   approvableQuotes               Quote[]                         @relation("QuoteApprover")
   quoteNotifications             QuoteNotification[]
@@ -79,7 +87,11 @@ model User {
   createdContracts               Contract[]                      @relation("ContractCreatedBy")
   notes                          Note[]                          @relation("NoteOwner")
   createdPersonnel               Personnel[]                     @relation("PersonnelCreatedBy")
+  createdTravelers               Traveler[]                      @relation("TravelerCreatedBy")
   personnelRecord                Personnel?                      @relation("PersonnelUser")
+  createdMapCategories           MapCategory[]                   @relation("MapCategoryCreatedBy")
+  createdMapLayers               MapLayer[]                      @relation("MapLayerCreatedBy")
+  createdMapGeofences            MapGeofence[]                   @relation("MapGeofenceCreatedBy")
 }
 
 model PersonalTodo {
@@ -89,6 +101,7 @@ model PersonalTodo {
   description   String?
   priority      String                     @default("medium")
   status        String                     @default("Backlog")
+  startDate     DateTime?
   dueDate       DateTime?
   completed     Boolean                    @default(false)
   completedAt   DateTime?
@@ -296,6 +309,7 @@ model Customer {
   invoices             Invoice[]
   trips                Trip[]
   contacts             Contact[]
+  travelers            Traveler[]
   deals                Deal[]
   crmActivities        CrmActivity[]
 
@@ -709,6 +723,94 @@ model WaveConnection {
   connectedBy          User     @relation("WaveConnectedBy", fields: [connectedById], references: [id], onDelete: Restrict)
 }
 
+/// One linked messaging account, owned by exactly one platform user.
+///
+/// Each user links their own WhatsApp / Telegram / Signal, so a thread is only
+/// ever visible to the person whose account received it — there is no admin
+/// override for reading someone else's conversations.
+model MessagingAccount {
+  id       Int    @id @default(autoincrement())
+  userId   Int
+  /// 'whatsapp' | 'telegram' | 'signal'
+  provider String
+
+  /// Provider-side identifier for this account:
+  ///   whatsapp -> the `wacli accounts` name (isolated store directory)
+  ///   signal   -> the linked E.164 number
+  ///   telegram -> the account's phone number, for display
+  handle String
+
+  /// Human-readable name shown in the console header.
+  label String?
+
+  /// Telegram only: the GramJS StringSession. A full account credential —
+  /// never returned to the browser. WhatsApp and Signal keep their own
+  /// credentials in their CLI store directories instead.
+  session String?
+
+  /// High-water mark for incremental provider backfill (wacli `messages list
+  /// --after`, Telegram message ids). Null until the first sync completes.
+  syncedUpTo DateTime?
+
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  user      User               @relation("MessagingAccountOwner", fields: [userId], references: [id], onDelete: Cascade)
+  chats     MessagingChat[]
+  messages  MessagingMessage[]
+
+  /// One account per provider per user.
+  @@unique([userId, provider])
+  @@index([provider])
+}
+
+/// A conversation mirrored from a linked messaging account.
+///
+/// The UI reads chats and messages from Postgres, never from the provider, so
+/// opening a module is a single indexed query instead of a CLI round-trip.
+model MessagingChat {
+  id            Int              @id @default(autoincrement())
+  accountId     Int
+  /// Provider-side chat id (JID, phone number, `group:<id>`, Telegram peer id).
+  chatId        String
+  kind          String           @default("dm")
+  name          String
+  lastMessageAt DateTime
+  unreadCount   Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  account       MessagingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, chatId])
+  @@index([accountId, lastMessageAt])
+}
+
+/// One mirrored message. Media bytes are never stored here — only the provider
+/// reference needed to stream them on demand through /api/<provider>/media.
+model MessagingMessage {
+  id         Int      @id @default(autoincrement())
+  accountId  Int
+  chatId     String
+  /// Provider-side message id; unique per chat so re-ingest is idempotent.
+  messageId  String
+  senderName String
+  fromMe     Boolean  @default(false)
+  text       String   @default("")
+  at         DateTime
+
+  mediaKind String?
+  mediaRef  String?
+  mediaMime String?
+  mediaName String?
+  mediaSize Int?
+
+  createdAt DateTime         @default(now())
+  account   MessagingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, chatId, messageId])
+  @@index([accountId, chatId, at])
+  @@index([accountId, at])
+}
+
 model Trip {
   id            Int                 @id @default(autoincrement())
   reference     String              @unique
@@ -732,6 +834,8 @@ model Trip {
   owner         User?               @relation("TripOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   items         TripItineraryItem[]
   assignments   TripAssignment[]
+  days          TripDay[]
+  travelers     TripTraveler[]
 
   @@index([createdById, status])
   @@index([ownerId, status])
@@ -742,10 +846,28 @@ model Trip {
 model TripItineraryItem {
   id                    Int                             @id @default(autoincrement())
   tripId                Int
+  dayId                 Int?
   position              Int
+  /// Legacy 5-value type. Retained for one release as a rollback path; new
+  /// code reads `category`.
   itemType              String                          @default("activity")
+  /// activity | lodging | flight | transportation | cruise | tour | booking | information
+  category              String                          @default("activity")
   description           String
   subtitle              String?
+  /// Long-form description shown under the title.
+  body                  String?
+  /// ARRIVAL / DEPARTURE / CHECK-IN / CHECK-OUT / PICK-UP / DROP-OFF, or free text.
+  timeLabel             String?
+  /// Airline, hotel chain, rental company, tour operator — whoever supplies it.
+  providerName          String?
+  bookingUrl            String?
+  phone                 String?
+  placeName             String?
+  address               String?
+  /// Category-specific fields. Shape is enforced by a zod discriminated union
+  /// at the API edge rather than by 40 sparse columns nothing else queries.
+  details               Json?
   quantity              Decimal                         @db.Decimal(12, 2)
   unitPrice             Decimal?                        @db.Decimal(14, 2)
   completedAt           DateTime?
@@ -759,13 +881,38 @@ model TripItineraryItem {
   imageUrl              String?
   confirmationCode      String?
   trip                  Trip                            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  day                   TripDay?                        @relation(fields: [dayId], references: [id], onDelete: SetNull)
   sourceQuoteItem       QuoteItem?                      @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
   notifications         TripItineraryItemNotification[]
 
+  @@index([dayId, position])
+  @@index([tripId, category])
   @@index([tripId, position])
   @@index([tripId, scheduledAt])
   @@index([reminderAt, reminderSentAt])
   @@index([sourceQuoteItemId])
+}
+
+model TripDay {
+  id        Int                 @id @default(autoincrement())
+  tripId    Int
+  /// "YYYY-MM-DD", or null for a trip whose dates are still TBD.
+  /// Deliberately a string, not DateTime: Prisma hands a date column back as
+  /// UTC midnight, which reads as the previous day west of Greenwich. A date
+  /// key round-trips unchanged and sorts lexicographically. Same convention as
+  /// ScheduleShift.date.
+  dateKey   String?
+  /// Dense 1..N. The only ordering key, and the "Day 3" label when undated.
+  dayNumber Int
+  title     String?
+  summary   String?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  trip      Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  items     TripItineraryItem[]
+
+  @@index([tripId, dayNumber])
+  @@index([tripId, dateKey])
 }
 
 model TripItineraryItemNotification {
@@ -815,6 +962,12 @@ model Vehicle {
 model Driver {
   id            Int              @id @default(autoincrement())
   name          String
+  /// Master personnel record this resource mirrors. SetNull, never Cascade:
+  /// TripAssignment history points here and must survive a personnel delete.
+  personnelId   Int?             @unique
+  /// Set when the person loses the Driver role. The row is KEPT so historical
+  /// TripAssignment.driverId never dangles; retired rows are hidden from pickers.
+  retiredAt     DateTime?
   phone         String?
   licenseNumber String?
   status        String           @default("Available")
@@ -827,6 +980,7 @@ model Driver {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   createdBy     User             @relation("DriverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  personnel     Personnel?       @relation(fields: [personnelId], references: [id], onDelete: SetNull)
   assignments   TripAssignment[]
 
   @@index([status])
@@ -836,6 +990,10 @@ model Driver {
 model Officer {
   id           Int              @id @default(autoincrement())
   name         String
+  /// Master personnel record this resource mirrors. See Driver.personnelId.
+  personnelId  Int?             @unique
+  /// See Driver.retiredAt.
+  retiredAt    DateTime?
   callSign     String?
   grade        String           @default("CPO")
   phone        String?
@@ -849,6 +1007,7 @@ model Officer {
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
   createdBy    User             @relation("OfficerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  personnel    Personnel?       @relation(fields: [personnelId], references: [id], onDelete: SetNull)
   assignments  TripAssignment[]
 
   @@index([status])
@@ -1049,10 +1208,13 @@ model FeedbackComment {
 }
 
 model DriverLicense {
-  id              Int       @id @default(autoincrement())
+  id              Int        @id @default(autoincrement())
+  /// Owning personnel record. Nullable: legacy rows and rows whose driverName
+  /// did not uniquely match a person stay unlinked rather than being guessed.
+  personnelId     Int?
   driverName      String
   licenseNumber   String
-  category        String    @default("Class A")
+  category        String     @default("Class A")
   expiryDate      DateTime
   lastVerified    DateTime?
   notes           String?
@@ -1061,12 +1223,14 @@ model DriverLicense {
   documentSize    Int?
   documentContent Bytes?
   createdById     Int
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  createdBy       User      @relation("DriverLicenseCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  createdBy       User       @relation("DriverLicenseCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  personnel       Personnel? @relation(fields: [personnelId], references: [id], onDelete: SetNull)
 
   @@index([expiryDate])
   @@index([driverName])
+  @@index([personnelId])
 }
 
 model StoredFile {
@@ -1151,9 +1315,134 @@ model CalendarEventNotification {
   @@index([userId, createdAt])
 }
 
+/// A recurring shift pattern — "Morning, 9am–5pm, Mon–Fri".
+///
+/// Templates are what managers maintain; individual ScheduleShift rows are what
+/// actually lands on the board. Keeping them separate means editing a pattern
+/// never silently rewrites history that has already been worked.
+model ShiftTemplate {
+  id        String  @id @default(cuid())
+  name      String
+  /// 24h "HH:MM". Stored as text because a shift has no date of its own, and an
+  /// overnight shift legitimately ends before it starts (22:00 → 06:00).
+  startTime String
+  endTime   String
+  /// ISO weekdays this pattern runs on: 1 = Monday … 7 = Sunday.
+  weekdays  Int[]   @default([])
+  /// Palette key, not a raw colour — the UI owns the actual values.
+  colour    String  @default("blue")
+  active    Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User?    @relation("ShiftTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  members ShiftTemplateMember[]
+  teams   ShiftTemplateTeam[]
+  shifts  ScheduleShift[]
+
+  @@index([active, sortOrder])
+}
+
+/// A named group of people that can be rostered as a unit.
+model Team {
+  id     String @id @default(cuid())
+  name   String @unique
+  colour String @default("emerald")
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User?    @relation("TeamCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  members        TeamMember[]
+  shiftTemplates ShiftTemplateTeam[]
+}
+
+model TeamMember {
+  id     String @id @default(cuid())
+  teamId String
+  userId Int
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user   User   @relation("TeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId])
+}
+
+/// One person attached to a shift pattern.
+model ShiftTemplateMember {
+  id         String @id @default(cuid())
+  templateId String
+  userId     Int
+  /// Contracted hours for this person on this shift; the pattern's own span is
+  /// the default, but part-timers differ.
+  hours      Int?
+
+  template ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user     User          @relation("ShiftTemplateMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, userId])
+  @@index([userId])
+}
+
+/// A whole team attached to a shift pattern.
+model ShiftTemplateTeam {
+  id         String @id @default(cuid())
+  templateId String
+  teamId     String
+  hours      Int?
+
+  template ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  team     Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, teamId])
+}
+
+/// Time off. Anyone may request; only a manager approves.
+model LeaveRequest {
+  id        String  @id @default(cuid())
+  userId    Int
+  /// annual | sick | casual | unpaid
+  type      String  @default("annual")
+  /// Inclusive 'YYYY-MM-DD' bounds, matching ScheduleShift.date.
+  startDate String
+  endDate   String
+  /// pending | approved | declined
+  status    String  @default("pending")
+  note      String?
+
+  decidedById Int?
+  decidedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user      User  @relation("LeaveRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User? @relation("LeaveRequestDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([startDate, endDate])
+  @@index([userId, startDate])
+}
+
+/// A non-working day shown across the whole calendar.
+model PublicHoliday {
+  id   String @id @default(cuid())
+  /// 'YYYY-MM-DD'
+  date String @unique
+  name String
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  createdBy   User?    @relation("PublicHolidayCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+}
+
 model ScheduleShift {
-  id             Int       @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   employeeId     Int
+  /// Set when the shift came from a pattern; null for one-off shifts.
+  templateId     String?
   date           String // 'YYYY-MM-DD'
   type           String
   startTime      String?
@@ -1168,10 +1457,11 @@ model ScheduleShift {
   totalTasks     Int?
   publishedAt    DateTime?
   createdById    Int?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  employee       User      @relation("ScheduleEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  createdBy      User?     @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  employee       User           @relation("ScheduleEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  template       ShiftTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdBy      User?          @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   // No longer @@unique([employeeId, date]) — an employee can have multiple
   // shifts on the same day (split shifts, overlapping coverage).
@@ -1295,28 +1585,42 @@ model SopRevision {
 
 // A workforce / HR record. Standalone, with an optional link to a login (User) account.
 model Personnel {
-  id           Int       @id @default(autoincrement())
-  name         String
-  email        String?
-  phone        String?
-  role         String? // job title
-  department   String    @default("Operations")
-  status       String    @default("Active") // Active | On Leave | Remote | Terminated
-  location     String?
-  manager      String? // manager name (free text)
-  joinDate     DateTime?
-  skills       String[]  @default([])
-  notes        String?
-  userId       Int?      @unique // optional one-to-one link to a login account
-  photoName    String?
-  photoMime    String?
-  photoSize    Int?
-  photoContent Bytes?
-  createdById  Int
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  createdBy    User      @relation("PersonnelCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  user         User?     @relation("PersonnelUser", fields: [userId], references: [id], onDelete: SetNull)
+  id             Int             @id @default(autoincrement())
+  name           String
+  email          String?
+  phone          String?
+  role           String? // job title
+  department     String          @default("Operations")
+  status         String          @default("Active") // Active | On Leave | Remote | Terminated
+  location       String?
+  manager        String? // manager name (free text)
+  joinDate       DateTime?
+  skills         String[]        @default([])
+  /// Operational roles this person can be assigned in. A person may hold
+  /// several, e.g. ["CPO", "Driver"]. See PERSONNEL_ROLES in lib/personnel.ts.
+  roles          String[]        @default([])
+  /// How this person is engaged: Employee | Vendor | Consultant | Contractor.
+  engagement     String          @default("Employee")
+  /// Vendor/consultancy that supplied them, when engagement is not Employee.
+  supplierName   String?
+  /// Radio call sign — CPOs.
+  callSign       String?
+  /// CPO | Team Leader | Detail Leader — CPOs.
+  grade          String?
+  notes          String?
+  userId         Int?            @unique // optional one-to-one link to a login account
+  photoName      String?
+  photoMime      String?
+  photoSize      Int?
+  photoContent   Bytes?
+  createdById    Int
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  createdBy      User            @relation("PersonnelCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  user           User?           @relation("PersonnelUser", fields: [userId], references: [id], onDelete: SetNull)
+  licenses       DriverLicense[]
+  driverProfile  Driver?
+  officerProfile Officer?
 
   @@index([department])
   @@index([status])
@@ -1324,6 +1628,60 @@ model Personnel {
 }
 
 // A personal, user-scoped quick note (sticky-board style).
+/// A person we protect (a principal / protectee), as opposed to Personnel, who
+/// are the people we assign to work. Carries sensitive PII -- passport, date of
+/// birth, medical -- which is why it sits behind its own `travelers` module grant.
+model Traveler {
+  id                    Int            @id @default(autoincrement())
+  name                  String
+  /// Client account this traveller belongs to.
+  customerId            Int?
+  email                 String?
+  phone                 String?
+  nationality           String?
+  dateOfBirth           DateTime?
+  passportNumber        String?
+  passportExpiry        DateTime?
+  status                String         @default("Active")
+  riskLevel             String         @default("Standard")
+  dietaryNotes          String?
+  medicalNotes          String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  notes                 String?
+  photoName             String?
+  photoMime             String?
+  photoSize             Int?
+  photoContent          Bytes?
+  createdById           Int
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  customer              Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy             User           @relation("TravelerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  trips                 TripTraveler[]
+
+  @@index([customerId])
+  @@index([name])
+  @@index([status])
+  @@index([passportExpiry])
+}
+
+/// Join between a trip and the travellers on it.
+model TripTraveler {
+  id         Int      @id @default(autoincrement())
+  tripId     Int
+  travelerId Int
+  /// The lead protectee on this trip, when there is more than one.
+  isPrimary  Boolean  @default(false)
+  notes      String?
+  createdAt  DateTime @default(now())
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  traveler   Traveler @relation(fields: [travelerId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, travelerId])
+  @@index([travelerId])
+}
+
 model Note {
   id        Int      @id @default(autoincrement())
   userId    Int
@@ -1380,4 +1738,142 @@ model UploadLimitSettings {
   logoMb      Int      @default(1)
   updatedById Int?
   updatedAt   DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Map workspace. Geometry is GeoJSON in Json columns: PostGIS is not enabled and
+// Prisma has no geometry type, so an Unsupported() column would force every read
+// through $queryRaw and break the SELECT/serialize pattern the rest of lib/ uses.
+// The only spatial question we ask — is this device inside that zone — is
+// answered by lib/geo-geometry.ts over a handful of zones.
+// ---------------------------------------------------------------------------
+
+/// A named colour + icon, assignable to imported/drawn features, to zones and to
+/// live-tracked devices. Shared org-wide, like Trips and Files.
+model MapCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  color       String   @default("#03458f")
+  /// Key into MAP_ICONS in app/modules/map/map-icons.ts.
+  icon        String   @default("pin")
+  /// feature | device | both — which pickers offer this category.
+  scope       String   @default("both")
+  sortOrder   Int      @default(0)
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy  User               @relation("MapCategoryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  layers     MapLayer[]
+  features   MapFeature[]
+  geofences  MapGeofence[]
+  deviceTags MapDeviceTag[]
+
+  @@index([sortOrder])
+}
+
+/// A group of features: one import, one drawing surface, or an uploaded set of
+/// reference borders that draws underneath everything else.
+model MapLayer {
+  id           Int     @id @default(autoincrement())
+  name         String
+  /// drawn | import | boundary (an uploaded reference-border layer)
+  kind         String  @default("drawn")
+  /// kmz | kml | csv — set on imported layers only.
+  source       String?
+  fileName     String?
+  fileMime     String?
+  fileSize     Int?
+  /// The original upload, kept so it can be downloaded or re-parsed later.
+  /// Never included in a list SELECT.
+  fileContent  Bytes?
+  visible      Boolean @default(true)
+  sortOrder    Int     @default(0)
+  categoryId   Int?
+  /// MapStyle — the layer default its features inherit.
+  style        Json?
+  /// Bounding box over the layer's features, so "fit to layer" needs no feature read.
+  minLat       Float?
+  minLng       Float?
+  maxLat       Float?
+  maxLng       Float?
+  featureCount Int     @default(0)
+
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User         @relation("MapLayerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  category  MapCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  features  MapFeature[]
+
+  @@index([kind, sortOrder])
+  @@index([categoryId])
+}
+
+/// One place or shape. `geometry` is a GeoJSON geometry object.
+model MapFeature {
+  id           Int     @id @default(autoincrement())
+  layerId      Int
+  categoryId   Int?
+  name         String  @default("")
+  description  String?
+  /// Point | LineString | Polygon | MultiPoint | MultiLineString | MultiPolygon
+  geometryType String
+  geometry     Json
+  /// KML ExtendedData and surplus CSV columns, kept for the info window.
+  properties   Json?
+  /// Partial MapStyle overriding the layer default.
+  style        Json?
+  /// Overrides the category icon for this one feature.
+  icon         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  layer    MapLayer     @relation(fields: [layerId], references: [id], onDelete: Cascade)
+  category MapCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([layerId])
+  @@index([categoryId])
+}
+
+/// A named zone. Polygons hold a GeoJSON Polygon; circles hold a centre and a
+/// radius in metres, because polygonising a circle loses the radius on edit.
+model MapGeofence {
+  id          Int      @id @default(autoincrement())
+  name        String
+  /// polygon | circle | rectangle
+  shape       String   @default("polygon")
+  geometry    Json
+  /// MapStyle.
+  style       Json?
+  visible     Boolean  @default(true)
+  categoryId  Int?
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User         @relation("MapGeofenceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  category  MapCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId])
+  @@index([visible])
+}
+
+/// Category, icon and label overrides for a live-tracked device. Keyed by the
+/// Zello username rather than an FK: ZelloDeviceLocation rows are keyed by
+/// (network, channel, device) and churn, but the username is stable.
+model MapDeviceTag {
+  id         Int      @id @default(autoincrement())
+  device     String   @unique
+  categoryId Int?
+  icon       String?
+  label      String?
+  hidden     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category MapCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId])
 }

@@ -2,37 +2,30 @@ import 'server-only';
 
 import { execFile } from 'child_process';
 
-import { ConversationStore } from './messaging-store';
+import type { StoredMedia } from './messaging-store';
 
 /**
  * Signal integration via the `signal-cli` binary
  * (https://github.com/AsamK/signal-cli).
  *
- * Like WhatsApp/wacli this needs an always-on host and a linked/registered
- * account; unlike wacli, `signal-cli receive` *pops* pending messages off the
- * server queue, so we drain it into an in-process ConversationStore (see its
- * note about server lifetime). History resets on restart, and messages are
- * only captured while the app is polling.
+ * Each platform user links their OWN Signal number from the module UI by
+ * scanning a QR code — see lib/messaging-link.ts. signal-cli keeps every linked
+ * account side by side in one data directory and selects between them with
+ * `-a <number>`, so all state here is keyed by that number and one user never
+ * sees another's messages.
  *
- * Setup on the host (NOT serverless):
- *   1. Install signal-cli and register or link an account:
- *        signal-cli link -n "LA-ERP"      (scan from Signal → Linked devices)
- *      or register a dedicated number with `signal-cli register`.
- *   2. Set SIGNAL_CLI_ACCOUNT to that E.164 number (e.g. +15551234567).
- *   3. Optionally set SIGNAL_CLI_BIN if the binary isn't on PATH.
+ * `signal-cli receive` *pops* pending messages off the server queue, so we drain
+ * it into a per-account in-process ConversationStore. History resets on restart,
+ * and messages are only captured while the app is polling — so this needs an
+ * always-on host, not a serverless one.
  *
  * Env:
- *   SIGNAL_CLI_BIN      absolute path to the binary (default: "signal-cli")
- *   SIGNAL_CLI_ACCOUNT  registered/linked account number in E.164 (required)
+ *   SIGNAL_CLI_BIN  absolute path to the binary (default: "signal-cli")
  */
 
 const BIN = (process.env.SIGNAL_CLI_BIN ?? '').trim() || 'signal-cli';
-const ACCOUNT = (process.env.SIGNAL_CLI_ACCOUNT ?? '').trim();
 const GROUP_PREFIX = 'group:';
 
-const store = new ConversationStore();
-const groupNames = new Map<string, string>();
-let lastReceiveOk = false;
 
 /** Run signal-cli with an args array (no shell). Resolves raw stdout. */
 function run(args: string[], timeoutMs = 30_000): Promise<string> {
@@ -52,113 +45,27 @@ function run(args: string[], timeoutMs = 30_000): Promise<string> {
   });
 }
 
-interface SignalDataMessage {
-  message?: string | null;
-  timestamp?: number;
-  groupInfo?: { groupId?: string } | null;
-}
-
-interface SignalEnvelope {
-  source?: string;
-  sourceNumber?: string;
-  sourceUuid?: string;
-  sourceName?: string;
-  timestamp?: number;
-  dataMessage?: SignalDataMessage | null;
-  syncMessage?: { sentMessage?: (SignalDataMessage & { destination?: string }) | null } | null;
-}
-
-interface SignalLine {
-  envelope?: SignalEnvelope;
-}
-
-function senderId(env: SignalEnvelope): string {
-  return env.sourceNumber || env.source || env.sourceUuid || 'unknown';
-}
-
-function ingestDataMessage(
-  env: SignalEnvelope,
-  data: SignalDataMessage,
-  opts: { fromMe: boolean; destination?: string },
-): void {
-  const text = (data.message ?? '').trim();
-  if (!text) return; // skip receipts, typing, empty payloads
-
-  const groupId = data.groupInfo?.groupId;
-  const ts = new Date(data.timestamp || env.timestamp || Date.now()).toISOString();
-
-  if (groupId) {
-    const chatId = `${GROUP_PREFIX}${groupId}`;
-    store.addMessage(
-      {
-        id: `${chatId}:${data.timestamp || env.timestamp}`,
-        chatId,
-        senderName: opts.fromMe ? 'You' : env.sourceName || senderId(env),
-        fromMe: opts.fromMe,
-        text,
-        timestamp: ts,
+/**
+ * Same as `run`, but keeps stdout as raw bytes. `getAttachment` streams the
+ * decrypted file to stdout, and decoding that as UTF-8 would corrupt it.
+ */
+function runBinary(args: string[], timeoutMs = 30_000): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    execFile(
+      BIN,
+      args,
+      { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer', env: process.env },
+      (err, stdout, stderr) => {
+        const bytes = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? '');
+        if (err && bytes.length === 0) {
+          const message = Buffer.isBuffer(stderr) ? stderr.toString('utf8').trim() : String(stderr ?? '');
+          reject(new Error(message || err.message));
+          return;
+        }
+        resolve(bytes);
       },
-      { id: chatId, kind: 'group', name: groupNames.get(groupId) || 'Signal group' },
     );
-    return;
-  }
-
-  // Direct message: the other party is the sender (inbound) or destination (sync-sent).
-  const other = opts.fromMe ? opts.destination || senderId(env) : senderId(env);
-  store.addMessage(
-    {
-      id: `${other}:${data.timestamp || env.timestamp}`,
-      chatId: other,
-      senderName: opts.fromMe ? 'You' : env.sourceName || other,
-      fromMe: opts.fromMe,
-      text,
-      timestamp: ts,
-    },
-    { id: other, kind: 'dm', name: env.sourceName || other },
-  );
-}
-
-/** Drain pending messages from the server queue into the store. */
-async function receiveIntoStore(): Promise<void> {
-  if (!ACCOUNT) return;
-  try {
-    const out = await run(['-o', 'json', '-a', ACCOUNT, 'receive', '--timeout', '1'], 20_000);
-    for (const line of out.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let parsed: SignalLine;
-      try {
-        parsed = JSON.parse(trimmed) as SignalLine;
-      } catch {
-        continue;
-      }
-      const env = parsed.envelope;
-      if (!env) continue;
-      if (env.dataMessage) {
-        ingestDataMessage(env, env.dataMessage, { fromMe: false });
-      } else if (env.syncMessage?.sentMessage) {
-        const sent = env.syncMessage.sentMessage;
-        ingestDataMessage(env, sent, { fromMe: true, destination: sent.destination });
-      }
-    }
-    lastReceiveOk = true;
-  } catch {
-    lastReceiveOk = false;
-  }
-}
-
-/** Refresh the group-id → name map (best-effort). */
-async function refreshGroupNames(): Promise<void> {
-  if (!ACCOUNT) return;
-  try {
-    const out = await run(['-o', 'json', '-a', ACCOUNT, 'listGroups'], 15_000);
-    const parsed = JSON.parse(out) as Array<{ id?: string; name?: string }>;
-    for (const g of parsed) {
-      if (g.id && g.name) groupNames.set(g.id, g.name);
-    }
-  } catch {
-    // best-effort; group chats fall back to a generic name
-  }
+  });
 }
 
 export interface SignalStatus {
@@ -171,53 +78,47 @@ export interface SignalStatus {
   error?: string;
 }
 
-export async function getStatus(): Promise<SignalStatus> {
-  let available = false;
+/**
+ * `account` is the user's linked number, or null when they haven't linked yet.
+ * A null account still reports whether the binary is installed, so the UI can
+ * distinguish "signal-cli missing on the server" from "you haven't linked".
+ */
+export async function getStatus(account: string | null): Promise<SignalStatus> {
+  const counts = { chats: 0, messages: 0 };
   try {
     await run(['--version'], 8_000);
-    available = true;
   } catch (e) {
     return {
       available: false,
       authenticated: false,
       connected: false,
       label: null,
-      counts: store.counts(),
+      counts,
       error: e instanceof Error ? e.message : 'signal-cli not found',
-      hint: 'Install signal-cli and set SIGNAL_CLI_BIN if it is not on PATH.',
+      hint: 'Install signal-cli on the server (and set SIGNAL_CLI_BIN if it is not on PATH).',
     };
   }
 
-  if (!ACCOUNT) {
+  if (!account) {
     return {
-      available,
+      available: true,
       authenticated: false,
       connected: false,
       label: null,
-      counts: store.counts(),
-      hint: 'Register or link an account, then set SIGNAL_CLI_ACCOUNT to its number.',
+      counts,
+      hint: 'Scan the QR code with Signal to link your account.',
     };
   }
 
-  await refreshGroupNames();
-  await receiveIntoStore();
+  // Receiving happens in the background ingest loop, never here — this call
+  // used to run `signal-cli receive`, which blocked the request for seconds.
   return {
-    available,
+    available: true,
     authenticated: true,
-    connected: lastReceiveOk,
-    label: ACCOUNT,
-    counts: store.counts(),
+    connected: true,
+    label: account,
+    counts,
   };
-}
-
-export async function listChats() {
-  await receiveIntoStore();
-  return store.listChats();
-}
-
-export async function listThread(chatId: string, limit = 200) {
-  await receiveIntoStore();
-  return store.listThread(chatId, limit);
 }
 
 export interface SendResult {
@@ -225,32 +126,111 @@ export interface SendResult {
   error?: string;
 }
 
-export async function sendText(chatId: string, message: string): Promise<SendResult> {
-  if (!ACCOUNT) return { ok: false, error: 'SIGNAL_CLI_ACCOUNT is not set' };
+export async function sendText(account: string, chatId: string, message: string): Promise<SendResult> {
+  if (!account) return { ok: false, error: 'No Signal account is linked.' };
   const isGroup = chatId.startsWith(GROUP_PREFIX);
   const target = isGroup ? chatId.slice(GROUP_PREFIX.length) : chatId;
   const args = isGroup
-    ? ['-o', 'json', '-a', ACCOUNT, 'send', '-m', message, '-g', target]
-    : ['-o', 'json', '-a', ACCOUNT, 'send', '-m', message, target];
+    ? ['-o', 'json', '-a', account, 'send', '-m', message, '-g', target]
+    : ['-o', 'json', '-a', account, 'send', '-m', message, target];
   try {
     await run(args, 60_000);
-    store.addMessage(
-      {
-        id: `out:${chatId}:${Date.now()}`,
-        chatId,
-        senderName: 'You',
-        fromMe: true,
-        text: message,
-        timestamp: new Date().toISOString(),
-      },
-      {
-        id: chatId,
-        kind: isGroup ? 'group' : 'dm',
-        name: isGroup ? groupNames.get(target) || 'Signal group' : target,
-      },
-    );
+    // The sent message is mirrored when it comes back as a sync message on the
+    // next drain — nothing is written locally, so there is one source of truth.
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'send failed' };
   }
+}
+
+// --- Media ----------------------------------------------------------------
+
+/** Split a chat id into the `send`/`getAttachment` target args. */
+function targetArgs(chatId: string, flagForGroup: string): { isGroup: boolean; args: string[] } {
+  const isGroup = chatId.startsWith(GROUP_PREFIX);
+  const target = isGroup ? chatId.slice(GROUP_PREFIX.length) : chatId;
+  return { isGroup, args: isGroup ? [flagForGroup, target] : [target] };
+}
+
+/**
+ * Send an attachment. signal-cli's `-a` accepts a data URI as well as a path,
+ * which lets us hand over the uploaded bytes without ever writing a temp file
+ * (and so without leaving decrypted media on disk).
+ */
+export async function sendMedia(
+  account: string,
+  chatId: string,
+  file: { bytes: Buffer; mimeType: string; fileName: string },
+  caption = '',
+): Promise<SendResult> {
+  if (!account) return { ok: false, error: 'No Signal account is linked.' };
+
+  // signal-cli reads the filename out of the data URI's `filename=` parameter.
+  const dataUri = `data:${file.mimeType};filename=${encodeURIComponent(file.fileName)};base64,${file.bytes.toString('base64')}`;
+  const { args: target } = targetArgs(chatId, '-g');
+  const args = ['-o', 'json', '-a', account, 'send', '-a', dataUri];
+  if (caption) args.push('-m', caption);
+  args.push(...target);
+
+  try {
+    await run(args, 120_000);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'send failed' };
+  }
+}
+
+export interface FetchedMedia {
+  bytes: Buffer;
+  mimeType: string;
+  fileName: string | null;
+}
+
+/**
+ * Retrieve a received attachment's bytes via `signal-cli getAttachment`, which
+ * writes the raw file to stdout. `ref` is the attachment id taken from the
+ * stored message — never a caller-supplied path.
+ */
+export async function getMedia(account: string, chatId: string, ref: string): Promise<FetchedMedia | null> {
+  if (!account || !ref) return null;
+  const { args: target } = targetArgs(chatId, '-g');
+  const recipientArgs = chatId.startsWith(GROUP_PREFIX) ? target : ['--recipient', ...target];
+
+  try {
+    const bytes = await runBinary(
+      ['-a', account, 'getAttachment', '--id', ref, ...recipientArgs],
+      60_000,
+    );
+    if (!bytes.length) return null;
+    // Recover the declared type from the stored message where we can.
+    const known = await findMediaRef(account, chatId, ref);
+    return {
+      bytes,
+      mimeType: known?.mimeType || 'application/octet-stream',
+      fileName: known?.fileName ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Look up a stored attachment descriptor so the media route can set headers.
+ * Reads the Postgres mirror rather than in-process state, so it still resolves
+ * after a restart.
+ */
+async function findMediaRef(account: string, chatId: string, ref: string): Promise<StoredMedia | null> {
+  const { prisma } = await import('./prisma');
+  const row = await prisma.messagingMessage.findFirst({
+    where: { chatId, mediaRef: ref, account: { provider: 'signal', handle: account } },
+    select: { mediaKind: true, mediaMime: true, mediaName: true, mediaSize: true },
+  });
+  if (!row?.mediaKind) return null;
+  return {
+    kind: row.mediaKind as StoredMedia['kind'],
+    ref,
+    mimeType: row.mediaMime,
+    fileName: row.mediaName,
+    sizeBytes: row.mediaSize,
+  };
 }
