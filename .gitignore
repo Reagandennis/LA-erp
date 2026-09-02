@@ -47,3 +47,6 @@ next-env.d.ts
 
 # QuickBooks credentials scratch file (secrets live in .env)
 quickbook.txt
+
+# ...but keep the committed template
+!.env.example
