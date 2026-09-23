@@ -143,7 +143,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ messageId:
         filename: a.filename,
         content: a.content,
         contentType: a.contentType,
-      })),
+      })), // this is a bit redundant but ensures we don't pass undefined values to nodemailer
     });
     return { messageId: info.messageId };
   } catch (error) {
