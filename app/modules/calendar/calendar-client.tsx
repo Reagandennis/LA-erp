@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { GoogleAuthProvider, useGoogleAuth } from '@/app/ui/google-auth-provider';
@@ -190,7 +191,7 @@ function formatDateKey(date: Date) {
 
 function timeLabel(iso: string, allDay: boolean) {
   if (allDay) return 'All day';
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' });
 }
 
 function startOfDay(d: Date) {
@@ -356,6 +357,9 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [view, setView] = useState<CalendarView>('month');
   const [localEvents, setLocalEvents] = useState<CalendarEvent[]>(initialEvents);
+  // Reference time for the "upcoming" list; refreshed whenever events reload
+  // so render stays pure.
+  const [loadedAt, setLoadedAt] = useState(() => Date.now());
   const [googleEvents, setGoogleEvents] = useState<GoogleEvent[]>([]);
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [weatherByDate, setWeatherByDate] = useState<Record<string, number>>({});
@@ -403,21 +407,21 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
       if (!res.ok) return;
       const data = (await res.json()) as { events?: CalendarEvent[] };
       setLocalEvents(data.events ?? []);
+      setLoadedAt(Date.now());
     } catch {
       // ignore
     }
   }, [rangeStart, rangeEnd]);
 
   useEffect(() => {
-    void loadLocal();
+    void (async () => {
+      await loadLocal();
+    })();
   }, [loadLocal]);
 
   // --- Load Google events for the visible month when connected ---
   const loadGoogle = useCallback(async () => {
-    if (!token) {
-      setGoogleEvents([]);
-      return;
-    }
+    if (!token) return;
     try {
       const params = new URLSearchParams({
         timeMin: rangeStart.toISOString(),
@@ -467,7 +471,9 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
   }, [token, rangeStart, rangeEnd]);
 
   useEffect(() => {
-    void loadGoogle();
+    void (async () => {
+      await loadGoogle();
+    })();
   }, [loadGoogle]);
 
   // --- Weather ---
@@ -516,7 +522,9 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
       source: 'local',
       local: e,
     }));
-    const google: DisplayEvent[] = googleEvents
+    // Google events only count while connected; disconnecting hides them
+    // without a state reset.
+    const google: DisplayEvent[] = (token ? googleEvents : [])
       .filter((g) => !linkedGoogleIds.has(g.id))
       .map((g) => ({ key: `g-${g.id}`, title: g.title, startsAt: g.startsAt, endsAt: g.endsAt, allDay: g.allDay, tag: 'Google', source: 'google' }));
     const extra: DisplayEvent[] = extraEvents.map((x) => ({
@@ -529,7 +537,7 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
       source: 'extra',
     }));
     return [...local, ...google, ...extra];
-  }, [localEvents, googleEvents, extraEvents]);
+  }, [localEvents, googleEvents, extraEvents, token]);
 
   const eventsByDay = useMemo(() => {
     const map: Record<string, DisplayEvent[]> = {};
@@ -544,12 +552,12 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
   }, [displayEvents]);
 
   const upcoming = useMemo(() => {
-    const cutoff = Date.now() - 12 * 3600_000;
+    const cutoff = loadedAt - 12 * 3600_000;
     return [...displayEvents]
       .filter((e) => new Date(e.startsAt).getTime() >= cutoff)
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
       .slice(0, 8);
-  }, [displayEvents]);
+  }, [displayEvents, loadedAt]);
 
   // --- Calendar grid ---
   const firstDay = new Date(year, month, 1);

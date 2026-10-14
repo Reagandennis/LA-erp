@@ -36,6 +36,14 @@ export async function register() {
   }
 
   try {
+    const { scheduleMaintenance } = await import('@/lib/maintenance');
+    // Keeps the Session and RateLimitBucket tables from growing without bound.
+    scheduleMaintenance();
+  } catch (error) {
+    console.error('[maintenance] could not schedule housekeeping:', error);
+  }
+
+  try {
     const { listAccountsForProvider } = await import('@/lib/messaging-accounts');
     const { startTelegramMirror } = await import('@/lib/telegram');
     for (const account of await listAccountsForProvider('telegram')) {

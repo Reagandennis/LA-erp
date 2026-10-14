@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
@@ -53,16 +54,16 @@ const LICENSE_BADGE: Record<string, string> = {
 };
 
 function money(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 0 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 0 });
 }
 
 function compactMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 });
 }
 
 function formatDate(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function statusEntries(counts: Record<string, number>, colors: Record<string, string>) {
@@ -193,7 +194,7 @@ export default function ReportsClient({ data, currency }: ReportsClientProps) {
         {tab === 'Compliance' && <ComplianceTab comp={comp} />}
 
         <p className="text-center text-xs text-gray-400">
-          Generated {new Date(data.generatedAt).toLocaleString()} · figures drawn live from invoices, quotes, trips, fleet, and licences.
+          Generated {new Date(data.generatedAt).toLocaleString(APP_LOCALE)} · figures drawn live from invoices, quotes, trips, fleet, and licences.
         </p>
       </div>
     </div>

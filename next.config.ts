@@ -17,6 +17,14 @@ const CONTENT_SECURITY_POLICY = [
 ].join('; ');
 
 const nextConfig: NextConfig = {
+  // Drop the X-Powered-By header: one less byte per response and no version hint.
+  poweredByHeader: false,
+  // Automatic memoization for client components (the big module screens
+  // re-render far less). Components that break the rules of React are skipped.
+  reactCompiler: true,
+  // When the reverse proxy (Caddy `encode zstd gzip`) already compresses
+  // responses, let it own that CPU work instead of Node. Read at build time.
+  compress: process.env.REVERSE_PROXY_COMPRESSION !== 'true',
   async headers() {
     return [
       {

@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useMemo, useState } from 'react';
 
 type GeoResult = {
@@ -97,7 +98,7 @@ const resolveWeatherVisual = (code?: number) => {
 const formatLocalTime = (iso: string, timezone?: string) => {
   const date = new Date(iso);
   if (!timezone) {
-    return date.toLocaleString();
+    return date.toLocaleString(APP_LOCALE);
   }
   return new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,

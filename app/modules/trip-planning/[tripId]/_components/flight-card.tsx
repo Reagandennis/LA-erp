@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
@@ -71,7 +72,7 @@ function clockTime(value: string | null): string {
   if (!value) return '--:--';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--:--';
-  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  return date.toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 /**
@@ -251,7 +252,7 @@ export default function FlightCard({
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
               Live
             </span>
-            {live.altFt != null && <span>{live.altFt.toLocaleString()} ft</span>}
+            {live.altFt != null && <span>{live.altFt.toLocaleString(APP_LOCALE)} ft</span>}
             {live.gspeedKt != null && <span>{live.gspeedKt} kt</span>}
             {live.eta && <span>ETA {clockTime(live.eta)}</span>}
           </p>

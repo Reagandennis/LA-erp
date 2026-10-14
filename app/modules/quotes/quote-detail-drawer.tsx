@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -29,7 +30,7 @@ const STATUS_HEADER_STYLES: Record<string, string> = {
 };
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, {
+  return value.toLocaleString(APP_LOCALE, {
     style: 'currency',
     currency,
     maximumFractionDigits: 2,
@@ -38,7 +39,7 @@ function formatMoney(value: number, currency: string) {
 
 function formatDateTime(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleString(undefined, {
+  return new Date(value).toLocaleString(APP_LOCALE, {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
@@ -46,7 +47,7 @@ function formatDateTime(value: string | null) {
 
 function formatDate(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, {
+  return new Date(value).toLocaleDateString(APP_LOCALE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -66,18 +67,19 @@ export default function QuoteDetailDrawer({
   onEdit,
 }: QuoteDetailDrawerProps) {
   const [quote, setQuote] = useState<QuoteDetail | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState('');
   const [showDeclineNote, setShowDeclineNote] = useState(false);
   const [showTripModal, setShowTripModal] = useState(false);
 
+  // Which record the current `quote`/`error` belong to; "loading" is derived
+  // from it instead of being toggled with extra renders.
+  const [loadedId, setLoadedId] = useState<number | null>(null);
+  const loading = loadedId !== quoteId;
+
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
-
     fetch(`/api/quotes/${quoteId}`, { credentials: 'include' })
       .then(async (response) => {
         const data = (await response.json().catch(() => null)) as
@@ -85,16 +87,21 @@ export default function QuoteDetailDrawer({
           | null;
         if (!active) return;
         if (!response.ok || !data?.quote) {
+          setQuote(null);
           setError(data?.error ?? 'Could not load quote');
           return;
         }
         setQuote(data.quote);
+        setError(null);
       })
       .catch(() => {
-        if (active) setError('Network error');
+        if (active) {
+          setQuote(null);
+          setError('Network error');
+        }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setLoadedId(quoteId);
       });
 
     return () => {

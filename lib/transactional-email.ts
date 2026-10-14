@@ -1,3 +1,4 @@
+import { APP_LOCALE } from './locale';
 import 'server-only';
 
 import { buildInvoicePdf, buildQuotePdf } from './document-pdf';
@@ -8,7 +9,7 @@ import type { QuoteDetail } from './quotes';
 
 function formatMoney(value: number, currency: string): string {
   try {
-    return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 2 });
+    return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 2 });
   } catch {
     return `${currency} ${value.toFixed(2)}`;
   }
@@ -16,7 +17,7 @@ function formatMoney(value: number, currency: string): string {
 
 function formatDate(value: string | null): string {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 /**

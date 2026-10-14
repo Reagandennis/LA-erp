@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { boundsOf, isInsideGeofence, type GeoGeometry, type GeofenceGeometry, type LatLngBounds } from '@/lib/geo-geometry';
+import { startVisibleInterval } from '@/lib/visible-interval';
 import {
   DEFAULT_STYLE,
   type MapCategoryDto,
@@ -124,11 +125,10 @@ export default function MapClient() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadDevices();
-    const id = setInterval(() => void loadDevices(), 30_000);
-    return () => clearInterval(id);
-  }, [loadDevices]);
+  useEffect(
+    () => startVisibleInterval(() => void loadDevices(), 30_000, { immediate: true }),
+    [loadDevices],
+  );
 
   /* ---------------------------------------------------------------- workspace */
 
@@ -141,7 +141,9 @@ export default function MapClient() {
   }, []);
 
   useEffect(() => {
-    void loadWorkspace();
+    void (async () => {
+      await loadWorkspace();
+    })();
   }, [loadWorkspace]);
 
   /** Features load per layer, the first time that layer is shown. */
@@ -517,17 +519,17 @@ export default function MapClient() {
    * for a Ghana tracker while looking at Nairobi and the map would look broken.
    * Only re-frames when the query itself changes, so it never fights a manual pan.
    */
-  const lastFittedQuery = useRef<string | null>(null);
-  useEffect(() => {
-    const query = deviceQuery.trim();
-    if (query === lastFittedQuery.current) return;
-    lastFittedQuery.current = query;
-    if (!query || visibleDevices.length === 0) return;
-    const bounds = boundsOf(
-      visibleDevices.map((d) => ({ type: 'Point', coordinates: [d.lon, d.lat] }) as GeoGeometry),
-    );
-    if (bounds) setFitBounds({ bounds, n: Date.now() });
-  }, [deviceQuery, visibleDevices]);
+  const [fittedQuery, setFittedQuery] = useState('');
+  const trimmedQuery = deviceQuery.trim();
+  if (trimmedQuery !== fittedQuery) {
+    setFittedQuery(trimmedQuery);
+    if (trimmedQuery && visibleDevices.length > 0) {
+      const bounds = boundsOf(
+        visibleDevices.map((d) => ({ type: 'Point', coordinates: [d.lon, d.lat] }) as GeoGeometry),
+      );
+      if (bounds) setFitBounds((current) => ({ bounds, n: (current?.n ?? 0) + 1 }));
+    }
+  }
 
   // Frame the saved content on first load. Without this the map opens at its
   // default continental zoom even when everything sits in one city.

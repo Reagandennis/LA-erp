@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useBanner } from '@/app/ui/banner';
@@ -180,9 +181,9 @@ export default function PlanningClient() {
 
   const periodLabel =
     screen === 'vacations' || showingMonth
-      ? anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+      ? anchor.toLocaleDateString(APP_LOCALE, { month: 'long', year: 'numeric' })
       : span === 'day'
-        ? anchor.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+        ? anchor.toLocaleDateString(APP_LOCALE, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
         : formatRange(days);
 
   // --- Mutations -----------------------------------------------------------

@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useMemo, useState } from 'react';
 
 import type { DiscountType, TemplateOption } from '../types';
@@ -56,7 +57,7 @@ const EMPTY_FORM: TemplateForm = {
 
 function money(amount: number, currency: string) {
   try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
+    return new Intl.NumberFormat(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
   } catch {
     return `${currency} ${amount.toFixed(2)}`;
   }

@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useState } from 'react';
 
 import type { ApproverOption, QuoteDetail, QuoteTripSummary } from './types';
@@ -13,7 +14,7 @@ interface CreateTripFromQuoteModalProps {
 }
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, {
+  return value.toLocaleString(APP_LOCALE, {
     style: 'currency',
     currency,
     maximumFractionDigits: 2,

@@ -1,5 +1,7 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
+import { startVisibleInterval } from '@/lib/visible-interval';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type FlightRecord = {
@@ -42,9 +44,9 @@ const SEARCH_META: Record<SearchField, { label: string; placeholder: string }> =
   registration: { label: 'Registration', placeholder: 'e.g. A7-BHA, 5Y-CYB' },
 };
 
-const numFmt = (n: number | null) => (n === null ? '—' : Math.round(n).toLocaleString());
+const numFmt = (n: number | null) => (n === null ? '—' : Math.round(n).toLocaleString(APP_LOCALE));
 const trackDeg = (t: number | null) => (t === null ? '—' : `${Math.round(t)}°`);
-const vRate = (n: number | null) => (n === null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n).toLocaleString()}`);
+const vRate = (n: number | null) => (n === null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n).toLocaleString(APP_LOCALE)}`);
 
 const isOnGround = (f: FlightRecord) => (f.altFt ?? 99999) < 150 && (f.gspeedKt ?? 0) < 50;
 const motionLabel = (f: FlightRecord) => {
@@ -69,7 +71,7 @@ const etaInfo = (iso: string | null) => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { mins: null, time: '—' };
   const mins = Math.round((d.getTime() - Date.now()) / 60000);
-  return { mins, time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+  return { mins, time: d.toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' }) };
 };
 
 type ArrivalKey = 'ontime' | 'delayed' | 'early' | 'none';
@@ -264,7 +266,9 @@ const BoardingCard = ({ flight, status }: { flight: FlightRecord | null; status:
 export default function FlightTrackerPage() {
   const [bounds, setBounds] = useState<Bounds>(DEFAULT_BOUNDS);
   const [flights, setFlights] = useState<FlightRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  // True until the first load completes; manual searches set it again, the
+  // background refresh does not (no flashing list every minute).
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [searchField, setSearchField] = useState<SearchField>('flight');
@@ -272,29 +276,35 @@ export default function FlightTrackerPage() {
   const [activeSearch, setActiveSearch] = useState<{ field: SearchField; value: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // First ETA we saw for each flight this session — used to detect delay / early drift.
-  const etaBaselineRef = useRef<Map<string, number>>(new Map());
+  const [etaBaseline, setEtaBaseline] = useState<ReadonlyMap<string, number>>(() => new Map());
 
   const arrivalStatus = useCallback((f: FlightRecord): Arrival => {
     const cur = f.eta ? Date.parse(f.eta) : NaN;
     if (Number.isNaN(cur)) return { key: 'none', label: isOnGround(f) ? 'On ground' : 'En route' };
-    const base = etaBaselineRef.current.get(f.id);
+    const base = etaBaseline.get(f.id);
     const delta = base ? Math.round((cur - base) / 60000) : 0;
     if (delta >= 6) return { key: 'delayed', label: `Delayed ${delta}m` };
     if (delta <= -6) return { key: 'early', label: `Early ${Math.abs(delta)}m` };
     return { key: 'ontime', label: 'On time' };
-  }, []);
+  }, [etaBaseline]);
 
   // Keep latest bounds without making the fetch re-run on every keystroke.
   const boundsRef = useRef(bounds);
-  boundsRef.current = bounds;
+  useEffect(() => {
+    boundsRef.current = bounds;
+  }, [bounds]);
 
   const submitSearch = () => {
     const v = searchValue.trim();
     setSelectedId(null);
+    setLoading(true);
+    setError('');
     setActiveSearch(v ? { field: searchField, value: v } : null);
   };
   const clearSearch = () => {
     setSearchValue('');
+    setLoading(true);
+    setError('');
     setActiveSearch(null);
     setSelectedId(null);
   };
@@ -305,22 +315,24 @@ export default function FlightTrackerPage() {
       activeSearch && activeSearch.value.trim()
         ? `${SEARCH_PARAM[activeSearch.field]}=${encodeURIComponent(activeSearch.value.trim())}`
         : `lamin=${b.lamin}&lomin=${b.lomin}&lamax=${b.lamax}&lomax=${b.lomax}`;
-    setLoading(true);
-    setError('');
     try {
       const response = await fetch(`/api/flight-radar?${queryString}`, { credentials: 'include' });
       const data = (await response.json().catch(() => null)) as { flights?: FlightRecord[]; error?: string } | null;
       if (!response.ok) throw new Error(data?.error || 'Unable to load flight data');
       const next = data?.flights ?? [];
       // Record the first ETA seen per flight so we can detect later drift.
-      for (const f of next) {
-        if (f.eta && !etaBaselineRef.current.has(f.id)) {
+      setEtaBaseline((current) => {
+        let updated: Map<string, number> | null = null;
+        for (const f of next) {
+          if (!f.eta || current.has(f.id)) continue;
           const t = Date.parse(f.eta);
-          if (!Number.isNaN(t)) etaBaselineRef.current.set(f.id, t);
+          if (Number.isNaN(t)) continue;
+          (updated ??= new Map(current)).set(f.id, t);
         }
-      }
+        return updated ?? current;
+      });
       setFlights(next);
-      setLastUpdated(new Date().toLocaleTimeString());
+      setLastUpdated(new Date().toLocaleTimeString(APP_LOCALE));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load flight data.');
     } finally {
@@ -333,18 +345,19 @@ export default function FlightTrackerPage() {
     [flights, selectedId],
   );
 
-  useEffect(() => {
-    void loadFlights();
-  }, [loadFlights]);
+  // Initial load, then a light auto-refresh (only while the tab is visible) so
+  // ETA drift / status stays current.
+  useEffect(
+    () => startVisibleInterval(() => void loadFlights(), 60_000, { immediate: true }),
+    [loadFlights],
+  );
 
-  // Light auto-refresh (only while the tab is visible) so ETA drift / status stays current.
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      void loadFlights();
-    }, 60000);
-    return () => clearInterval(id);
-  }, [loadFlights]);
+  /** Manual refresh: show the loading state, unlike the background refresh. */
+  const refreshFlights = () => {
+    setLoading(true);
+    setError('');
+    void loadFlights();
+  };
 
   const inputClass =
     'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500';
@@ -375,7 +388,7 @@ export default function FlightTrackerPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={loadFlights}
+                  onClick={refreshFlights}
                   disabled={loading}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
                   title="Refresh"
@@ -457,9 +470,15 @@ export default function FlightTrackerPage() {
                   type="button"
                   onClick={() => {
                     setSearchValue('');
-                    setActiveSearch(null);
                     setSelectedId(null);
-                    void loadFlights();
+                    if (activeSearch) {
+                      // Clearing the search re-runs the load through the effect.
+                      setLoading(true);
+                      setError('');
+                      setActiveSearch(null);
+                    } else {
+                      refreshFlights();
+                    }
                   }}
                   className="mt-3 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                 >

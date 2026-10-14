@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
@@ -27,12 +28,12 @@ const PRIORITY_STYLES: Record<string, string> = {
 
 function formatDate(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function formatDateTime(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleString(undefined, {
+  return new Date(value).toLocaleString(APP_LOCALE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

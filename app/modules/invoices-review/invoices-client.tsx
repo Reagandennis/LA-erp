@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -57,11 +58,11 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 2 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 2 });
 }
 
 function displayStatus(invoice: InvoiceSummary): string {
@@ -530,12 +531,12 @@ function QuotePicker({
                     {quote.customer} · {quote.subject}
                   </p>
                   <p className="mt-0.5 text-sm font-semibold text-gray-900 sm:hidden">
-                    {quote.total.toLocaleString(undefined, { style: 'currency', currency: quote.currency })}
+                    {quote.total.toLocaleString(APP_LOCALE, { style: 'currency', currency: quote.currency })}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3 whitespace-nowrap">
                   <span className="hidden text-sm font-semibold text-gray-900 sm:block">
-                    {quote.total.toLocaleString(undefined, { style: 'currency', currency: quote.currency })}
+                    {quote.total.toLocaleString(APP_LOCALE, { style: 'currency', currency: quote.currency })}
                   </span>
                   <a
                     href={`/modules/quotes/${quote.id}/edit`}

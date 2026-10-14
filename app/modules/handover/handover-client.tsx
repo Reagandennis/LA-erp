@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useMemo, useState } from 'react';
 
 import HandoverDetailDrawer from './handover-detail-drawer';
@@ -15,7 +16,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 function formatShiftDate(value: string) {
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 interface HandoverClientProps {

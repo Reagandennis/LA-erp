@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
@@ -49,7 +50,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleDateString(undefined, {
+  return new Date(value).toLocaleDateString(APP_LOCALE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -57,7 +58,7 @@ function formatDate(value: string) {
 }
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, {
+  return value.toLocaleString(APP_LOCALE, {
     style: 'currency',
     currency,
     maximumFractionDigits: 2,

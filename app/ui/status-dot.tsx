@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { startVisibleInterval } from '@/lib/visible-interval';
+
 export type StatusVariant =
   | 'online'
   | 'away'
@@ -162,11 +164,11 @@ export function usePresence(userIds?: number[]) {
     };
 
     void load();
-    const timer = window.setInterval(load, PRESENCE_POLL_MS);
+    const stopPolling = startVisibleInterval(() => void load(), PRESENCE_POLL_MS);
 
     return () => {
       active = false;
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [key]);
 

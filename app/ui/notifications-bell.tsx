@@ -1,7 +1,10 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+
+import { startVisibleInterval } from '@/lib/visible-interval';
 
 import { Toast, ToastStack } from './toast';
 
@@ -83,6 +86,19 @@ type NotificationItem = {
   toastTitle: string;
 };
 
+/** Single aggregated read; the per-source endpoints below remain for mark-as-read. */
+const FEED_ENDPOINT = '/api/notifications';
+
+type NotificationFeed = {
+  todo?: RawTodoNotification[];
+  quote?: RawQuoteNotification[];
+  invoice?: RawInvoiceNotification[];
+  trip?: RawTripNotification[];
+  message?: RawMessageNotification[];
+  file?: RawFileNotification[];
+  calendar?: RawCalendarNotification[];
+};
+
 const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   todo: '/api/planning/notifications',
   quote: '/api/quotes/notifications',
@@ -162,149 +178,112 @@ export default function NotificationsBell() {
 
     const loadNotifications = async () => {
       try {
-        const [todoResponse, quoteResponse, invoiceResponse, tripResponse, messageResponse, fileResponse, calendarResponse] = await Promise.all([
-          fetch(SOURCE_ENDPOINTS.todo, { credentials: 'include' }).catch(() => null),
-          fetch(SOURCE_ENDPOINTS.quote, { credentials: 'include' }).catch(() => null),
-          fetch(SOURCE_ENDPOINTS.invoice, { credentials: 'include' }).catch(() => null),
-          fetch(SOURCE_ENDPOINTS.trip, { credentials: 'include' }).catch(() => null),
-          fetch(SOURCE_ENDPOINTS.message, { credentials: 'include' }).catch(() => null),
-          fetch(SOURCE_ENDPOINTS.file, { credentials: 'include' }).catch(() => null),
-          fetch(SOURCE_ENDPOINTS.calendar, { credentials: 'include' }).catch(() => null),
-        ]);
+        const feedResponse = await fetch(FEED_ENDPOINT, { credentials: 'include' }).catch(
+          () => null,
+        );
+        const feed =
+          feedResponse && feedResponse.ok
+            ? ((await feedResponse.json().catch(() => null)) as NotificationFeed | null)
+            : null;
 
         const merged: NotificationItem[] = [];
 
-        if (todoResponse && todoResponse.ok) {
-          const data = (await todoResponse.json().catch(() => null)) as
-            | { notifications?: RawTodoNotification[] }
-            | null;
-          for (const item of data?.notifications ?? []) {
-            merged.push({
-              source: 'todo',
-              id: item.id,
-              entityId: item.todoId,
-              type: item.type,
-              message: item.message,
-              createdAt: item.createdAt,
-              readAt: item.readAt,
-              href: buildHref({ source: 'todo', entityId: item.todoId }),
-              toastTitle: buildToastTitle('todo', item.type),
-            });
-          }
+        for (const item of feed?.todo ?? []) {
+          merged.push({
+            source: 'todo',
+            id: item.id,
+            entityId: item.todoId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'todo', entityId: item.todoId }),
+            toastTitle: buildToastTitle('todo', item.type),
+          });
         }
 
-        if (quoteResponse && quoteResponse.ok) {
-          const data = (await quoteResponse.json().catch(() => null)) as
-            | { notifications?: RawQuoteNotification[] }
-            | null;
-          for (const item of data?.notifications ?? []) {
-            merged.push({
-              source: 'quote',
-              id: item.id,
-              entityId: item.quoteId,
-              type: item.type,
-              message: item.message,
-              createdAt: item.createdAt,
-              readAt: item.readAt,
-              href: buildHref({ source: 'quote', entityId: item.quoteId }),
-              toastTitle: buildToastTitle('quote', item.type),
-            });
-          }
+        for (const item of feed?.quote ?? []) {
+          merged.push({
+            source: 'quote',
+            id: item.id,
+            entityId: item.quoteId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'quote', entityId: item.quoteId }),
+            toastTitle: buildToastTitle('quote', item.type),
+          });
         }
 
-        if (invoiceResponse && invoiceResponse.ok) {
-          const data = (await invoiceResponse.json().catch(() => null)) as
-            | { notifications?: RawInvoiceNotification[] }
-            | null;
-          for (const item of data?.notifications ?? []) {
-            merged.push({
-              source: 'invoice',
-              id: item.id,
-              entityId: item.invoiceId,
-              type: item.type,
-              message: item.message,
-              createdAt: item.createdAt,
-              readAt: item.readAt,
-              href: buildHref({ source: 'invoice', entityId: item.invoiceId }),
-              toastTitle: buildToastTitle('invoice', item.type),
-            });
-          }
+        for (const item of feed?.invoice ?? []) {
+          merged.push({
+            source: 'invoice',
+            id: item.id,
+            entityId: item.invoiceId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'invoice', entityId: item.invoiceId }),
+            toastTitle: buildToastTitle('invoice', item.type),
+          });
         }
 
-        if (tripResponse && tripResponse.ok) {
-          const data = (await tripResponse.json().catch(() => null)) as
-            | { notifications?: RawTripNotification[] }
-            | null;
-          for (const item of data?.notifications ?? []) {
-            merged.push({
-              source: 'trip',
-              id: item.id,
-              entityId: item.tripId,
-              type: item.type,
-              message: item.message,
-              createdAt: item.createdAt,
-              readAt: item.readAt,
-              href: buildHref({ source: 'trip', entityId: item.tripId }),
-              toastTitle: buildToastTitle('trip', item.type),
-            });
-          }
+        for (const item of feed?.trip ?? []) {
+          merged.push({
+            source: 'trip',
+            id: item.id,
+            entityId: item.tripId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'trip', entityId: item.tripId }),
+            toastTitle: buildToastTitle('trip', item.type),
+          });
         }
 
-        if (messageResponse && messageResponse.ok) {
-          const data = (await messageResponse.json().catch(() => null)) as
-            | { notifications?: RawMessageNotification[] }
-            | null;
-          for (const item of data?.notifications ?? []) {
-            merged.push({
-              source: 'message',
-              id: item.id,
-              entityId: item.conversationId,
-              type: item.type,
-              message: item.message,
-              createdAt: item.createdAt,
-              readAt: item.readAt,
-              href: buildHref({ source: 'message', entityId: item.conversationId }),
-              toastTitle: buildToastTitle('message', item.type),
-            });
-          }
+        for (const item of feed?.message ?? []) {
+          merged.push({
+            source: 'message',
+            id: item.id,
+            entityId: item.conversationId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'message', entityId: item.conversationId }),
+            toastTitle: buildToastTitle('message', item.type),
+          });
         }
 
-        if (fileResponse && fileResponse.ok) {
-          const data = (await fileResponse.json().catch(() => null)) as
-            | { notifications?: RawFileNotification[] }
-            | null;
-          for (const item of data?.notifications ?? []) {
-            merged.push({
-              source: 'file',
-              id: item.id,
-              entityId: item.fileId,
-              type: item.type,
-              message: item.message,
-              createdAt: item.createdAt,
-              readAt: item.readAt,
-              href: buildHref({ source: 'file', entityId: item.fileId }),
-              toastTitle: buildToastTitle('file', item.type),
-            });
-          }
+        for (const item of feed?.file ?? []) {
+          merged.push({
+            source: 'file',
+            id: item.id,
+            entityId: item.fileId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'file', entityId: item.fileId }),
+            toastTitle: buildToastTitle('file', item.type),
+          });
         }
 
-        if (calendarResponse && calendarResponse.ok) {
-          const data = (await calendarResponse.json().catch(() => null)) as
-            | { notifications?: RawCalendarNotification[] }
-            | null;
-          for (const item of data?.notifications ?? []) {
-            merged.push({
-              source: 'calendar',
-              id: item.id,
-              entityId: item.eventId,
-              type: item.type,
-              message: item.message,
-              createdAt: item.createdAt,
-              readAt: item.readAt,
-              href: buildHref({ source: 'calendar', entityId: item.eventId }),
-              toastTitle: buildToastTitle('calendar', item.type),
-            });
-          }
+        for (const item of feed?.calendar ?? []) {
+          merged.push({
+            source: 'calendar',
+            id: item.id,
+            entityId: item.eventId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'calendar', entityId: item.eventId }),
+            toastTitle: buildToastTitle('calendar', item.type),
+          });
         }
 
         merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
@@ -323,13 +302,12 @@ export default function NotificationsBell() {
     };
 
     void loadNotifications();
-    const interval = setInterval(() => {
-      void loadNotifications();
-    }, 10000);
+    // Seven endpoints per tick, so only poll while the tab is actually visible.
+    const stopPolling = startVisibleInterval(() => void loadNotifications(), 10000);
 
     return () => {
       isActive = false;
-      clearInterval(interval);
+      stopPolling();
     };
   }, []);
 
@@ -473,7 +451,7 @@ export default function NotificationsBell() {
                     </p>
                     <p className="text-sm text-gray-900 mt-1">{notification.message}</p>
                     <p className="text-xs text-gray-500 mt-1">
-                      {new Date(notification.createdAt).toLocaleString()}
+                      {new Date(notification.createdAt).toLocaleString(APP_LOCALE)}
                     </p>
                   </Link>
                 ))

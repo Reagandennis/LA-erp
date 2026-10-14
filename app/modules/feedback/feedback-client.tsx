@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import React, { useState } from 'react';
 
 // --- Types (mirror lib/feedback.ts) ---
@@ -76,7 +77,7 @@ function timeAgo(iso: string) {
   if (days < 7) return `${days} days ago`;
   const weeks = Math.floor(days / 7);
   if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'} ago`;
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString(APP_LOCALE);
 }
 
 function getStatusStyle(status: string) {

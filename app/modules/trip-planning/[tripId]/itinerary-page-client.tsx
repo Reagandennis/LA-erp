@@ -1,7 +1,8 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import {
   REMINDER_OPTIONS,
@@ -119,14 +120,14 @@ function formatRangeBadge(start: string | null, end: string | null): string {
   const s = new Date(start);
   const e = new Date(end);
   if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 'No dates set';
-  const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const fmt = (d: Date) => d.toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric' });
   return `${fmt(s)} – ${fmt(e)}`;
 }
 
 function formatTimeRange(scheduledAt: string | null, endsAt: string | null): string {
   if (!scheduledAt) return '';
   const s = new Date(scheduledAt);
-  const t = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const t = (d: Date) => d.toLocaleTimeString(APP_LOCALE, { hour: 'numeric', minute: '2-digit' });
   if (!endsAt) return t(s);
   const e = new Date(endsAt);
   return `${t(s)} – ${t(e)}`;
@@ -280,6 +281,12 @@ export default function ItineraryPageClient({
   const [activeDayId, setActiveDayId] = useState<number | null>(
     initialTrip.days[0]?.id ?? null,
   );
+  // `null` means the unscheduled bucket; a day id that no longer exists (the
+  // day was deleted) falls back to the first day.
+  const currentDayId =
+    activeDayId === null || trip.days.some((day) => day.id === activeDayId)
+      ? activeDayId
+      : (trip.days[0]?.id ?? null);
   const [addingHere, setAddingHere] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editor, setEditor] = useState<EditorState>(blankEditor(null));
@@ -298,15 +305,9 @@ export default function ItineraryPageClient({
     [trip.days, trip.items],
   );
 
-  const activeGroup = groups.find((group) => group.day.id === activeDayId) ?? null;
+  const activeGroup = groups.find((group) => group.day.id === currentDayId) ?? null;
   const activeItems = activeGroup ? activeGroup.items : unscheduled;
 
-  // Keep the selection valid when the active day is deleted.
-  useEffect(() => {
-    if (activeDayId !== null && !trip.days.some((day) => day.id === activeDayId)) {
-      setActiveDayId(trip.days[0]?.id ?? null);
-    }
-  }, [trip.days, activeDayId]);
 
   const applyTrip = (next: TripDetail) => setTrip(next);
 
@@ -339,7 +340,7 @@ export default function ItineraryPageClient({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ ...payload, dayId: activeDayId }] }),
+        body: JSON.stringify({ items: [{ ...payload, dayId: currentDayId }] }),
       });
       const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
       if (!r.ok || !data?.trip) {
@@ -471,7 +472,7 @@ export default function ItineraryPageClient({
   const { drag, registerEvent, registerDayCard, registerPane, onEventPointerDown } =
     useItineraryDrag({
       items: activeItems,
-      activeDayId,
+      activeDayId: currentDayId,
       enabled: canEdit && editingItemId === null && !addingHere,
       onCommit: commitDrag,
     });
@@ -512,7 +513,7 @@ export default function ItineraryPageClient({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          atStart ? { atStart: true } : { afterDayId: activeDayId ?? null },
+          atStart ? { atStart: true } : { afterDayId: currentDayId ?? null },
         ),
       },
       'Could not add a day',
@@ -652,7 +653,7 @@ export default function ItineraryPageClient({
           <div className="max-h-[22rem] overflow-y-auto lg:max-h-[calc(100vh-11rem)]">
             {groups.map(({ day, items }) => {
               const label = dayLabel(day);
-              const active = day.id === activeDayId;
+              const active = day.id === currentDayId;
               return (
                 <button
                   key={day.id}
@@ -709,7 +710,7 @@ export default function ItineraryPageClient({
               type="button"
               onClick={() => setActiveDayId(null)}
               className={`flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left transition-colors ${
-                activeDayId === null ? 'bg-primary/5' : 'hover:bg-gray-50'
+                currentDayId === null ? 'bg-primary/5' : 'hover:bg-gray-50'
               } ${
                 drag?.target?.dayId === null && drag.target.index === Number.MAX_SAFE_INTEGER
                   ? 'ring-2 ring-inset ring-primary/50'
@@ -854,7 +855,7 @@ export default function ItineraryPageClient({
               onPointerDownItem={onEventPointerDown}
               dragItemId={drag?.itemId ?? null}
               ghost={
-                drag && drag.target && drag.target.dayId === activeDayId
+                drag && drag.target && drag.target.dayId === currentDayId
                   ? { index: drag.target.index, height: drag.height }
                   : null
               }

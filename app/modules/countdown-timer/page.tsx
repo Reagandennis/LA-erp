@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useMemo, useState } from 'react';
 
 type TimerStatus = 'running' | 'paused' | 'done';
@@ -217,7 +218,7 @@ export default function CountdownTimerPage() {
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{timer.name}</p>
                       <p className="text-xs text-slate-500">
-                        Created {new Date(timer.createdAt).toLocaleString()}
+                        Created {new Date(timer.createdAt).toLocaleString(APP_LOCALE)}
                       </p>
                     </div>
                     <span

@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -31,12 +32,12 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 2 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 2 });
 }
 
 function formatDate(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function todayIso() {
@@ -55,7 +56,6 @@ export default function InvoiceDetailDrawer({
   approvers,
 }: InvoiceDetailDrawerProps) {
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quickBooksNotice, setQuickBooksNotice] = useState<{ tone: 'ok' | 'warn'; message: string } | null>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
@@ -70,23 +70,33 @@ export default function InvoiceDetailDrawer({
     note: '',
   });
 
+  // Which record the current `invoice`/`error` belong to; "loading" is derived
+  // from it instead of being toggled with extra renders.
+  const [loadedId, setLoadedId] = useState<number | null>(null);
+  const loading = loadedId !== invoiceId;
+
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
     fetch(`/api/invoices/${invoiceId}`, { credentials: 'include' })
       .then(async (response) => {
         const data = (await response.json().catch(() => null)) as { invoice?: InvoiceDetail; error?: string } | null;
         if (!active) return;
         if (!response.ok || !data?.invoice) {
+          setInvoice(null);
           setError(data?.error ?? 'Could not load invoice');
           return;
         }
         setInvoice(data.invoice);
+        setError(null);
         setPayment((p) => ({ ...p, amount: data.invoice!.balanceDue > 0 ? String(data.invoice!.balanceDue) : '' }));
       })
-      .catch(() => active && setError('Network error'))
-      .finally(() => active && setLoading(false));
+      .catch(() => {
+        if (active) {
+          setInvoice(null);
+          setError('Network error');
+        }
+      })
+      .finally(() => active && setLoadedId(invoiceId));
     return () => {
       active = false;
     };

@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import React, { useMemo, useState } from 'react';
 
 import type { DueDateBuckets, DueDateItem, DueSource } from '@/lib/due-dates';
@@ -24,9 +25,9 @@ function formatDate(iso: string) {
 function formatMoney(amount: number | null, currency: string | null) {
   if (amount == null) return null;
   try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency ?? 'USD', maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat(APP_LOCALE, { style: 'currency', currency: currency ?? 'USD', maximumFractionDigits: 0 }).format(amount);
   } catch {
-    return `${currency ?? ''} ${amount.toLocaleString()}`.trim();
+    return `${currency ?? ''} ${amount.toLocaleString(APP_LOCALE)}`.trim();
   }
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { APP_LOCALE } from '@/lib/locale';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 type Category = 'Raw Materials' | 'Equipment' | 'Services' | 'Logistics';
 type Status = 'Active' | 'Inactive' | 'On Hold';
@@ -54,7 +55,7 @@ function parseSpent(value: string): number {
 }
 
 function formatUsd(value: number): string {
-  return `$${value.toLocaleString()}`;
+  return `$${value.toLocaleString(APP_LOCALE)}`;
 }
 
 function initials(name: string): string {
@@ -78,14 +79,6 @@ export default function VendorsSuppliersPage() {
   const [selectedStatus, setSelectedStatus] = useState<'All' | Status>('All');
   const [draft, setDraft] = useState<Vendor | null>(null);
   const [isNew, setIsNew] = useState(false);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') closeDrawer();
-    }
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, []);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -135,10 +128,18 @@ export default function VendorsSuppliersPage() {
     setIsNew(true);
   };
 
-  const closeDrawer = () => {
+  const closeDrawer = useCallback(() => {
     setDraft(null);
     setIsNew(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') closeDrawer();
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [closeDrawer]);
 
   const save = () => {
     if (!draft) return;

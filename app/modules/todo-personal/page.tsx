@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import CalendarClient, { type CalendarExtraEvent } from '@/app/modules/calendar/calendar-client';
@@ -157,7 +158,7 @@ const fetchTasks = async (signal?: AbortSignal): Promise<Task[]> => {
     const data = (await response.json().catch(() => null)) as { tasks?: ApiTask[] } | null;
     const apiTasks = data?.tasks ?? [];
     return apiTasks.map((task) => {
-      const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : null;
+      const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString(APP_LOCALE) : null;
       const status = task.status ?? (task.completed ? 'In review' : 'Backlog');
       const priority = task.priority
         ? (task.priority[0].toUpperCase() + task.priority.slice(1))
@@ -336,7 +337,7 @@ export default function TodoPersonalPage() {
       const mapped = (data?.comments ?? []).map((comment) => ({
         id: String(comment.id),
         author: comment.author,
-        time: new Date(comment.createdAt).toLocaleString(),
+        time: new Date(comment.createdAt).toLocaleString(APP_LOCALE),
         text: comment.text,
       }));
       setComments(mapped);
@@ -931,7 +932,7 @@ export default function TodoPersonalPage() {
   };
   const handleEditDueDateChange = (value: string) => {
     const isoValue = isoFromDateKey(value);
-    const displayValue = dayFromIso(isoValue)?.toLocaleDateString() ?? null;
+    const displayValue = dayFromIso(isoValue)?.toLocaleDateString(APP_LOCALE) ?? null;
     setEditedTask((current) =>
       current
         ? {
@@ -1115,7 +1116,7 @@ export default function TodoPersonalPage() {
     const optimistic = {
       startDateIso: startIso,
       dueDateIso: dueIso,
-      dueDate: dayFromIso(dueIso)?.toLocaleDateString() ?? null,
+      dueDate: dayFromIso(dueIso)?.toLocaleDateString(APP_LOCALE) ?? null,
     };
 
     writeEpochRef.current += 1;
@@ -1652,7 +1653,7 @@ export default function TodoPersonalPage() {
                         <div className="flex-1">
                           <p className="text-sm font-medium text-gray-900">{attachment.filename}</p>
                           <p className="text-xs text-gray-500">
-                            {formatFileSize(attachment.size)} • {new Date(attachment.createdAt).toLocaleDateString()}
+                            {formatFileSize(attachment.size)} • {new Date(attachment.createdAt).toLocaleDateString(APP_LOCALE)}
                           </p>
                         </div>
                       </div>
@@ -1980,7 +1981,7 @@ export default function TodoPersonalPage() {
                 <div key={notification.id} className="text-sm text-primary">
                   {notification.message}
                   <span className="ml-2 text-xs text-primary">
-                    {new Date(notification.createdAt).toLocaleString()}
+                    {new Date(notification.createdAt).toLocaleString(APP_LOCALE)}
                   </span>
                 </div>
               ))}

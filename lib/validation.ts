@@ -116,7 +116,7 @@ export const personalTodoBoardSchema = z.object({
     .array(z.string().trim().min(1, 'Column name is required').max(40, 'Column name is too long'))
     .min(1, 'At least one column is required')
     .max(20, 'Too many columns'),
-  columnColors: z.record(z.string().trim()).optional(),
+  columnColors: z.record(z.string(), z.string().trim()).optional(),
   // Board-order of task ids across every column; ids missing from the list keep
   // their server-side ordering and sort after the ones listed here.
   taskOrder: z.array(z.string().trim().min(1)).max(2000).optional(),
@@ -143,18 +143,18 @@ export const discountTypeSchema = z.enum(['none', 'percentage', 'fixed']);
 const quoteItemSchema = z.object({
   description: z.string().trim().min(1, 'Item description is required').max(280),
   quantity: z
-    .number({ invalid_type_error: 'Quantity must be a number' })
+    .number({ error: 'Quantity must be a number' })
     .finite()
     .gt(0, 'Quantity must be greater than zero')
     .max(1_000_000),
   days: z
-    .number({ invalid_type_error: 'Days must be a number' })
+    .number({ error: 'Days must be a number' })
     .finite()
     .gt(0, 'Days must be greater than zero')
     .max(100_000)
     .optional(),
   unitPrice: z
-    .number({ invalid_type_error: 'Unit price must be a number' })
+    .number({ error: 'Unit price must be a number' })
     .finite()
     .gte(0, 'Unit price cannot be negative')
     .max(100_000_000),
@@ -191,7 +191,7 @@ export const quoteCreateSchema = z.object({
   expiryDate: isoDateSchema,
   currency: currencySchema.default('USD'),
   taxRate: z
-    .number({ invalid_type_error: 'Tax rate must be a number' })
+    .number({ error: 'Tax rate must be a number' })
     .finite()
     .gte(0, 'Tax rate cannot be negative')
     .lte(1, 'Tax rate must be a decimal between 0 and 1'),
@@ -218,7 +218,7 @@ export const quoteDecisionSchema = z.object({
 
 export const invoiceSubmitSchema = z.object({
   approverId: z
-    .number({ invalid_type_error: 'Pick an approver' })
+    .number({ error: 'Pick an approver' })
     .int()
     .positive('Pick an approver'),
 });
@@ -319,10 +319,12 @@ const detailShapes = {
 
 const detailValue = z.string().trim().max(200);
 
-function detailSchemaFor(keys: Record<string, true>) {
-  const shape: Record<string, z.ZodTypeAny> = {};
+function detailSchemaFor(keys: Record<string, true>): z.ZodType<Record<string, string>> {
+  const shape: Record<string, z.ZodOptional<typeof detailValue>> = {};
   for (const key of Object.keys(keys)) shape[key] = detailValue.optional();
-  return z.object(shape).strict();
+  // Every value is a trimmed string and unknown keys are rejected, so the
+  // output is a plain string map; only the index-signature inference needs help.
+  return z.strictObject(shape) as unknown as z.ZodType<Record<string, string>>;
 }
 
 export const tripItemDetailsSchema = z.union([
@@ -556,12 +558,12 @@ export const brandProfileUpdateSchema = brandProfileCreateSchema
 const invoiceItemSchema = z.object({
   description: z.string().trim().min(1, 'Item description is required').max(280),
   quantity: z
-    .number({ invalid_type_error: 'Days must be a number' })
+    .number({ error: 'Days must be a number' })
     .finite()
     .gt(0, 'Days must be greater than zero')
     .max(1_000_000),
   unitPrice: z
-    .number({ invalid_type_error: 'Unit price must be a number' })
+    .number({ error: 'Unit price must be a number' })
     .finite()
     .gte(0, 'Unit price cannot be negative')
     .max(100_000_000),
@@ -579,7 +581,7 @@ export const invoiceCreateSchema = z.object({
   dueDate: isoDateSchema,
   currency: currencySchema.default('USD'),
   taxRate: z
-    .number({ invalid_type_error: 'Tax rate must be a number' })
+    .number({ error: 'Tax rate must be a number' })
     .finite()
     .gte(0, 'Tax rate cannot be negative')
     .lte(1, 'Tax rate must be a decimal between 0 and 1'),
@@ -596,7 +598,7 @@ export const invoiceUpdateSchema = invoiceCreateSchema.partial().extend({
 
 export const invoicePaymentSchema = z.object({
   amount: z
-    .number({ invalid_type_error: 'Amount must be a number' })
+    .number({ error: 'Amount must be a number' })
     .finite()
     .gt(0, 'Amount must be greater than zero')
     .max(100_000_000),

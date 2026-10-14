@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import React, { useMemo, useRef, useState } from 'react';
 
 import type { VehicleSummary } from '@/lib/task-assignment';
@@ -586,7 +587,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
               </div>
 
               <p className="text-xs text-gray-400">
-                Added {new Date(selected.createdAt).toLocaleDateString()}
+                Added {new Date(selected.createdAt).toLocaleDateString(APP_LOCALE)}
               </p>
             </div>
 

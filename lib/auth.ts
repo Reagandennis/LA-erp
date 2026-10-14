@@ -3,6 +3,7 @@ import 'server-only';
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
+import { cache } from 'react';
 
 import { PRESENCE_HEARTBEAT_MS } from './presence';
 import { prisma } from './prisma';
@@ -131,6 +132,11 @@ async function resolveAuthenticatedUser(token: string | null) {
     sessionId: session.id,
     expiresAt: session.expiresAt.toISOString(),
     user: buildAccessUser(user),
+    // Per-user UI preferences that the root layout needs on every render.
+    // They ride along on the session row so the layout avoids a second query.
+    preferences: {
+      worldClockZones: user.worldClockZones,
+    },
   };
 }
 
@@ -138,9 +144,15 @@ export async function getRequestAuth(request: NextRequest) {
   return resolveAuthenticatedUser(getSessionCookieValue(request));
 }
 
-export async function getServerAuth() {
+/**
+ * Resolves the current user for Server Components.
+ *
+ * Wrapped in React `cache` so the root layout and the page it renders share a
+ * single session lookup per request instead of each hitting the database.
+ */
+export const getServerAuth = cache(async () => {
   const cookieStore = await cookies();
   return resolveAuthenticatedUser(
     cookieStore.get(SESSION_COOKIE_NAME)?.value ?? null,
   );
-}
+});

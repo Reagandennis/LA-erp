@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import 'leaflet/dist/leaflet.css';
 
 import type * as Leaflet from 'leaflet';
@@ -149,9 +150,12 @@ export default function MapCanvas(props: MapCanvasProps) {
   const geofenceOverlays = useRef<Map<number, OverlayRecord>>(new Map());
   const editingRef = useRef<string | null>(null);
   const drawTargetRef = useRef<DrawTarget>(drawTarget);
-  drawTargetRef.current = drawTarget;
   const drawModeRef = useRef<DrawMode | null>(drawMode);
-  drawModeRef.current = drawMode;
+  // Latest values for the Leaflet handlers, which are bound once at init.
+  useEffect(() => {
+    drawTargetRef.current = drawTarget;
+    drawModeRef.current = drawMode;
+  }, [drawTarget, drawMode]);
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -278,7 +282,7 @@ export default function MapCanvas(props: MapCanvasProps) {
         `<div style="font:13px system-ui;min-width:140px">` +
         `<strong>${esc(label)}</strong>` +
         (category ? `<br/><span style="color:#6b7280">${esc(category.name)}</span>` : '') +
-        `<br/><span style="color:#6b7280">${esc(new Date(device.at).toLocaleString())}</span>` +
+        `<br/><span style="color:#6b7280">${esc(new Date(device.at).toLocaleString(APP_LOCALE))}</span>` +
         (device.speedKph ? `<br/>${Math.round(device.speedKph)} km/h` : '') +
         (device.address ? `<br/>${esc(device.address)}` : '') +
         (device.accuracy ? `<br/><span style="color:#9ca3af">±${Math.round(device.accuracy)} m</span>` : '') +

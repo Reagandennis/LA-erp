@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -70,7 +71,7 @@ function emptyItem(): ItemDraft {
 }
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 2 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 2 });
 }
 
 function round2(value: number): number {

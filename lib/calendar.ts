@@ -1,3 +1,4 @@
+import { APP_LOCALE } from './locale';
 import 'server-only';
 
 import { prisma } from '@/lib/prisma';
@@ -183,7 +184,7 @@ export async function deleteEvent(id: number, userId: number): Promise<boolean> 
 }
 
 function formatReminderMessage(title: string, startsAt: Date, minutesBefore: number | null): string {
-  const when = startsAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const when = startsAt.toLocaleString(APP_LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
   const lead =
     minutesBefore == null
       ? ''

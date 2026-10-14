@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 // --- Types (mirror lib/files.ts) ---
 type ShareTarget = { id: number; name: string };
@@ -128,11 +128,12 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
     return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
-  useEffect(() => {
-    if (activeTag && !allTags.some((t) => t.toLowerCase() === activeTag.toLowerCase())) {
-      setActiveTag(null);
-    }
-  }, [activeTag, allTags]);
+  // A tag that no longer exists (last file with it was deleted) simply stops
+  // filtering; no state correction needed.
+  const currentTag =
+    activeTag && allTags.some((t) => t.toLowerCase() === activeTag.toLowerCase())
+      ? activeTag
+      : null;
 
   const reload = async () => {
     try {
@@ -291,7 +292,7 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
     (f) =>
       (f.name.toLowerCase().includes(search) || f.tags.some((t) => t.toLowerCase().includes(search))) &&
       matchesFilter(f, activeFilter) &&
-      (!activeTag || f.tags.some((t) => t.toLowerCase() === activeTag.toLowerCase())),
+      (!currentTag || f.tags.some((t) => t.toLowerCase() === currentTag.toLowerCase())),
   );
 
   const sharedWithIds = new Set(selected?.sharedWith.map((s) => s.id) ?? []);
@@ -373,7 +374,7 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
             </svg>
           </div>
           <p className="text-sm font-bold text-gray-700">{dragOver ? 'Drop files to upload' : 'Drag & drop files here, or click to browse'}</p>
-          <p className="text-xs text-gray-400 mt-1 font-medium">Up to 25 MB per file • Private to you until you share</p> // 25 mb limit per file
+          <p className="text-xs text-gray-400 mt-1 font-medium">Up to 25 MB per file • Private to you until you share</p>
           {uploadError && <p className="text-xs font-bold text-rose-500 mt-3">{uploadError}</p>}
         </div>
 
@@ -411,7 +412,7 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
           <div className="flex flex-wrap items-center gap-2 mb-8 -mt-4">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mr-1">Tags</span>
             {allTags.map((tag) => {
-              const active = activeTag?.toLowerCase() === tag.toLowerCase();
+              const active = currentTag?.toLowerCase() === tag.toLowerCase();
               return (
                 <button
                   key={tag.toLowerCase()}
@@ -426,7 +427,7 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
                 </button>
               );
             })}
-            {activeTag && (
+            {currentTag && (
               <button onClick={() => setActiveTag(null)} className="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-gray-600 ml-1">
                 Clear
               </button>

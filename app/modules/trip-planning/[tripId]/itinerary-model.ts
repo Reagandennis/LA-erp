@@ -8,6 +8,7 @@
  * class of bug rather than patching it.
  */
 
+import { APP_LOCALE } from '@/lib/locale';
 import { addDays, dateKey, parseDateKey } from '@/lib/date-grid';
 
 import type { TripDaySummary, TripItineraryItemSummary } from '../types';
@@ -79,10 +80,10 @@ export function dayLabel(day: TripDaySummary): DayLabel {
     return { month: 'DAY', dayOfMonth: String(day.dayNumber), weekday: '', short: `Day ${day.dayNumber}` };
   }
   return {
-    month: parsed.toLocaleDateString(undefined, { month: 'short' }).toUpperCase(),
+    month: parsed.toLocaleDateString(APP_LOCALE, { month: 'short' }).toUpperCase(),
     dayOfMonth: String(parsed.getDate()),
-    weekday: parsed.toLocaleDateString(undefined, { weekday: 'long' }),
-    short: parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+    weekday: parsed.toLocaleDateString(APP_LOCALE, { weekday: 'long' }),
+    short: parsed.toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric' }),
   };
 }
 

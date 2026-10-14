@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useMemo, useState, type ReactNode } from 'react';
 
 import type { ProductSummary } from '@/lib/products';
@@ -26,7 +27,7 @@ interface Draft {
 }
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 2 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 2 });
 }
 
 const inputClass =

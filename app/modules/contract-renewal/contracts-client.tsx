@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { APP_LOCALE } from '@/lib/locale';
+import React, { useMemo, useRef, useState } from 'react';
 
 import type { ContractStats, ContractSummary } from '@/lib/contracts';
 
@@ -50,9 +51,9 @@ function toDateInput(iso: string | null) {
 function formatMoney(value: number | null, currency: string) {
   if (value == null) return '—';
   try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
+    return new Intl.NumberFormat(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
   } catch {
-    return `${currency} ${value.toLocaleString()}`;
+    return `${currency} ${value.toLocaleString(APP_LOCALE)}`;
   }
 }
 
@@ -113,11 +114,15 @@ export default function ContractsClient({ isAdmin, initialItems, initialStats }:
 
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
 
-  useEffect(() => {
+  // Re-seed the drawer form whenever a different contract (or a refreshed copy
+  // of it) is selected. Adjusted during render so a stale draft never paints.
+  const [draftSource, setDraftSource] = useState(selected);
+  if (draftSource !== selected) {
+    setDraftSource(selected);
     setNotesDraft(selected?.notes ?? '');
     setIsRenewOpen(false);
     setRenewDate(selected ? toDateInput(selected.endDate) : '');
-  }, [selectedId, selected]);
+  }
 
   const reload = async () => {
     try {

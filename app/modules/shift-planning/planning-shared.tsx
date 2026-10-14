@@ -1,5 +1,7 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
+
 /**
  * Shared vocabulary for the shift-planning views.
  *
@@ -104,11 +106,11 @@ export {
 } from '@/lib/date-grid';
 
 export function formatDayName(date: Date): string {
-  return date.toLocaleDateString(undefined, { weekday: 'long' });
+  return date.toLocaleDateString(APP_LOCALE, { weekday: 'long' });
 }
 
 export function formatShortDay(date: Date): string {
-  return date.toLocaleDateString(undefined, { weekday: 'short' });
+  return date.toLocaleDateString(APP_LOCALE, { weekday: 'short' });
 }
 
 export function formatRange(days: Date[]): string {
@@ -116,11 +118,11 @@ export function formatRange(days: Date[]): string {
   const first = days[0]!;
   const last = days[days.length - 1]!;
   const sameMonth = first.getMonth() === last.getMonth();
-  const firstPart = first.toLocaleDateString(undefined, {
+  const firstPart = first.toLocaleDateString(APP_LOCALE, {
     day: 'numeric',
     ...(sameMonth ? {} : { month: 'short' }),
   });
-  const lastPart = last.toLocaleDateString(undefined, {
+  const lastPart = last.toLocaleDateString(APP_LOCALE, {
     day: 'numeric',
     month: 'long',
     year: 'numeric',

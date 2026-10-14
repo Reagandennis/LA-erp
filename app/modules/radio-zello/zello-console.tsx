@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -13,6 +14,8 @@ import {
 } from './zello-channel';
 import ZelloMap, { type MapDevice } from './zello-map';
 import { StatusDot, type StatusVariant } from '@/app/ui/status-dot';
+import { useIsClient } from '@/app/ui/use-client';
+import { startVisibleInterval } from '@/lib/visible-interval';
 
 const STORAGE_KEY = 'la-erp.zello.config';
 const BLANK: ZelloConfig = { network: '', channel: '', username: '', password: '', authToken: '' };
@@ -34,7 +37,7 @@ const inputClass =
 const labelClass = 'block text-xs font-medium text-gray-600 mb-1.5';
 
 function timeOf(at: number) {
-  return new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return new Date(at).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 /** A traffic entry — a system/text line, or a captured voice clip with replay + transcript. */
@@ -102,8 +105,10 @@ export default function ZelloConsole() {
   const [showSettings, setShowSettings] = useState(false);
   const [text, setText] = useState('');
   const [transmitting, setTransmitting] = useState(false);
-  // Default true so SSR and first client render match; corrected after mount.
-  const [voice, setVoice] = useState(true);
+  // Assume voice support on the server and during hydration; the real answer
+  // is derived once we are on the client.
+  const isClient = useIsClient();
+  const voice = isClient ? hasVoiceSupport() : true;
   const [channels, setChannels] = useState<string[]>([]);
   // Channel creation is admin-only; canManage comes from /api/zello/roster.
   const [canManage, setCanManage] = useState(false);
@@ -133,7 +138,6 @@ export default function ZelloConsole() {
   );
 
   useEffect(() => {
-    setVoice(hasVoiceSupport());
     fetch('/api/zello/roster', { credentials: 'include' })
       .then((r) => r.json())
       .catch(() => null)
@@ -471,8 +475,7 @@ export default function ZelloConsole() {
   // devices even when they aren't actively transmitting on the channel.
   useEffect(() => {
     if (status !== 'online') return;
-    const id = setInterval(() => void loadDevices(config), 30_000);
-    return () => clearInterval(id);
+    return startVisibleInterval(() => void loadDevices(config), 30_000);
   }, [status, config, loadDevices]);
 
   const startPtt = useCallback(() => {

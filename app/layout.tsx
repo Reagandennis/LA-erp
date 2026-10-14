@@ -6,7 +6,6 @@ import { BannerProvider } from "@/app/ui/banner";
 import NotificationsBell from "@/app/ui/notifications-bell";
 import WorldClockTicker from "@/app/ui/world-clock-ticker";
 import { getServerAuth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { getAccessibleModulesForUser } from "@/lib/user";
 import { resolveWorldClockZones } from "@/lib/world-clocks";
 
@@ -37,14 +36,8 @@ export default async function RootLayout({
     : { name: 'Guest', email: 'guest@la-erp.local' };
   const shouldShowSidebar = true;
 
-  const clockPreferences = auth
-    ? await prisma.user.findUnique({
-        where: { id: auth.user.id },
-        select: { worldClockZones: true },
-      })
-    : null;
   const worldClockZones = resolveWorldClockZones(
-    clockPreferences?.worldClockZones ?? [],
+    auth?.preferences.worldClockZones ?? [],
   );
 
   return (

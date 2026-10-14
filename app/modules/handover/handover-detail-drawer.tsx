@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useState } from 'react';
 
 import type { HandoverDetail } from './types';
@@ -22,12 +23,12 @@ const HEADER_STYLES: Record<string, string> = {
 
 function formatDate(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function formatDateTime(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(value).toLocaleString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function Field({ label, value }: { label: string; value: string | null }) {
@@ -50,26 +51,35 @@ export default function HandoverDetailDrawer({
   onEdit,
 }: HandoverDetailDrawerProps) {
   const [handover, setHandover] = useState<HandoverDetail | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
 
+  // Which record the current `item`/`error` belong to; "loading" is derived
+  // from it instead of being toggled with extra renders.
+  const [loadedId, setLoadedId] = useState<number | null>(null);
+  const loading = loadedId !== handoverId;
+
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
     fetch(`/api/handover/${handoverId}`, { credentials: 'include' })
       .then(async (res) => {
         const data = (await res.json().catch(() => null)) as { item?: HandoverDetail; error?: string } | null;
         if (!active) return;
         if (!res.ok || !data?.item) {
+          setHandover(null);
           setError(data?.error ?? 'Could not load handover');
           return;
         }
         setHandover(data.item);
+        setError(null);
       })
-      .catch(() => active && setError('Network error'))
-      .finally(() => active && setLoading(false));
+      .catch(() => {
+        if (active) {
+          setHandover(null);
+          setError('Network error');
+        }
+      })
+      .finally(() => active && setLoadedId(handoverId));
     return () => {
       active = false;
     };

@@ -1,3 +1,5 @@
+import { APP_LOCALE } from '@/lib/locale';
+
 /** Display helpers shared by the map shell and its panels. */
 
 export function timeAgo(at: number, now: number): string {
@@ -26,7 +28,7 @@ export function formatBytes(bytes: number | null): string {
 }
 
 export function formatArea(squareMeters: number): string {
-  if (squareMeters < 10_000) return `${Math.round(squareMeters).toLocaleString()} m²`;
+  if (squareMeters < 10_000) return `${Math.round(squareMeters).toLocaleString(APP_LOCALE)} m²`;
   return `${(squareMeters / 1_000_000).toFixed(2)} km²`;
 }
 

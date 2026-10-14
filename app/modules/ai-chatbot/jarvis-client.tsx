@@ -1,5 +1,6 @@
 'use client';
 
+import { useIsClient } from '@/app/ui/use-client';
 import React, {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
@@ -572,13 +573,6 @@ export default function JarvisClient({
     panelWidthRef.current = panelWidth;
   }, [panelWidth]);
 
-  // Restore the saved panel width once, on the client.
-  useEffect(() => {
-    const saved = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
-    if (Number.isFinite(saved) && saved >= INSPECTOR_MIN_WIDTH) {
-      setPanelWidth(Math.min(saved, INSPECTOR_MAX_WIDTH));
-    }
-  }, []);
 
   // Match the container-query breakpoint by measuring the root, not the viewport,
   // so an expanded app sidebar is accounted for.
@@ -623,8 +617,17 @@ export default function JarvisClient({
   }, []);
   const dictation = useDictation(appendDictation);
 
-  // Load persisted chats (client-only — avoids hydration mismatch).
-  useEffect(() => {
+  // Restore persisted chats and the inspector width during the first client
+  // render (the server never sees localStorage, so `loaded` gates persistence).
+  const isClient = useIsClient();
+  if (isClient && !loaded) {
+    setLoaded(true);
+
+    const savedWidth = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+    if (Number.isFinite(savedWidth) && savedWidth >= INSPECTOR_MIN_WIDTH) {
+      setPanelWidth(Math.min(savedWidth, INSPECTOR_MAX_WIDTH));
+    }
+
     let chats: Conversation[] = [];
     try {
       const raw = localStorage.getItem(STORAGE_CHATS);
@@ -643,8 +646,7 @@ export default function JarvisClient({
       );
     }
     setConversations(chats);
-    setLoaded(true);
-  }, []);
+  }
 
   // Persist on change.
   useEffect(() => {

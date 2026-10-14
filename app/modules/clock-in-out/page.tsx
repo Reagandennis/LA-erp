@@ -1,5 +1,6 @@
 
 'use client';
+import { useIsClient, useNow } from '@/app/ui/use-client';
 import { useEffect, useMemo, useState } from 'react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -246,35 +247,27 @@ function deriveStatus(entries: PunchEntry[]): ShiftStatus {
 
 
 export default function ClockInOutPage() {
-  // Auth state for user role
-  const [currentUser, setCurrentUser] = useState<any>(null);
-
-  useEffect(() => {
-    fetch('/api/auth/session')
-      .then(res => res.json())
-      .then(data => {
-        if (data?.user) {
-          setCurrentUser(data.user);
-          }
-      });
-  }, []);
-  // Use null as sentinel so we know we haven't hydrated yet
-  const [now, setNow] = useState<Date | null>(null);
+  // Ticks once a second on the client; null during SSR so the first client
+  // render matches the server HTML.
+  const nowMs = useNow(1000);
+  const now = useMemo(() => (nowMs === null ? null : new Date(nowMs)), [nowMs]);
   const [entries, setEntries] = useState<PunchEntry[]>([]);
   const [note, setNote] = useState('');
   const [activeTab, setActiveTab] = useState<'punch' | 'schedule'>('punch');
 
-  // Hydrate from localStorage and start the clock only after mount
-  // so the first server-rendered HTML and first client render match.
-  useEffect(() => {
-    setNow(new Date());
+  // Entries live in localStorage: restore them during the first client render,
+  // and only persist once restored so the server's empty list never overwrites
+  // what is saved.
+  const isClient = useIsClient();
+  const [restored, setRestored] = useState(false);
+  if (isClient && !restored) {
+    setRestored(true);
     setEntries(readLocalStorage<PunchEntry>(STORAGE_KEY));
+  }
 
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => { writeLocalStorage(STORAGE_KEY, entries); }, [entries]);
+  useEffect(() => {
+    if (restored) writeLocalStorage(STORAGE_KEY, entries);
+  }, [entries, restored]);
 
   const status = useMemo<ShiftStatus>(() => deriveStatus(entries), [entries]);
 

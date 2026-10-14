@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import React, { useMemo, useRef, useState } from 'react';
 
 import type { ContactSummary, CustomerOption } from '@/lib/contacts';
@@ -594,7 +595,7 @@ export default function ContactsClient({
                 </div>
               )}
 
-              <p className="text-xs text-gray-400">Added {new Date(selected.createdAt).toLocaleDateString()}</p>
+              <p className="text-xs text-gray-400">Added {new Date(selected.createdAt).toLocaleDateString(APP_LOCALE)}</p>
             </div>
 
             <div className="p-6 border-t border-gray-100 sticky bottom-0 bg-white flex gap-3">

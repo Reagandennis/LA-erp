@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useState } from 'react';
 
 import type { ProductOption } from '../types';
@@ -33,7 +34,7 @@ const emptyDraft: DraftState = {
 };
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, {
+  return value.toLocaleString(APP_LOCALE, {
     style: 'currency',
     currency,
     maximumFractionDigits: 2,

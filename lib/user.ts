@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { Prisma } from '@prisma/client';
+import { cache } from 'react';
 
 import { ADMIN_ROLE_NAME } from './rbac';
 import { prisma } from './prisma';
@@ -212,11 +213,13 @@ export async function listRolesWithPermissions() {
   }));
 }
 
-export async function listAllModules() {
+// Deduplicated per request: the root layout and admin pages both need the
+// module catalogue on the same render.
+export const listAllModules = cache(async () => {
   return prisma['module'].findMany({
     orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
   });
-}
+});
 
 export async function listManagedUsers() {
   const users = await prisma.user.findMany({

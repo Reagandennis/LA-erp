@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -167,16 +168,21 @@ export default function AdminClient({
   const [passwordDraft, setPasswordDraft] = useState('');
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
-  useEffect(() => {
+  // Reset the password field when a different user is selected (adjusted
+  // during render so the stale draft never paints).
+  const [passwordDraftUserId, setPasswordDraftUserId] = useState(selectedUserId);
+  if (passwordDraftUserId !== selectedUserId) {
+    setPasswordDraftUserId(selectedUserId);
     setPasswordDraft('');
-  }, [selectedUserId]);
+  }
 
   const [limitsDraft, setLimitsDraft] = useState<UploadLimitsDraft | null>(null);
   const [limitsLoading, setLimitsLoading] = useState(false);
   const [limitsSaving, setLimitsSaving] = useState(false);
 
-  useEffect(() => {
-    if (activeTab !== 'settings' || limitsDraft || limitsLoading) return;
+  // Fetched on demand when the settings tab opens (an event, not an effect).
+  const loadUploadLimits = () => {
+    if (limitsDraft || limitsLoading) return;
     setLimitsLoading(true);
     fetch('/api/admin/upload-limits', { credentials: 'include' })
       .then(parseJson)
@@ -185,7 +191,12 @@ export default function AdminClient({
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load upload limits'))
       .finally(() => setLimitsLoading(false));
-  }, [activeTab, limitsDraft, limitsLoading]);
+  };
+
+  const openTab = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    if (tab === 'settings') loadUploadLimits();
+  };
 
   // --- Audit state ---------------------------------------------------------
   const [audit, setAudit] = useState<AuditQueryResult>(initialAudit);
@@ -455,7 +466,7 @@ export default function AdminClient({
           {TABS.map((tab) => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => openTab(tab)}
               className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${activeTab === tab ? 'text-white' : 'text-gray-500 hover:bg-gray-50'}`}
               style={activeTab === tab ? { backgroundColor: BRAND } : undefined}
             >
@@ -488,7 +499,7 @@ export default function AdminClient({
                     <div key={l.id} className="flex items-center gap-3 text-sm">
                       <code className="text-xs font-medium text-[#03458f] bg-blue-50 px-1.5 py-0.5 rounded shrink-0">{l.action}</code>
                       <span className="text-gray-500 truncate">{l.actor?.email ?? 'system'}</span>
-                      <span className="text-xs text-gray-400 ml-auto shrink-0">{new Date(l.createdAt).toLocaleString()}</span>
+                      <span className="text-xs text-gray-400 ml-auto shrink-0">{new Date(l.createdAt).toLocaleString(APP_LOCALE)}</span>
                     </div>
                   ))}
                   {audit.logs.length === 0 && <p className="text-sm text-gray-400">No activity yet.</p>}
@@ -638,7 +649,7 @@ export default function AdminClient({
                         </p>
                       </div>
                       {log.ipAddress && <span className="hidden md:block text-xs text-gray-400 shrink-0">{log.ipAddress}</span>}
-                      <span className="text-xs text-gray-400 shrink-0 w-36 text-right">{new Date(log.createdAt).toLocaleString()}</span>
+                      <span className="text-xs text-gray-400 shrink-0 w-36 text-right">{new Date(log.createdAt).toLocaleString(APP_LOCALE)}</span>
                     </button>
                   ))}
                 </div>
@@ -728,7 +739,7 @@ export default function AdminClient({
               <DetailRow label="Entity id" value={selectedLog.entityId ?? '—'} />
               <DetailRow label="Actor" value={selectedLog.actor ? `${selectedLog.actor.name} (${selectedLog.actor.email})` : 'System'} />
               <DetailRow label="Target" value={selectedLog.target ? `${selectedLog.target.name} (${selectedLog.target.email})` : '—'} />
-              <DetailRow label="When" value={new Date(selectedLog.createdAt).toLocaleString()} />
+              <DetailRow label="When" value={new Date(selectedLog.createdAt).toLocaleString(APP_LOCALE)} />
               <DetailRow label="IP address" value={selectedLog.ipAddress ?? '—'} />
               <div>
                 <p className="text-xs text-gray-400 mb-1">User agent</p>
@@ -773,7 +784,7 @@ export default function AdminClient({
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-gray-50 rounded-xl border border-gray-100 p-3.5">
                   <p className="text-xs text-gray-400 mb-1">Created</p>
-                  <p className="text-sm font-medium text-gray-900">{new Date(selectedUser.createdAt).toLocaleDateString()}</p>
+                  <p className="text-sm font-medium text-gray-900">{new Date(selectedUser.createdAt).toLocaleDateString(APP_LOCALE)}</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl border border-gray-100 p-3.5">
                   <p className="text-xs text-gray-400 mb-1.5">Status</p>

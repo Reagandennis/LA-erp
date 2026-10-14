@@ -160,6 +160,7 @@ model PersonalTodoNotification {
   user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([todoId])
 }
 
 model PersonalTodoComment {
@@ -232,6 +233,7 @@ model UserRole {
   role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([userId, roleId])
+  @@index([roleId])
 }
 
 model UserModule {
@@ -243,6 +245,7 @@ model UserModule {
   module     Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 
   @@unique([userId, moduleId])
+  @@index([moduleId])
 }
 
 model RolePermission {
@@ -253,6 +256,7 @@ model RolePermission {
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, permissionId])
+  @@index([permissionId])
 }
 
 model Session {
@@ -267,6 +271,7 @@ model Session {
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
 }
 
 model AuditLog {
@@ -285,6 +290,8 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([action])
+  @@index([actorUserId])
+  @@index([targetUserId])
 }
 
 model Customer {
@@ -349,6 +356,7 @@ model Contact {
   @@index([category])
   @@index([name])
   @@index([source])
+  @@index([customerId])
 }
 
 // A CRM pipeline deal. Stage keys live in lib/crm.ts (lead → onboarding →
@@ -381,6 +389,7 @@ model Deal {
   @@index([stage, stageChangedAt])
   @@index([customerId])
   @@index([quoteId])
+  @@index([contractId])
 }
 
 // Communication history entry: call | email | meeting | note.
@@ -401,6 +410,7 @@ model CrmActivity {
 
   @@index([customerId, occurredAt])
   @@index([dealId])
+  @@index([contactId])
 }
 
 model Quote {
@@ -637,6 +647,7 @@ model Invoice {
   @@index([createdById])
   @@index([brandProfileId])
   @@index([number])
+  @@index([sourceQuoteId])
 }
 
 model InvoiceItem {
@@ -927,6 +938,7 @@ model TripItineraryItemNotification {
   user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([itemId])
 }
 
 model TripSequence {
@@ -1148,6 +1160,7 @@ model Message {
   notifications  MessageNotification[]
 
   @@index([conversationId, createdAt])
+  @@index([senderId])
 }
 
 model MessageNotification {
@@ -1164,6 +1177,7 @@ model MessageNotification {
 
   @@index([userId, createdAt])
   @@index([userId, conversationId])
+  @@index([messageId])
 }
 
 model Feedback {
@@ -1276,6 +1290,7 @@ model FileNotification {
   file      StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([fileId])
 }
 
 model CalendarEvent {
@@ -1313,6 +1328,7 @@ model CalendarEventNotification {
   event     CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([eventId])
 }
 
 /// A recurring shift pattern — "Morning, 9am–5pm, Mon–Fri".
@@ -1763,7 +1779,7 @@ model MapCategory {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  createdBy  User               @relation("MapCategoryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy  User           @relation("MapCategoryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   layers     MapLayer[]
   features   MapFeature[]
   geofences  MapGeofence[]
@@ -1813,10 +1829,10 @@ model MapLayer {
 
 /// One place or shape. `geometry` is a GeoJSON geometry object.
 model MapFeature {
-  id           Int     @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   layerId      Int
   categoryId   Int?
-  name         String  @default("")
+  name         String   @default("")
   description  String?
   /// Point | LineString | Polygon | MultiPoint | MultiLineString | MultiPolygon
   geometryType String

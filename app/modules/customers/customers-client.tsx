@@ -1,7 +1,8 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 import type { AccountStatus, CustomerAccount } from '@/lib/accounts';
 import type {
@@ -118,20 +119,20 @@ const labelClass = 'mb-1 block text-xs font-semibold uppercase tracking-wider te
 // --- Helpers ---
 
 function formatMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 2 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 2 });
 }
 
 function formatCompactMoney(value: number, currency: string) {
-  return value.toLocaleString(undefined, { style: 'currency', currency, maximumFractionDigits: 0 });
+  return value.toLocaleString(APP_LOCALE, { style: 'currency', currency, maximumFractionDigits: 0 });
 }
 
 function formatDate(value: string | null) {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function formatDateTime(value: string) {
-  return new Date(value).toLocaleString(undefined, {
+  return new Date(value).toLocaleString(APP_LOCALE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -710,6 +711,20 @@ function DealCard({ deal, onOpen }: { deal: DealSummary; onOpen: () => void }) {
 // Deal drawer
 // ---------------------------------------------------------------------------
 
+function dealDraftFrom(deal: DealSummary) {
+  return {
+    title: deal.title,
+    stage: deal.stage as string,
+    value: String(deal.value || ''),
+    quoteId: deal.quote?.id ?? 0,
+    contractId: deal.contract?.id ?? 0,
+    signatureStatus: deal.signatureStatus as string,
+    expectedCloseDate: deal.expectedCloseDate ? deal.expectedCloseDate.slice(0, 10) : '',
+    lostReason: deal.lostReason ?? '',
+    notes: deal.notes ?? '',
+  };
+}
+
 function DealDrawer({
   deal,
   activities,
@@ -739,34 +754,18 @@ function DealDrawer({
   }) => Promise<string | null>;
   onOpenCustomer: () => void;
 }) {
-  const [draft, setDraft] = useState({
-    title: deal.title,
-    stage: deal.stage as string,
-    value: String(deal.value || ''),
-    quoteId: deal.quote?.id ?? 0,
-    contractId: deal.contract?.id ?? 0,
-    signatureStatus: deal.signatureStatus as string,
-    expectedCloseDate: deal.expectedCloseDate ? deal.expectedCloseDate.slice(0, 10) : '',
-    lostReason: deal.lostReason ?? '',
-    notes: deal.notes ?? '',
-  });
+  const [draft, setDraft] = useState(() => dealDraftFrom(deal));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setDraft({
-      title: deal.title,
-      stage: deal.stage,
-      value: String(deal.value || ''),
-      quoteId: deal.quote?.id ?? 0,
-      contractId: deal.contract?.id ?? 0,
-      signatureStatus: deal.signatureStatus,
-      expectedCloseDate: deal.expectedCloseDate ? deal.expectedCloseDate.slice(0, 10) : '',
-      lostReason: deal.lostReason ?? '',
-      notes: deal.notes ?? '',
-    });
+  // Re-seed the form when a different deal (or a refreshed copy of it) is
+  // shown. Adjusted during render so a stale draft never paints.
+  const [draftDeal, setDraftDeal] = useState(deal);
+  if (draftDeal !== deal) {
+    setDraftDeal(deal);
+    setDraft(dealDraftFrom(deal));
     setError(null);
-  }, [deal]);
+  }
 
   const submit = async () => {
     setSaving(true);
@@ -1057,6 +1056,18 @@ function AccountsList({
   );
 }
 
+function customerDraftFrom(customer: CrmCustomer) {
+  return {
+    name: customer.name,
+    company: customer.company ?? '',
+    email: customer.email ?? '',
+    phone: customer.phone ?? '',
+    address: customer.address ?? '',
+    billingAddress: customer.billingAddress ?? '',
+    entity: customer.entity,
+  };
+}
+
 function CustomerDrawer({
   customer,
   account,
@@ -1084,15 +1095,7 @@ function CustomerDrawer({
   }) => Promise<string | null>;
   onOpenDeal: (dealId: number) => void;
 }) {
-  const [draft, setDraft] = useState({
-    name: customer.name,
-    company: customer.company ?? '',
-    email: customer.email ?? '',
-    phone: customer.phone ?? '',
-    address: customer.address ?? '',
-    billingAddress: customer.billingAddress ?? '',
-    entity: customer.entity,
-  });
+  const [draft, setDraft] = useState(() => customerDraftFrom(customer));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showContactForm, setShowContactForm] = useState(false);
@@ -1100,18 +1103,14 @@ function CustomerDrawer({
   const [contactError, setContactError] = useState<string | null>(null);
   const [addingContact, setAddingContact] = useState(false);
 
-  useEffect(() => {
-    setDraft({
-      name: customer.name,
-      company: customer.company ?? '',
-      email: customer.email ?? '',
-      phone: customer.phone ?? '',
-      address: customer.address ?? '',
-      billingAddress: customer.billingAddress ?? '',
-      entity: customer.entity,
-    });
+  // Re-seed the form when a different customer (or a refreshed copy of it) is
+  // shown. Adjusted during render so a stale draft never paints.
+  const [draftCustomer, setDraftCustomer] = useState(customer);
+  if (draftCustomer !== customer) {
+    setDraftCustomer(customer);
+    setDraft(customerDraftFrom(customer));
     setError(null);
-  }, [customer]);
+  }
 
   const submit = async () => {
     setSaving(true);

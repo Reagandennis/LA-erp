@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import {
   useCallback,
   useEffect,
@@ -109,14 +110,14 @@ function formatKey(date: Date): string {
 }
 
 function monthLabel(date: Date): string {
-  return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  return date.toLocaleDateString(APP_LOCALE, { month: 'short', year: 'numeric' });
 }
 
 function describeRange(startKey: string, dueKey: string): string {
   const start = parseDateKey(startKey);
   const due = parseDateKey(dueKey);
   if (!start || !due) return '';
-  const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const fmt = (d: Date) => d.toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric' });
   return startKey === dueKey ? fmt(due) : `${fmt(start)} to ${fmt(due)}`;
 }
 
@@ -452,7 +453,7 @@ export default function GanttChart({
                               isToday ? 'text-indigo-400' : 'text-slate-400'
                             }`}
                           >
-                            {date.toLocaleDateString(undefined, { weekday: 'short' })}
+                            {date.toLocaleDateString(APP_LOCALE, { weekday: 'short' })}
                           </span>
                         )}
                         <span

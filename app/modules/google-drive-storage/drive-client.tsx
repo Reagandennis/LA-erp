@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useBanner } from '@/app/ui/banner';
@@ -55,7 +56,7 @@ function formatBytes(bytes: number | null): string {
 
 function formatDate(iso: string | null): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, {
+  return new Date(iso).toLocaleDateString(APP_LOCALE, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -184,8 +185,9 @@ function DriveManager() {
 
   useEffect(() => {
     if (!connected) return;
-    void loadFiles(folderId, search);
-    void loadQuota();
+    void (async () => {
+      await Promise.all([loadFiles(folderId, search), loadQuota()]);
+    })();
   }, [connected, folderId, search, loadFiles, loadQuota]);
 
   const openFolder = (id: string) => {

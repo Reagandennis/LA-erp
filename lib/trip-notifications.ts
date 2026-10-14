@@ -1,3 +1,4 @@
+import { APP_LOCALE } from './locale';
 import 'server-only';
 
 import { Prisma } from '@prisma/client';
@@ -25,7 +26,7 @@ type DueItemRow = {
 
 function formatReminderMessage(row: DueItemRow): string {
   const when = row.scheduledAt
-    ? row.scheduledAt.toLocaleString(undefined, {
+    ? row.scheduledAt.toLocaleString(APP_LOCALE, {
         dateStyle: 'medium',
         timeStyle: 'short',
       })

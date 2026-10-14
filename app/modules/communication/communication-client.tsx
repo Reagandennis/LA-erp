@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AvatarStatus, StatusDot, presenceOf, usePresence } from '@/app/ui/status-dot';
@@ -105,7 +106,7 @@ function initials(name: string) {
 
 function formatTime(iso: string | null) {
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatListTime(iso: string | null) {
@@ -113,10 +114,10 @@ function formatListTime(iso: string | null) {
   const date = new Date(iso);
   const now = new Date();
   const sameDay = date.toDateString() === now.toDateString();
-  if (sameDay) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return date.toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' });
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000);
-  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' });
-  return date.toLocaleDateString([], { day: '2-digit', month: 'short' });
+  if (diffDays < 7) return date.toLocaleDateString(APP_LOCALE, { weekday: 'short' });
+  return date.toLocaleDateString(APP_LOCALE, { day: '2-digit', month: 'short' });
 }
 
 export default function CommunicationClient({ currentUser, initialConversations, initialUsers }: Props) {
@@ -133,7 +134,11 @@ export default function CommunicationClient({ currentUser, initialConversations,
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvIdRef = useRef<number | null>(activeConvId);
-  activeConvIdRef.current = activeConvId;
+  // Latest id for the SSE handlers and in-flight loads (declared before the
+  // effects that read it, so it is already current when they run).
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
 
   const activeConv = useMemo(
     () => conversations.find((c) => c.id === activeConvId) ?? null,
@@ -193,13 +198,20 @@ export default function CommunicationClient({ currentUser, initialConversations,
     }
   }, []);
 
+  // Clear the pane when no conversation is selected (adjusted during render).
+  const [messagesConvId, setMessagesConvId] = useState(activeConvId);
+  if (messagesConvId !== activeConvId) {
+    setMessagesConvId(activeConvId);
+    if (activeConvId == null) setMessages([]);
+  }
+
   // Load messages whenever the active conversation changes.
   useEffect(() => {
-    if (activeConvId == null) {
-      setMessages([]);
-      return;
-    }
-    void loadMessages(activeConvId);
+    if (activeConvId == null) return;
+    const conversationId = activeConvId;
+    void (async () => {
+      await loadMessages(conversationId);
+    })();
   }, [activeConvId, loadMessages]);
 
   useEffect(() => {

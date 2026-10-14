@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useRef, useState } from 'react';
 
 import { MAPS_API_KEY, MAPS_MAP_ID, loadGoogleMaps, onMapsAuthFailure } from '@/lib/google-maps';
@@ -37,15 +38,16 @@ export default function ZelloMap({
   const markersRef = useRef<Map<string, any>>(new Map());
   const fittedRef = useRef(false);
   const devicesRef = useRef<MapDevice[]>(devices);
-  devicesRef.current = devices;
+  // Latest devices for the map callbacks, which are bound once.
+  useEffect(() => {
+    devicesRef.current = devices;
+  }, [devices]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (!key) {
-      setError(true);
-      return;
-    }
+    // A missing key is handled at render time (`!key || error` below).
+    if (!key) return;
     let cancelled = false;
     // Google refuses a bad key only through this hook, long after the script loads.
     const unsubscribe = onMapsAuthFailure(() => {
@@ -95,7 +97,7 @@ export default function ZelloMap({
       const content =
         `<div style="font:13px system-ui;min-width:130px">` +
         `<strong>${esc(d.from)}</strong><br/>` +
-        `<span style="color:#6b7280">${esc(new Date(d.at).toLocaleString())}</span>` +
+        `<span style="color:#6b7280">${esc(new Date(d.at).toLocaleString(APP_LOCALE))}</span>` +
         (d.address ? `<br/>${esc(d.address)}` : '') +
         (d.accuracy ? `<br/><span style="color:#9ca3af">±${Math.round(d.accuracy)} m</span>` : '') +
         `</div>`;
@@ -164,7 +166,6 @@ export default function ZelloMap({
     const bounds = new g.maps.LatLngBounds();
     for (const d of list) bounds.extend({ lat: d.lat, lng: d.lon });
     map.fitBounds(bounds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitNonce, ready]);
 
   if (!key || error) {

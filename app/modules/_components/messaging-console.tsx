@@ -1,5 +1,7 @@
 'use client';
 
+import { APP_LOCALE } from '@/lib/locale';
+import { startVisibleInterval } from '@/lib/visible-interval';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import MessageMediaView, { type MessageMedia } from './message-media';
@@ -67,13 +69,13 @@ const inputClass =
   'w-full rounded-xl bg-gray-50 px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30';
 
 function timeOf(at: string) {
-  return new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return new Date(at).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' });
 }
 
 function dayOf(at: string) {
   const t = new Date(at).getTime();
   if (!t || t < 0) return '';
-  return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return new Date(at).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric' });
 }
 
 function initials(name: string): string {
@@ -139,17 +141,21 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
     }
   }, [base]);
 
-  useEffect(() => {
-    void loadStatus();
-    void loadChats();
-    // Updates arrive over SSE; this slow tick only covers a dropped stream or a
-    // status change (link/unlink) that produces no message event.
-    const t = setInterval(() => {
-      void loadStatus();
-      void loadChats();
-    }, 60_000);
-    return () => clearInterval(t);
-  }, [loadStatus, loadChats]);
+  // Updates arrive over SSE; this slow tick only covers a dropped stream or a
+  // status change (link/unlink) that produces no message event. It pauses
+  // while the tab is hidden.
+  useEffect(
+    () =>
+      startVisibleInterval(
+        () => {
+          void loadStatus();
+          void loadChats();
+        },
+        60_000,
+        { immediate: true },
+      ),
+    [loadStatus, loadChats],
+  );
 
   const sorted = useMemo(() => {
     return [...chats].sort((a, b) => +new Date(b.lastMessageTs) - +new Date(a.lastMessageTs));
@@ -179,13 +185,19 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
     [base],
   );
 
-  useEffect(() => {
-    if (!effectiveSelected) {
-      setThread([]);
-      return;
-    }
+  // Clear the pane the moment the selection changes (adjusted during render),
+  // then fetch the new thread.
+  const [threadChatId, setThreadChatId] = useState<string | null>(effectiveSelected);
+  if (threadChatId !== effectiveSelected) {
+    setThreadChatId(effectiveSelected);
     setThread([]);
-    void loadThread(effectiveSelected);
+  }
+  useEffect(() => {
+    if (!effectiveSelected) return;
+    const id = effectiveSelected;
+    void (async () => {
+      await loadThread(id);
+    })();
   }, [effectiveSelected, loadThread]);
 
   /**
