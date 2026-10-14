@@ -23,17 +23,17 @@ export interface GeminiContent {
 
 function apiKey(): string {
   // Dedicated assistant key if set, else the shared Gemini key.
-  return (process.env.AI_ASSISTANT_API_KEY ?? process.env.GEMINI_API_KEY ?? '').trim();
+  return process.env.AI_ASSISTANT_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
 }
 
 /** Main reasoning model (accuracy); overridable via env. */
 export function assistantModel(): string {
-  return (process.env.AI_ASSISTANT_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini-3.5-flash').trim();
+  return process.env.AI_ASSISTANT_MODEL?.trim() || process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
 }
 
 /** Cheap model used only for the isolated grounded web-search call. */
 function searchModel(): string {
-  return (process.env.AI_SEARCH_MODEL ?? 'gemini-3.1-flash-lite').trim();
+  return process.env.AI_SEARCH_MODEL?.trim() || 'gemini-3.1-flash-lite';
 }
 
 export function isConfigured(): boolean {

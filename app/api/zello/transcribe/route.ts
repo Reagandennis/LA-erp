@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   if (buffer.length > mbToBytes(maxAudioMb)) return NextResponse.json({ error: 'too-large' }, { status: 413 });
 
   // gemini-3.1-flash-lite (the app default) handles audio; override per-feature if needed.
-  const model = (process.env.ZELLO_TRANSCRIBE_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini-2.0-flash').trim();
+  const model = process.env.ZELLO_TRANSCRIBE_MODEL?.trim() || process.env.GEMINI_MODEL?.trim() || 'gemini-2.0-flash';
 
   try {
     const res = await fetch(`${GEMINI_API_URL}/models/${model}:generateContent?key=${apiKey}`, {

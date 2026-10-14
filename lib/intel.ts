@@ -17,10 +17,10 @@ export const RISK_LEVELS = ['Low', 'Moderate', 'High', 'Extreme'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
 
 function geminiKey(): string {
-  return (process.env.AI_ASSISTANT_API_KEY ?? process.env.GEMINI_API_KEY ?? '').trim();
+  return process.env.AI_ASSISTANT_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
 }
 function geminiModel(): string {
-  return (process.env.AI_ASSISTANT_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini-3.5-flash').trim();
+  return process.env.AI_ASSISTANT_MODEL?.trim() || process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
 }
 function mapsKey(): string {
   return (

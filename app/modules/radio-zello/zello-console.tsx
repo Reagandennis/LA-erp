@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { APP_LOCALE } from '@/lib/locale';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -622,6 +624,12 @@ export default function ZelloConsole() {
             <p className="mt-1 text-sm text-gray-500">Dispatch push-to-talk over your Zello channel.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/modules/radio-zello/archive"
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              Archive
+            </Link>
             <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium">
               <StatusDot
                 variant={meta.variant}
