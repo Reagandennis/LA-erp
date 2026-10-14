@@ -17,8 +17,8 @@ import crypto from 'crypto';
 export interface ZelloRosterUser {
   name: string;
   fullName: string | null;
-  online: boolean;
-  status: string;
+  /** Channels this user belongs to — a logon may only name channels from this list. */
+  channels: string[];
 }
 
 export interface ZelloRosterChannel {
@@ -31,7 +31,6 @@ export interface ZelloRoster {
   channels: ZelloRosterChannel[];
   users: ZelloRosterUser[];
   total: number;
-  online: number;
 }
 
 function md5(value: string): string {
@@ -43,14 +42,6 @@ function readSessionCookie(response: Response): string | null {
   const all = headers.getSetCookie ? headers.getSetCookie() : [response.headers.get('set-cookie') ?? ''];
   const match = all.join('; ').match(/PHPSESSID=([^;]+)/);
   return match ? `PHPSESSID=${match[1]}` : null;
-}
-
-const ONLINE_VALUES = new Set(['online', 'available', 'busy', 'standby', 'connected', '1', 'true']);
-
-function isOnline(raw: Record<string, unknown>): boolean {
-  if (raw.online === true || raw.online === 1 || raw.online === '1') return true;
-  const status = String(raw.status ?? raw.presence ?? '').toLowerCase();
-  return ONLINE_VALUES.has(status);
 }
 
 async function authenticate(): Promise<{ base: string; cookie: string; sid: string | null } | { error: string }> {
@@ -194,7 +185,7 @@ export async function getZelloLocations(opts?: { name?: string }): Promise<Zello
 }
 
 export async function getZelloRoster(): Promise<ZelloRoster> {
-  const empty: ZelloRoster = { configured: true, error: null, channels: [], users: [], total: 0, online: 0 };
+  const empty: ZelloRoster = { configured: true, error: null, channels: [], users: [], total: 0 };
   const session = await authenticate();
   if ('error' in session) {
     if (session.error === 'not-configured') {
@@ -213,18 +204,16 @@ export async function getZelloRoster(): Promise<ZelloRoster> {
       .catch(() => null),
   ]);
 
+  // The Server API carries no presence at all (`user/get` has no online field);
+  // live presence comes from the Channel API websocket in the console instead.
   const users: ZelloRosterUser[] = ((usersRaw?.users ?? []) as Record<string, unknown>[])
-    .map((u) => {
-      const online = isOnline(u);
-      return {
-        name: String(u.name ?? ''),
-        fullName: (u.full_name as string) ?? null,
-        online,
-        status: String(u.status ?? (online ? 'Online' : 'Offline')),
-      };
-    })
+    .map((u) => ({
+      name: String(u.name ?? ''),
+      fullName: (u.full_name as string) ?? null,
+      channels: Array.isArray(u.channels) ? u.channels.map(String).filter(Boolean) : [],
+    }))
     .filter((u) => u.name)
-    .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const channels: ZelloRosterChannel[] = ((channelsRaw?.channels ?? []) as Record<string, unknown>[])
     .map((c) => ({ name: String(c.name ?? '') }))
@@ -236,7 +225,6 @@ export async function getZelloRoster(): Promise<ZelloRoster> {
     channels,
     users,
     total: users.length,
-    online: users.filter((u) => u.online).length,
   };
 }
 
@@ -264,7 +252,11 @@ export const CHANNEL_NAME_RULE =
   'Channel names may use letters, numbers, spaces, dots, hyphens and underscores (max 40 characters).';
 
 /**
- * Create a channel on the Zello Work network (`PUT /channel/add?name=…`).
+ * Create a channel on the Zello Work network.
+ *
+ * Per the Server API reference the call is `POST /channel/add/name/<name>`
+ * with the session id as a `sid` query parameter (the name travels in the
+ * path, not the query string); other shapes come back as a 4xx from Zello.
  *
  * This is a WRITE against the live network, using the shared service account in
  * ZELLO_USERNAME/ZELLO_PASSWORD — gate callers on admin, not on module access.
@@ -288,16 +280,18 @@ export async function createZelloChannel(rawName: string): Promise<ZelloChannelC
     return { ...fail, error: session.error };
   }
 
-  const { base, cookie } = session;
+  const { base, cookie, sid } = session;
   try {
-    const res = await fetch(`${base}/channel/add?name=${encodeURIComponent(name)}`, {
-      method: 'PUT',
+    const query = sid ? `?sid=${encodeURIComponent(sid)}` : '';
+    const res = await fetch(`${base}/channel/add/name/${encodeURIComponent(name)}${query}`, {
+      method: 'POST',
       headers: { cookie },
       cache: 'no-store',
     });
     const data = (await res.json().catch(() => null)) as { code?: string; status?: string } | null;
     if (!data || data.code !== '200') {
-      return { ...fail, error: data?.status ?? 'Zello rejected the new channel.' };
+      const detail = data?.status ? `${data.status}${data.code ? ` (Zello code ${data.code})` : ''}` : null;
+      return { ...fail, error: detail ?? 'Zello rejected the new channel.' };
     }
     return { ok: true, configured: true, error: null, name };
   } catch {

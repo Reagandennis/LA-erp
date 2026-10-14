@@ -86,7 +86,7 @@ describe('createZelloChannel', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('PUTs the channel with the session cookie and a url-encoded name', async () => {
+  it('POSTs the channel by path with the session id and cookie, url-encoding the name', async () => {
     const fetchMock = mockZelloFlow({ code: '200', status: 'OK' });
 
     const result = await createZelloChannel('  Ops North  ');
@@ -94,21 +94,21 @@ describe('createZelloChannel', () => {
     expect(result).toEqual({ ok: true, configured: true, error: null, name: 'Ops North' });
     const addCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/channel/add'));
     expect(addCall).toBeDefined();
-    expect(String(addCall![0])).toBe('https://testnet.zellowork.com/channel/add?name=Ops%20North');
-    expect(addCall![1]).toMatchObject({ method: 'PUT' });
+    expect(String(addCall![0])).toBe('https://testnet.zellowork.com/channel/add/name/Ops%20North?sid=sid-1');
+    expect(addCall![1]).toMatchObject({ method: 'POST' });
     expect((addCall![1] as RequestInit & { headers: Record<string, string> }).headers.cookie).toBe(
       'PHPSESSID=abc123',
     );
   });
 
-  it('surfaces a Zello rejection verbatim (e.g. duplicate name)', async () => {
+  it('surfaces a Zello rejection with its code (e.g. duplicate name)', async () => {
     mockZelloFlow({ code: '409', status: 'Channel already exists' });
 
     const result = await createZelloChannel('Ops');
 
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
-    expect(result.error).toBe('Channel already exists');
+    expect(result.error).toBe('Channel already exists (Zello code 409)');
   });
 
   it('does not throw when the network is unreachable', async () => {

@@ -55,9 +55,41 @@ export interface ZelloLocation {
   at: number;
 }
 
+/** Live presence for one channel, from Zello's `on_channel_status` event. */
+export interface ChannelPresence {
+  channel: string;
+  status: 'online' | 'offline';
+  usersOnline: number;
+}
+
+export interface ZelloChannelOptions {
+  /**
+   * Extra channels to watch for presence only (Zello Work supports up to 100
+   * per connection). Audio, text and locations are still taken from the
+   * selected channel alone.
+   */
+  watchChannels?: string[];
+}
+
+/** Zello Work accepts at most this many channels on one connection. */
+export const MAX_LOGON_CHANNELS = 100;
+
+/** Selected channel first, then the watched ones, de-duplicated and capped. */
+export function logonChannelList(selected: string, watch: string[] = []): string[] {
+  const out: string[] = [];
+  for (const raw of [selected, ...watch]) {
+    const name = raw.trim();
+    if (name && !out.includes(name)) out.push(name);
+    if (out.length >= MAX_LOGON_CHANNELS) break;
+  }
+  return out;
+}
+
 export interface ZelloHandlers {
   onStatus?: (status: ZelloStatus, detail?: string) => void;
   onChannelStatus?: (info: { online: number; locationsSupported: boolean }) => void;
+  /** Fired for every channel on the connection, including the selected one. */
+  onChannelPresence?: (presence: ChannelPresence) => void;
   onTalking?: (username: string | null) => void;
   onLog?: (entry: ZelloLogEntry) => void;
   onVoiceClip?: (clip: ZelloVoiceClip) => void;
@@ -150,11 +182,159 @@ const STORE_RATE = 16000;
 /** Playback look-ahead (seconds) — a small cushion so network jitter doesn't underrun. */
 const PLAYBACK_JITTER = 0.1;
 
+export type PresenceWatchState = 'connecting' | 'watching' | 'retrying' | 'stopped';
+
+export interface PresenceWatcherHandlers {
+  onPresence: (presence: ChannelPresence) => void;
+  onState?: (state: PresenceWatchState) => void;
+  /** A logon rejection (bad credentials, unknown channel) — reported once per attempt. */
+  onError?: (message: string) => void;
+}
+
+const PRESENCE_RETRY_MIN_MS = 5_000;
+const PRESENCE_RETRY_MAX_MS = 60_000;
+
+/**
+ * Zello's reason when the same user signs in somewhere else. Zello allows one
+ * session per user and kicks the older one, so retrying would only bounce the
+ * other device off in turn; the watcher stops instead and says why.
+ */
+export const ZELLO_KICKED = 'kicked';
+
+/**
+ * Presence-only connection for Zello Work: logs on to the given channels and
+ * forwards `on_channel_status` events, nothing else (audio frames are
+ * discarded). Used while the console is open but not connected, so the channel
+ * strip is live before the operator presses Connect. Reconnects with backoff
+ * until stopped.
+ */
+export class ZelloPresenceWatcher {
+  private ws: WebSocket | null = null;
+  private seq = 0;
+  private stopped = false;
+  private retryMs = PRESENCE_RETRY_MIN_MS;
+  private timer: number | null = null;
+
+  constructor(
+    private readonly config: Pick<ZelloConfig, 'network' | 'username' | 'password'>,
+    private readonly channels: string[],
+    private readonly handlers: PresenceWatcherHandlers,
+  ) {}
+
+  start(): void {
+    this.stopped = false;
+    this.open();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const ws = this.ws;
+    this.ws = null;
+    try {
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+    this.handlers.onState?.('stopped');
+  }
+
+  private open(): void {
+    const network = this.config.network.trim();
+    if (this.stopped || !network || this.channels.length === 0) return;
+    this.handlers.onState?.('connecting');
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(`wss://zellowork.io/ws/${encodeURIComponent(network)}`);
+    } catch {
+      this.scheduleRetry();
+      return;
+    }
+    this.ws = ws;
+    ws.onopen = () => {
+      this.seq += 1;
+      ws.send(
+        JSON.stringify({
+          command: 'logon',
+          seq: this.seq,
+          username: this.config.username.trim(),
+          password: this.config.password,
+          channels: this.channels,
+        }),
+      );
+    };
+    ws.onmessage = (event) => {
+      // Zello kicks the older of two sessions for one user; once stopped, a
+      // late "kicked" or close from this socket must not leak into the UI.
+      if (this.stopped || this.ws !== ws) return;
+      if (typeof event.data !== 'string') return; // audio frames: not our concern
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (msg.command === 'on_channel_status') {
+        this.handlers.onPresence({
+          channel: String(msg.channel ?? ''),
+          status: msg.status === 'offline' ? 'offline' : 'online',
+          usersOnline: Number(msg.users_online ?? 0),
+        });
+        return;
+      }
+      if (msg.seq === this.seq) {
+        if (msg.success === true) {
+          this.retryMs = PRESENCE_RETRY_MIN_MS;
+          this.handlers.onState?.('watching');
+        } else if (msg.error) {
+          // Credentials or channel list rejected: no point hammering the server.
+          this.handlers.onError?.(String(msg.error));
+          this.retryMs = PRESENCE_RETRY_MAX_MS;
+          try {
+            ws.close();
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
+      if (msg.command === 'on_error' && msg.error) {
+        const error = String(msg.error);
+        this.handlers.onError?.(error);
+        if (error === ZELLO_KICKED) this.stop();
+      }
+    };
+    ws.onclose = () => {
+      if (this.ws !== ws) return; // superseded or stopped
+      this.ws = null;
+      this.scheduleRetry();
+    };
+    ws.onerror = () => {
+      /* onclose follows and schedules the retry */
+    };
+  }
+
+  private scheduleRetry(): void {
+    if (this.stopped || this.timer !== null) return;
+    this.handlers.onState?.('retrying');
+    const wait = this.retryMs;
+    this.retryMs = Math.min(this.retryMs * 2, PRESENCE_RETRY_MAX_MS);
+    this.timer = window.setTimeout(() => {
+      this.timer = null;
+      this.open();
+    }, wait);
+  }
+}
+
 export class ZelloChannel {
   private ws: WebSocket | null = null;
   private seq = 0;
   private config: ZelloConfig;
   private handlers: ZelloHandlers;
+  private watchChannels: string[];
   private status: ZelloStatus = 'idle';
 
   // playback
@@ -181,9 +361,15 @@ export class ZelloChannel {
   private outPacketId = 0;
   private sendSampleRate = 0;
 
-  constructor(config: ZelloConfig, handlers: ZelloHandlers) {
+  constructor(config: ZelloConfig, handlers: ZelloHandlers, options: ZelloChannelOptions = {}) {
     this.config = config;
     this.handlers = handlers;
+    this.watchChannels = options.watchChannels ?? [];
+  }
+
+  /** Events carry `channel` once several are joined; absent means the selected one. */
+  private isSelectedChannel(msg: Record<string, unknown>): boolean {
+    return msg.channel == null || String(msg.channel) === this.config.channel.trim();
   }
 
   private setStatus(status: ZelloStatus, detail?: string) {
@@ -236,7 +422,8 @@ export class ZelloChannel {
 
     if (isWork) {
       // Zello Work authenticates with username + password + channels (no token).
-      cmd.channels = [this.config.channel];
+      // Joining the other channels too is what gives per-channel presence.
+      cmd.channels = logonChannelList(this.config.channel, this.watchChannels);
       if (this.config.username.trim()) cmd.username = this.config.username.trim();
       if (this.config.password) cmd.password = this.config.password;
     } else {
@@ -281,12 +468,24 @@ export class ZelloChannel {
     const command = msg.command as string | undefined;
 
     if (command === 'on_channel_status') {
-      const online = Number(msg.users_online ?? 0);
+      const channel = String(msg.channel ?? this.config.channel);
+      const usersOnline = Number(msg.users_online ?? 0);
+      const isOnline = msg.status !== 'offline';
+      this.handlers.onChannelPresence?.({ channel, status: isOnline ? 'online' : 'offline', usersOnline });
+      if (!this.isSelectedChannel(msg)) return;
+      if (!isOnline) {
+        const detail = String(msg.error ?? `Channel "${channel}" is offline.`);
+        this.handlers.onError?.(detail);
+        this.setStatus('error', detail);
+        return;
+      }
       this.setStatus('online');
-      this.handlers.onChannelStatus?.({ online, locationsSupported: msg.locations_supported === true });
+      this.handlers.onChannelStatus?.({ online: usersOnline, locationsSupported: msg.locations_supported === true });
       return;
     }
     if (command === 'on_stream_start') {
+      // Other channels are watched for presence only; never play their audio.
+      if (!this.isSelectedChannel(msg)) return;
       this.startDecoder(msg);
       // The live "talking now" indicator covers the start; the finished clip is
       // logged on stop (with replay + transcript) so there's one entry per burst.
@@ -299,10 +498,12 @@ export class ZelloChannel {
       return;
     }
     if (command === 'on_text_message') {
+      if (!this.isSelectedChannel(msg)) return;
       this.log('text', String(msg.from ?? ''), String(msg.text ?? ''));
       return;
     }
     if (command === 'on_location') {
+      if (!this.isSelectedChannel(msg)) return;
       const lat = Number(msg.latitude);
       const lon = Number(msg.longitude);
       if (Number.isFinite(lat) && Number.isFinite(lon)) {
@@ -491,6 +692,7 @@ export class ZelloChannel {
     this.sendJson({
       command: 'start_stream',
       seq: this.nextSeq(),
+      channel: this.config.channel.trim(),
       type: 'audio',
       codec: 'opus',
       codec_header: btoa(String.fromCharCode(...header)),
@@ -569,7 +771,7 @@ export class ZelloChannel {
   sendText(text: string): void {
     const trimmed = text.trim();
     if (!trimmed || !this.ws) return;
-    this.sendJson({ command: 'send_text_message', seq: this.nextSeq(), text: trimmed });
+    this.sendJson({ command: 'send_text_message', seq: this.nextSeq(), channel: this.config.channel.trim(), text: trimmed });
     this.log('text', this.config.username || 'You', trimmed);
   }
 

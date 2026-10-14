@@ -13,6 +13,15 @@ import {
   type ZelloVoiceClip,
 } from './zello-channel';
 import ZelloMap, { type MapDevice } from './zello-map';
+import { ZELLO_KICKED, ZelloPresenceWatcher, logonChannelList, type ChannelPresence, type PresenceWatchState } from './zello-channel';
+
+/** Zello's terse "kicked" means another device signed in as the same user. */
+function explainZelloError(message: string, username: string): string {
+  if (message === ZELLO_KICKED) {
+    return `Signed out by Zello: another device or console is using the Zello user "${username || 'this user'}". Zello allows one session per user, so give this console its own Zello Work user.`;
+  }
+  return message;
+}
 import { StatusDot, type StatusVariant } from '@/app/ui/status-dot';
 import { useIsClient } from '@/app/ui/use-client';
 import { startVisibleInterval } from '@/lib/visible-interval';
@@ -110,6 +119,18 @@ export default function ZelloConsole() {
   const isClient = useIsClient();
   const voice = isClient ? hasVoiceSupport() : true;
   const [channels, setChannels] = useState<string[]>([]);
+  // Live per-channel presence while connected (Zello reports a count, never names).
+  const [presence, setPresence] = useState<Record<string, ChannelPresence>>({});
+  // Channel membership per Zello user (lower-cased name), from the roster. A
+  // logon may only name channels the user belongs to, so presence is watched
+  // for exactly those.
+  const [memberships, setMemberships] = useState<Record<string, string[]>>({});
+  // Background presence while not connected (see ZelloPresenceWatcher).
+  const [presenceState, setPresenceState] = useState<PresenceWatchState>('stopped');
+  const [presenceNote, setPresenceNote] = useState<string | null>(null);
+  // Bumped by the "Retry" link after a kick, which otherwise stops the watcher for good.
+  const [presenceAttempt, setPresenceAttempt] = useState(0);
+  const watcherRef = useRef<ZelloPresenceWatcher | null>(null);
   // Channel creation is admin-only; canManage comes from /api/zello/roster.
   const [canManage, setCanManage] = useState(false);
   const [showNewChannel, setShowNewChannel] = useState(false);
@@ -141,8 +162,11 @@ export default function ZelloConsole() {
     fetch('/api/zello/roster', { credentials: 'include' })
       .then((r) => r.json())
       .catch(() => null)
-      .then((d: { channels?: { name: string }[]; canManage?: boolean } | null) => {
+      .then((d: { channels?: { name: string }[]; users?: { name: string; channels?: string[] }[]; canManage?: boolean } | null) => {
         if (d?.channels?.length) setChannels(d.channels.map((c) => c.name).filter(Boolean));
+        if (d?.users?.length) {
+          setMemberships(Object.fromEntries(d.users.map((u) => [u.name.toLowerCase(), u.channels ?? []])));
+        }
         setCanManage(Boolean(d?.canManage));
       });
     let saved: Partial<ZelloConfig> = {};
@@ -343,12 +367,46 @@ export default function ZelloConsole() {
     }
   }, []);
 
+  /** Channels the configured Zello user may log on to (selected one first). */
+  const watchListFor = (cfg: ZelloConfig) =>
+    logonChannelList(cfg.channel, memberships[cfg.username.trim().toLowerCase()] ?? []);
+
+  // Keep the channel strip live while the console is open but not connected:
+  // a presence-only connection, handed over to the real one on Connect and
+  // resumed after Disconnect.
+  useEffect(() => {
+    const connected = status === 'online' || status === 'connecting' || status === 'authenticating';
+    if (connected || !config.network.trim() || !config.username.trim() || !config.password) return;
+    const list = logonChannelList(config.channel, memberships[config.username.trim().toLowerCase()] ?? []);
+    if (list.length === 0) return;
+    const watcher = new ZelloPresenceWatcher(config, list, {
+      onPresence: (p) => setPresence((cur) => ({ ...cur, [p.channel]: p })),
+      onState: (s) => {
+        setPresenceState(s);
+        if (s === 'watching') setPresenceNote(null);
+      },
+      onError: (m) => setPresenceNote(explainZelloError(m, config.username)),
+    });
+    watcherRef.current = watcher;
+    watcher.start();
+    return () => {
+      watcher.stop();
+      if (watcherRef.current === watcher) watcherRef.current = null;
+    };
+    // presenceAttempt only forces a fresh watcher after a kick.
+  }, [status, config, memberships, presenceAttempt]);
+
   const connectWith = (cfg: ZelloConfig) => {
     if (!cfg.channel.trim()) {
       setShowSettings(true);
       return;
     }
     channelRef.current?.disconnect();
+    // Zello allows one session per user and kicks the older one, so the
+    // presence watcher must be gone before the real logon goes out.
+    const hadWatcher = watcherRef.current !== null;
+    watcherRef.current?.stop();
+    watcherRef.current = null;
     const ch = new ZelloChannel(cfg, {
       onStatus: (s, d) => {
         setStatus(s);
@@ -358,6 +416,7 @@ export default function ZelloConsole() {
         setOnline(n);
         setLocationsSupported(loc);
       },
+      onChannelPresence: (p) => setPresence((cur) => ({ ...cur, [p.channel]: p })),
       onTalking: (who) => setTalking(who),
       onLog: (entry) => {
         pushLog(entry);
@@ -400,15 +459,23 @@ export default function ZelloConsole() {
         void saveLocation(cfg, loc);
       },
       onError: (m) => {
-        setStatusDetail(m);
-        pushLog({ id: `${Date.now()}-${Math.random()}`, kind: 'system', from: 'System', text: m, at: Date.now() });
+        const text = explainZelloError(m, cfg.username);
+        setStatusDetail(text);
+        pushLog({ id: `${Date.now()}-${Math.random()}`, kind: 'system', from: 'System', text, at: Date.now() });
       },
-    });
+    }, { watchChannels: watchListFor(cfg) });
     channelRef.current = ch;
     setLog([]);
     setDevices([]);
+    setPresence({});
     setLocationsSupported(null);
-    void ch.connect();
+    setPresenceNote(null);
+    if (hadWatcher) {
+      // Let the watcher's socket close on Zello's side first.
+      window.setTimeout(() => void ch.connect(), 400);
+    } else {
+      void ch.connect();
+    }
     void loadHistory(cfg);
     void loadDevices(cfg);
   };
@@ -462,6 +529,7 @@ export default function ZelloConsole() {
   const disconnect = () => {
     channelRef.current?.disconnect();
     channelRef.current = null;
+    setPresence({});
     setStatus('idle');
     setTalking(null);
     setOnline(0);
@@ -534,6 +602,12 @@ export default function ZelloConsole() {
 
   const isLive = status === 'online';
   const isConnecting = status === 'connecting' || status === 'authenticating';
+  // Zello's count includes this console's own connection, so "others" is one less.
+  const othersOn = (p: ChannelPresence) => (p.status === 'online' ? Math.max(0, p.usersOnline - 1) : 0);
+  // Channels with someone else on them right now, busiest first.
+  const activeChannels = Object.values(presence)
+    .filter((p) => othersOn(p) > 0)
+    .sort((a, b) => othersOn(b) - othersOn(a) || a.channel.localeCompare(b.channel));
   const meta = STATUS_META[status];
   const someoneElseTalking = talking !== null && !transmitting;
   // Stable A→Z order so the device list rows and the numbered map markers line up.
@@ -602,6 +676,7 @@ export default function ZelloConsole() {
                 {channels.map((c) => (
                   <option key={c} value={c}>
                     {c}
+                    {presence[c] ? ` · ${othersOn(presence[c])} online` : ''}
                   </option>
                 ))}
               </select>
@@ -617,7 +692,11 @@ export default function ZelloConsole() {
             {isLive && config.channel && (
               <span className="px-1 text-xs font-medium text-emerald-600 sm:px-2">switch live</span>
             )}
-            <span className="px-1 text-xs text-gray-400 sm:px-2">{channels.length} channels</span>
+            <span className="px-1 text-xs text-gray-400 sm:px-2">
+              {activeChannels.length > 0
+                ? `${activeChannels.length} of ${channels.length} channels active`
+                : `${channels.length} channels`}
+            </span>
             {canManage && (
               <button
                 type="button"
@@ -631,6 +710,51 @@ export default function ZelloConsole() {
               </button>
             )}
           </div>
+
+          {Object.keys(presence).length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5 border-t border-gray-100 pt-3">
+              {[...activeChannels, ...Object.values(presence).filter((p) => othersOn(p) === 0).sort((a, b) => a.channel.localeCompare(b.channel))].map((p) => {
+                const selected = p.channel === config.channel;
+                const others = othersOn(p);
+                const busy = others > 0;
+                return (
+                  <button
+                    key={p.channel}
+                    type="button"
+                    onClick={() => pickChannel(p.channel)}
+                    title={p.status === 'offline' ? 'Channel offline' : `${others} other${others === 1 ? '' : 's'} online`}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                      selected
+                        ? 'border-primary bg-primary text-white'
+                        : busy
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                          : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${busy ? 'bg-emerald-500' : p.status === 'offline' ? 'bg-rose-400' : 'bg-gray-300'}`} />
+                    <span className="max-w-[10rem] truncate">{p.channel}</span>
+                    <span className={`tabular-nums ${selected ? 'text-white/80' : 'text-gray-400'}`}>{others}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {!isLive && (presenceNote || presenceState !== 'stopped') && (
+            <p className={`mt-2 px-1 text-xs ${presenceNote ? 'text-rose-600' : 'text-gray-400'}`}>
+              {presenceNote ? (
+                <>
+                  Live presence paused: {presenceNote}{' '}
+                  <button type="button" onClick={() => { setPresenceNote(null); setPresenceAttempt((n) => n + 1); }} className="font-semibold text-primary hover:underline">
+                    Retry
+                  </button>
+                </>
+              ) : presenceState === 'watching'
+                  ? 'Live presence while disconnected — counts update as people join and leave.'
+                  : presenceState === 'retrying'
+                    ? 'Live presence reconnecting…'
+                    : 'Checking who is on the channels…'}
+            </p>
+          )}
 
           {canManage && showNewChannel && (
             <div className="mt-3 border-t border-gray-100 pt-3">
