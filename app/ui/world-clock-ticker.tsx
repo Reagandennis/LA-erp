@@ -9,10 +9,39 @@ import {
   type WorldClockZone,
 } from '@/lib/world-clocks';
 
-/** Seconds each clock takes to cross the bar — keeps speed constant as the list grows. */
-const SECONDS_PER_ZONE = 4.2;
-/** Minimum chips on the track so short line-ups still tile the full width. */
-const MIN_TRACK_CHIPS = 10;
+import { useNow } from './use-client';
+
+/**
+ * The bar is static and shows as many clocks as *its own* width fits (a
+ * container query, so the sidebar's width is accounted for). A clock chip is
+ * about 15.5rem and the button area about 7.5rem, so chip `n` (0-based)
+ * appears once the bar is wider than roughly 15.5·(n+1) + 11rem. Hidden
+ * clocks are a tap away in the picker, and a "+N" chip says how many.
+ *
+ * Class strings are literal so Tailwind can see them.
+ */
+const CHIP_VISIBILITY = [
+  'flex',
+  'hidden @min-[42rem]:flex',
+  'hidden @min-[58rem]:flex',
+  'hidden @min-[74rem]:flex',
+  'hidden @min-[90rem]:flex',
+  'hidden @min-[105rem]:flex',
+  'hidden @min-[121rem]:flex',
+  'hidden @min-[137rem]:flex',
+] as const;
+
+/** "+N" chips: one per tier, each visible only inside its own width band. */
+const MORE_TIERS = [
+  { show: 1, cls: 'flex @min-[42rem]:hidden' },
+  { show: 2, cls: 'hidden @min-[42rem]:flex @min-[58rem]:hidden' },
+  { show: 3, cls: 'hidden @min-[58rem]:flex @min-[74rem]:hidden' },
+  { show: 4, cls: 'hidden @min-[74rem]:flex @min-[90rem]:hidden' },
+  { show: 5, cls: 'hidden @min-[90rem]:flex @min-[105rem]:hidden' },
+  { show: 6, cls: 'hidden @min-[105rem]:flex @min-[121rem]:hidden' },
+  { show: 7, cls: 'hidden @min-[121rem]:flex @min-[137rem]:hidden' },
+  { show: 8, cls: 'hidden @min-[137rem]:flex' },
+] as const;
 
 function fmt(date: Date, tz: string) {
   return date.toLocaleTimeString('en-GB', {
@@ -36,20 +65,13 @@ function fmtDay(date: Date, tz: string) {
 export default function WorldClockTicker({
   initialZones,
 }: Readonly<{ initialZones: WorldClockZone[] }>) {
-  const [now, setNow] = useState<Date | null>(null);
+  const nowMs = useNow(1000);
   const [zones, setZones] = useState(initialZones);
   const [draft, setDraft] = useState(() => initialZones.map((zone) => zone.tz));
   const [isPicking, setIsPicking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const panelRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const tick = () => setNow(new Date());
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, []);
 
   // Close the picker on outside click / Escape.
   useEffect(() => {
@@ -128,67 +150,45 @@ export default function WorldClockTicker({
     }
   }, [draft]);
 
-  // Repeat the line-up so even two or three clocks fill the bar, then render the
-  // sequence twice so the -50% scroll wraps seamlessly.
-  const sequence = useMemo(() => {
-    if (zones.length === 0) return [];
-
-    const repeats = Math.max(1, Math.ceil(MIN_TRACK_CHIPS / zones.length));
-    return Array.from({ length: repeats }, () => zones).flat();
-  }, [zones]);
-
-  const duration = Math.max(20, sequence.length * SECONDS_PER_ZONE);
-
-  if (!now) {
+  if (nowMs === null) {
     return <div className="ticker-bar bg-primary" />;
   }
+  const now = new Date(nowMs);
 
-  const chips = sequence.map((zone, index) => (
+  const chips = zones.slice(0, CHIP_VISIBILITY.length).map((zone, index) => (
     <span
-      key={`${zone.tz}-${index}`}
-      className="flex items-baseline gap-2 shrink-0 px-4"
+      key={zone.tz}
+      className={`${CHIP_VISIBILITY[index]} items-baseline gap-2 shrink-0 px-3 @min-[42rem]:px-4 ${index > 0 ? 'border-l border-white/15' : ''}`}
     >
       <span className="text-sm font-bold tracking-wide opacity-85">{zone.city}</span>
-      <span className="text-lg tabular-nums font-bold leading-none">
-        {fmt(now, zone.tz)}
-      </span>
-      <span className="text-[11px] font-semibold opacity-60">{fmtDay(now, zone.tz)}</span>
-      <span className="mx-2 opacity-30 select-none">·</span>
+      <span className="text-lg tabular-nums font-bold leading-none">{fmt(now, zone.tz)}</span>
+      <span className="hidden @min-[42rem]:inline text-[11px] font-semibold opacity-60">{fmtDay(now, zone.tz)}</span>
     </span>
   ));
 
-  return (
-    <div className="ticker-bar world-clock-bar bg-primary text-white font-mono select-none">
-      <style>{`
-        @keyframes world-clock-scroll {
-          0%   { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        .world-clock-track {
-          display: inline-flex;
-          align-items: center;
-          white-space: nowrap;
-          will-change: transform;
-          animation: world-clock-scroll ${duration}s linear infinite;
-        }
-        .world-clock-bar:hover .world-clock-track {
-          animation-play-state: paused;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .world-clock-track { animation: none; }
-        }
-      `}</style>
+  const hiddenCounts = MORE_TIERS.map((tier) =>
+    zones.length > tier.show ? (
+      <button
+        key={tier.show}
+        type="button"
+        onClick={openPicker}
+        className={`${tier.cls} items-center shrink-0 ml-2 px-2 py-0.5 rounded-full bg-white/10 border border-white/20 text-[11px] font-bold hover:bg-white/25 transition-colors`}
+        aria-label={`${zones.length - tier.show} more clocks`}
+      >
+        +{zones.length - tier.show}
+      </button>
+    ) : null,
+  );
 
+  return (
+    <div className="ticker-bar world-clock-bar @container bg-primary text-white font-mono select-none">
       <div className="flex h-full items-center">
-        <div className="flex-1 h-full flex items-center overflow-hidden">
-          <div className="world-clock-track">
-            {chips}
-            {/* duplicate for seamless loop */}
-            {chips}
-          </div>
+        <div className="flex-1 h-full flex items-center overflow-hidden whitespace-nowrap">
+          {chips}
+          {hiddenCounts}
         </div>
 
-        <div className="shrink-0 h-full flex items-center pl-6 pr-4 bg-gradient-to-r from-transparent via-primary to-primary">
+        <div className="shrink-0 h-full flex items-center pl-3 pr-3 @min-[42rem]:pl-4 @min-[42rem]:pr-4">
           <button
             type="button"
             onClick={isPicking ? () => setIsPicking(false) : openPicker}
@@ -204,7 +204,7 @@ export default function WorldClockTicker({
                 d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            CLOCKS
+            <span className="hidden @min-[42rem]:inline">CLOCKS</span>
           </button>
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { startVisibleInterval } from '@/lib/visible-interval';
 
@@ -88,6 +88,8 @@ type NotificationItem = {
 
 /** Single aggregated read; the per-source endpoints below remain for mark-as-read. */
 const FEED_ENDPOINT = '/api/notifications';
+/** Toasts are for what just happened; anything older waits in the bell. */
+const MAX_VISIBLE_TOASTS = 2;
 
 type NotificationFeed = {
   todo?: RawTodoNotification[];
@@ -168,6 +170,9 @@ export default function NotificationsBell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [visibleToastKeys, setVisibleToastKeys] = useState<string[]>([]);
+  // Unread keys already shown or present at first load. Null until the first
+  // load completes, so a page refresh never replays the whole backlog as toasts.
+  const seenUnreadKeys = useRef<Set<string> | null>(null);
 
   const dismissToast = (key: string) => {
     setVisibleToastKeys((current) => current.filter((value) => value !== key));
@@ -293,9 +298,16 @@ export default function NotificationsBell() {
 
         setNotifications(trimmed);
         const unreadKeys = trimmed.filter((item) => !item.readAt).map(compositeKey);
-        setVisibleToastKeys((current) =>
-          Array.from(new Set([...current, ...unreadKeys])),
-        );
+        if (!seenUnreadKeys.current) {
+          // First load: the badge shows the backlog; only later arrivals toast.
+          seenUnreadKeys.current = new Set(unreadKeys);
+          return;
+        }
+        const seen = seenUnreadKeys.current;
+        const fresh = unreadKeys.filter((key) => !seen.has(key));
+        if (fresh.length === 0) return;
+        for (const key of fresh) seen.add(key);
+        setVisibleToastKeys((current) => [...current, ...fresh].slice(-MAX_VISIBLE_TOASTS));
       } catch {
         // ignore
       }

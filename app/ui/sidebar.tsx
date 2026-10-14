@@ -5,6 +5,11 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import LogoutButton from './logout-button';
 import { moduleIcon } from './module-icons';
+import { useIsClient } from './use-client';
+
+/** Below this width the sidebar starts collapsed and overlays the page when opened. */
+const SMALL_SCREEN = '(max-width: 1023px)';
+const isSmallScreen = () => typeof window !== 'undefined' && window.matchMedia(SMALL_SCREEN).matches;
 
 interface Module {
   id: string | number;
@@ -27,6 +32,21 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
+  // Phones and small tablets start collapsed (decided on the first client
+  // render, so the server HTML still matches), and close again after a tap on
+  // a link so the page you asked for is not hidden behind the menu.
+  const isClient = useIsClient();
+  const [sizedForScreen, setSizedForScreen] = useState(false);
+  if (isClient && !sizedForScreen) {
+    setSizedForScreen(true);
+    if (isSmallScreen()) setIsCollapsed(true);
+  }
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (lastPathname !== pathname) {
+    setLastPathname(pathname);
+    if (isSmallScreen()) setIsCollapsed(true);
+  }
+
   // Group modules by category
   const groupedModules: Record<string, Module[]> = {};
   for (const m of modules) {
@@ -40,6 +60,15 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
   const isActive = (path: string) => pathname === path;
 
   return (
+    <>
+    {!isCollapsed && (
+      <button
+        type="button"
+        aria-label="Close menu"
+        onClick={() => setIsCollapsed(true)}
+        className="fixed inset-0 z-[95] bg-primary/30 lg:hidden"
+      />
+    )}
     <aside
       className={`bg-secondary h-screen flex flex-col fixed left-0 top-0 overflow-hidden border-r border-primary/10 transition-all duration-300 z-[100] ${
         isCollapsed ? 'w-16' : 'w-72'
@@ -151,5 +180,6 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
       </div>
 
     </aside>
+    </>
   );
 }

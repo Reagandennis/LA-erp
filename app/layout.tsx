@@ -60,7 +60,7 @@ export default async function RootLayout({
         )}
         {auth && <WorldClockTicker initialZones={worldClockZones} />}
         {auth && <NotificationsBell />}
-        <div className={`flex-1 flex flex-col min-h-screen transition-all duration-300 ${shouldShowSidebar ? 'sidebar-margin' : ''}`}>
+        <div className={`flex-1 min-w-0 flex flex-col min-h-screen transition-all duration-300 ${shouldShowSidebar ? 'sidebar-margin' : ''}`}>
           {children}
         </div>
         {/* Helper for the main content to avoid overlap using CSS-only detection of sidebar width */}
@@ -73,6 +73,11 @@ export default async function RootLayout({
             body:has(aside.w-16) .ticker-bar { left: 4rem; }
             body:has(aside.w-72) .ticker-bar { left: 18rem; }
             body:has(.ticker-bar) .sidebar-margin { padding-top: 3rem; }
+            /* Small screens: an opened sidebar overlays the page instead of squeezing it. */
+            @media (max-width: 1023px) {
+              body:has(aside.w-72) .sidebar-margin { margin-left: 4rem; }
+              body:has(aside.w-72) .ticker-bar { left: 4rem; }
+            }
           `}} />
         )}
         </BannerProvider>
