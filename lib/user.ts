@@ -73,6 +73,11 @@ export const userAccessInclude = {
               permission: true,
             },
           },
+          roleModules: {
+            include: {
+              module: true,
+            },
+          },
         },
       },
     },
@@ -147,9 +152,18 @@ export function buildAccessUser(user: UserWithAccess): AccessUser {
     }
   }
 
-  const modules = user.userModules
-    .map((assignment) => serializeModule(assignment.module))
-    .sort((left, right) => left.sortOrder - right.sortOrder);
+  // Access is the union of the user's own grants and every role's modules,
+  // so `userHasModule` honours roles everywhere without any caller changing.
+  const moduleMap = new Map<number, ModuleSummary>();
+  for (const assignment of user.userModules) {
+    moduleMap.set(assignment.module.id, serializeModule(assignment.module));
+  }
+  for (const assignment of user.userRoles) {
+    for (const roleModule of assignment.role.roleModules) {
+      moduleMap.set(roleModule.module.id, serializeModule(roleModule.module));
+    }
+  }
+  const modules = [...moduleMap.values()].sort((left, right) => left.sortOrder - right.sortOrder);
 
   return {
     id: user.id,
@@ -183,34 +197,38 @@ export async function getUserAccessById(userId: number) {
   return user ? buildAccessUser(user) : null;
 }
 
-export async function listRolesWithPermissions() {
+export interface AdminRoleSummary {
+  id: number;
+  name: string;
+  description: string;
+  /** The admin role: every module, can't be renamed, emptied or deleted. */
+  isAdmin: boolean;
+  moduleIds: number[];
+  memberCount: number;
+  createdAt: string;
+}
+
+/** Roles for the admin console: admin first, then by name. */
+export async function listRolesForAdmin(): Promise<AdminRoleSummary[]> {
   const roles = await prisma.role.findMany({
     include: {
-      rolePermissions: {
-        include: {
-          permission: true,
-        },
-      },
+      roleModules: { select: { moduleId: true } },
+      _count: { select: { userRoles: true } },
     },
-    orderBy: {
-      name: 'asc',
-    },
+    orderBy: { name: 'asc' },
   });
 
-  return roles.map((role) => ({
-    id: role.id,
-    name: role.name,
-    description: role.description,
-    permissions: role.rolePermissions
-      .map(({ permission }) => ({
-        id: permission.id,
-        name: permission.name,
-        description: permission.description,
-        resource: permission.resource,
-        action: permission.action,
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name)),
-  }));
+  return roles
+    .map((role) => ({
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      isAdmin: role.name === ADMIN_ROLE_NAME,
+      moduleIds: role.roleModules.map((rm) => rm.moduleId),
+      memberCount: role._count.userRoles,
+      createdAt: role.createdAt.toISOString(),
+    }))
+    .sort((left, right) => Number(right.isAdmin) - Number(left.isAdmin));
 }
 
 // Deduplicated per request: the root layout and admin pages both need the
@@ -221,15 +239,69 @@ export const listAllModules = cache(async () => {
   });
 });
 
-export async function listManagedUsers() {
-  const users = await prisma.user.findMany({
-    include: userAccessInclude,
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
+export interface ManagedUser extends AccessUser {
+  /** Modules granted to the user directly, as opposed to through a role. */
+  directModuleIds: number[];
+  /** Latest activity on any session, or null if they have never signed in. */
+  lastSeenAt: string | null;
+  /** Sessions that are neither revoked nor expired. */
+  activeSessions: number;
+}
 
-  return users.map(buildAccessUser);
+/**
+ * When each user was last active: the later of their newest session activity
+ * and their newest successful sign-in. Sessions alone aren't enough, because
+ * maintenance deletes them 30 days after they end; the audit log is kept.
+ */
+export async function lastActivityByUser(): Promise<Map<number, Date>> {
+  const [sessions, signIns] = await Promise.all([
+    prisma.session.groupBy({ by: ['userId'], _max: { lastSeenAt: true } }),
+    prisma.auditLog.groupBy({
+      by: ['actorUserId'],
+      where: { action: 'auth.login.succeeded', actorUserId: { not: null } },
+      _max: { createdAt: true },
+    }),
+  ]);
+  const latest = new Map<number, Date>();
+  const offer = (userId: number | null, at: Date | null) => {
+    if (userId === null || !at) return;
+    const seen = latest.get(userId);
+    if (!seen || at > seen) latest.set(userId, at);
+  };
+  for (const row of sessions) offer(row.userId, row._max.lastSeenAt);
+  for (const row of signIns) offer(row.actorUserId, row._max.createdAt);
+  return latest;
+}
+
+export async function listManagedUsers(): Promise<ManagedUser[]> {
+  const now = new Date();
+  const [users, lastSeen, active] = await Promise.all([
+    prisma.user.findMany({
+      include: userAccessInclude,
+      orderBy: {
+        createdAt: 'desc',
+      },
+    }),
+    lastActivityByUser(),
+    prisma.session.groupBy({
+      by: ['userId'],
+      where: { revokedAt: null, expiresAt: { gt: now } },
+      _count: { _all: true },
+    }),
+  ]);
+  const activeBy = new Map(active.map((row) => [row.userId, row._count._all]));
+
+  return users.map((user) => ({
+    ...buildAccessUser(user),
+    directModuleIds: user.userModules.map((assignment) => assignment.moduleId),
+    lastSeenAt: lastSeen.get(user.id)?.toISOString() ?? null,
+    activeSessions: activeBy.get(user.id) ?? 0,
+  }));
+}
+
+/** Who holds a role, for checks before it is changed or deleted. */
+export async function countRoleMembers(roleId: number): Promise<number> {
+  return prisma.userRole.count({ where: { roleId } });
 }
 
 export async function createManagedUser(input: {
@@ -267,6 +339,8 @@ export async function createManagedUser(input: {
 
 export async function updateManagedUser(input: {
   userId: number;
+  name?: string;
+  email?: string;
   status?: string;
   roleIds?: number[];
   moduleIds?: number[];
@@ -289,6 +363,8 @@ export async function updateManagedUser(input: {
     await tx.user.update({
       where: { id: input.userId },
       data: {
+        name: input.name,
+        email: input.email,
         status: input.status,
         sessionVersion: shouldResetSessions
           ? {

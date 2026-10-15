@@ -10,6 +10,7 @@ import { enforceRateLimit } from '@/lib/rate-limit';
 import { stopIngest } from '@/lib/messaging-ingest';
 import { clearCache } from '@/lib/messaging-media-cache';
 import { stopTelegramMirror } from '@/lib/telegram';
+import { removeAccount as removeWacliAccount } from '@/lib/wacli';
 import { stopSync } from '@/lib/whatsapp-sync';
 
 export const dynamic = 'force-dynamic';
@@ -24,8 +25,14 @@ export const runtime = 'nodejs';
  * one user can't start or read a link attempt on another's behalf.
  *
  * GET  ?provider=x   poll the current attempt (payload rendered as a QR data URL)
- * POST { provider }  start an attempt
- * DELETE ?provider=x cancel an attempt, or unlink an already-linked account
+ * POST { provider, accountId? }
+ *                    start an attempt; for WhatsApp, `accountId` re-pairs that
+ *                    account and leaving it out adds another one
+ * DELETE ?provider=x&attempt
+ *                    cancel the current attempt only
+ * DELETE ?provider=x[&account=id]
+ *                    cancel any attempt and unlink the account (the first one
+ *                    linked when no id is given)
  */
 
 function providerFrom(request: NextRequest): string {
@@ -74,7 +81,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const view = await startLink(ctx.userId, provider);
+  let accountId: number | undefined;
+  if (body?.accountId !== undefined && body.accountId !== null) {
+    accountId = Number(body.accountId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) {
+      return NextResponse.json({ error: 'Invalid account.' }, { status: 400 });
+    }
+  }
+
+  const view = await startLink(ctx.userId, provider, { accountId });
   const qr = view.payload ? await QRCode.toDataURL(view.payload, { margin: 1, width: 320 }) : null;
   return NextResponse.json({ ...view, qr }, { status: view.status === 'error' ? 400 : 200 });
 }
@@ -88,20 +103,26 @@ export async function DELETE(request: NextRequest) {
   if (response || !ctx) return response;
 
   cancelLink(ctx.userId, provider);
-  const removed = await deleteAccount(ctx.userId, provider);
+  if (new URL(request.url).searchParams.has('attempt')) return NextResponse.json({ ok: true, unlinked: false });
+
+  const removed = await deleteAccount(ctx.userId, provider, ctx.account?.id);
   if (removed) {
     // Tear down whatever was feeding this account's mirror.
     stopIngest(provider, removed.id);
     // Cached attachments belong to the account that is going away.
     await clearCache(removed.id);
-    if (provider === 'whatsapp') stopSync(removed.handle);
+    if (provider === 'whatsapp') {
+      // Stop the sync first: it holds the store lock that logout needs.
+      stopSync(removed.handle);
+      await removeWacliAccount(removed.handle, { logout: true });
+    }
     if (provider === 'telegram') stopTelegramMirror(ctx.userId);
     await recordAuditEvent({
       action: 'messaging.account.unlinked',
       entityType: 'messaging-account',
       entityId: String(removed.id),
       actorUserId: ctx.userId,
-      metadata: { provider },
+      metadata: { provider, label: removed.label },
       request,
     });
   }

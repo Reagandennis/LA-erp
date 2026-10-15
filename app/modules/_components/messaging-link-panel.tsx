@@ -8,7 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * Shows a QR the user scans with the phone app, polls until the handshake
  * completes, then tells the console to reload. The account is always the
  * signed-in user's own — the server takes the user id from the session cookie,
- * never from anything this component sends.
+ * never from anything this component sends. `accountId` re-pairs one of the
+ * user's existing accounts instead of adding one, and the server checks it is
+ * theirs.
  */
 
 type LinkStatus = 'idle' | 'pending' | 'linked' | 'error' | 'expired';
@@ -18,6 +20,7 @@ interface LinkView {
   qr: string | null;
   error: string | null;
   label: string | null;
+  accountId?: number | null;
 }
 
 const POLL_MS = 2000;
@@ -32,17 +35,30 @@ export default function MessagingLinkPanel({
   provider,
   title,
   onLinked,
+  accountId,
+  heading,
+  description,
+  onCancel,
   children,
 }: {
   provider: 'whatsapp' | 'telegram' | 'signal';
   title: string;
-  onLinked: () => void;
+  /** Called with the id of the account that was linked, when the server reports it. */
+  onLinked: (accountId: number | null) => void;
+  /** Re-pair this existing account rather than adding a new one. */
+  accountId?: number | null;
+  heading?: string;
+  description?: string;
+  /** Shows a Cancel button, for when linking is optional (adding another account). */
+  onCancel?: () => void;
   /** Optional alternative sign-in (Telegram's phone flow) shown under the QR. */
   children?: React.ReactNode;
 }) {
   const [view, setView] = useState<LinkView>({ status: 'idle', qr: null, error: null, label: null });
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  /** Whether a server-side attempt may still be running, so leaving can stop it. */
+  const pendingRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -58,9 +74,11 @@ export default function MessagingLinkPanel({
       if (!d) return;
       setView(d);
       if (d.status === 'linked') {
+        pendingRef.current = false;
         stopPolling();
-        onLinked();
-      } else if (d.status === 'error' || d.status === 'expired') {
+        onLinked(d.accountId ?? null);
+      } else if (d.status === 'error' || d.status === 'expired' || d.status === 'idle') {
+        pendingRef.current = false;
         stopPolling();
       }
     } catch {
@@ -76,13 +94,14 @@ export default function MessagingLinkPanel({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({ provider, ...(accountId ? { accountId } : {}) }),
       });
       const d = (await r.json().catch(() => null)) as (LinkView & { error?: string }) | null;
       setView(
         d ?? { status: 'error', qr: null, error: 'Could not start linking.', label: null },
       );
       if (d?.status === 'pending') {
+        pendingRef.current = true;
         pollRef.current = setInterval(() => void poll(), POLL_MS);
       }
     } catch {
@@ -90,17 +109,30 @@ export default function MessagingLinkPanel({
     } finally {
       setBusy(false);
     }
-  }, [provider, poll, stopPolling]);
+  }, [provider, accountId, poll, stopPolling]);
 
-  useEffect(() => stopPolling, [stopPolling]);
+  /** Stop the server-side attempt (the CLI process waiting for a scan). */
+  const cancelAttempt = useCallback(() => {
+    stopPolling();
+    if (!pendingRef.current) return;
+    pendingRef.current = false;
+    // keepalive lets this finish even when the panel is going away with the page.
+    void fetch(`/api/messaging/link?provider=${provider}&attempt`, {
+      method: 'DELETE',
+      credentials: 'include',
+      keepalive: true,
+    }).catch(() => {});
+  }, [provider, stopPolling]);
+
+  useEffect(() => cancelAttempt, [cancelAttempt]);
 
   const steps = INSTRUCTIONS[provider] ?? [];
 
   return (
     <div className="mx-auto w-full max-w-sm rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-      <h2 className="text-base font-bold text-gray-900">Link your {title}</h2>
+      <h2 className="text-base font-bold text-gray-900">{heading ?? `Link your ${title}`}</h2>
       <p className="mt-1 text-xs text-gray-500">
-        Connects your own account. Only you can see these conversations.
+        {description ?? 'Connects your own account. Only you can see these conversations.'}
       </p>
 
       {view.status === 'pending' && view.qr ? (
@@ -140,6 +172,19 @@ export default function MessagingLinkPanel({
             {busy ? 'Preparing…' : view.status === 'idle' ? 'Show QR code' : 'Try again'}
           </button>
         </div>
+      )}
+
+      {onCancel && (
+        <button
+          type="button"
+          onClick={() => {
+            cancelAttempt();
+            onCancel();
+          }}
+          className="mt-3 w-full rounded-xl px-4 py-2 text-sm font-medium text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
+        >
+          Cancel
+        </button>
       )}
 
       {children && (

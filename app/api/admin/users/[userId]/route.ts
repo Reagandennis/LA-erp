@@ -9,6 +9,7 @@ import {
   countAdmins,
   deleteManagedUser,
   getUserAccessById,
+  getUserByEmail,
   isUserAdmin,
   updateManagedUser,
   userHasRole,
@@ -112,7 +113,14 @@ export async function PUT(
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  const { roleIds, moduleIds, status } = validation.data;
+  const { name, email, roleIds, moduleIds, status } = validation.data;
+
+  if (email !== undefined && email !== targetBefore.email) {
+    const clash = await getUserByEmail(email);
+    if (clash && clash.id !== userId) {
+      return NextResponse.json({ error: 'A user with that email already exists' }, { status: 409 });
+    }
+  }
   const targetIsAdmin = userHasRole(targetBefore, ADMIN_ROLE_NAME);
 
   if (auth.user.id === userId) {
@@ -173,6 +181,8 @@ export async function PUT(
 
   const updatedUser = await updateManagedUser({
     userId,
+    name,
+    email,
     status,
     roleIds,
     moduleIds,
@@ -189,6 +199,8 @@ export async function PUT(
     actorUserId: auth.user.id,
     targetUserId: userId,
     metadata: {
+      ...(name !== undefined && name !== targetBefore.name ? { name, previousName: targetBefore.name } : {}),
+      ...(email !== undefined && email !== targetBefore.email ? { email, previousEmail: targetBefore.email } : {}),
       status: status ?? null,
       roleIds: roleIds ?? null,
       moduleIds: moduleIds ?? null,

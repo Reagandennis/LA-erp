@@ -197,6 +197,20 @@ model Role {
   updatedAt       DateTime         @updatedAt
   userRoles       UserRole[]
   rolePermissions RolePermission[]
+  roleModules     RoleModule[]
+}
+
+/// A module every holder of the role can open. A user's access is the union of
+/// these and their own UserModule grants; admins see every module regardless.
+model RoleModule {
+  id       Int    @id @default(autoincrement())
+  roleId   Int
+  moduleId Int
+  role     Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, moduleId])
+  @@index([moduleId])
 }
 
 model Permission {
@@ -220,6 +234,7 @@ model Module {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   userModules UserModule[]
+  roleModules RoleModule[]
 
   @@index([category, sortOrder])
 }
@@ -751,7 +766,8 @@ model MessagingAccount {
   ///   telegram -> the account's phone number, for display
   handle String
 
-  /// Human-readable name shown in the console header.
+  /// Human-readable name shown in the console header (WhatsApp: the linked
+  /// phone number, e.g. "+254712345678").
   label String?
 
   /// Telegram only: the GramJS StringSession. A full account credential —
@@ -769,8 +785,9 @@ model MessagingAccount {
   chats     MessagingChat[]
   messages  MessagingMessage[]
 
-  /// One account per provider per user.
-  @@unique([userId, provider])
+  /// WhatsApp allows several accounts per user, one per wacli store; Telegram
+  /// and Signal keep one each, which lib/messaging-accounts.ts enforces.
+  @@unique([userId, provider, handle])
   @@index([provider])
 }
 
@@ -1120,6 +1137,17 @@ model RateLimitBucket {
 
   @@unique([scope, key, windowStart])
   @@index([expiresAt])
+}
+
+/// Last good exchange-rate table per base currency (see lib/exchange-rates-server.ts).
+/// Lets reports keep converting after a restart or while the rates service is down.
+model ExchangeRateSnapshot {
+  base      String   @id
+  /// Currency code → units per 1 `base`.
+  rates     Json
+  /// When the provider published these rates.
+  asOf      DateTime
+  fetchedAt DateTime @updatedAt
 }
 
 model Conversation {

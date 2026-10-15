@@ -30,18 +30,47 @@ export const managedUserSchema = z.object({
 
 export const managedUserUpdateSchema = z
   .object({
+    name: z.string().trim().min(2, 'Name must be at least 2 characters').max(80).optional(),
+    email: emailSchema.optional(),
     status: userStatusSchema.optional(),
-    roleIds: z.array(z.number().int().positive()).min(1).optional(),
+    roleIds: z.array(z.number().int().positive()).min(1, 'Keep at least one role').optional(),
     moduleIds: z.array(z.number().int().positive()).optional(),
   })
   .refine(
     (value) =>
+      value.name !== undefined ||
+      value.email !== undefined ||
       value.status !== undefined ||
       value.roleIds !== undefined ||
       value.moduleIds !== undefined,
     {
     message: 'At least one field must be updated',
     },
+  );
+
+export const roleNameSchema = z
+  .string()
+  .trim()
+  .min(2, 'Role names need at least 2 characters')
+  .max(40, 'Keep role names to 40 characters')
+  .regex(/^[A-Za-z0-9][A-Za-z0-9 &/_-]*$/, 'Use letters, numbers, spaces and - _ & /');
+
+/** A custom role: a named bundle of modules its holders can open. */
+export const roleSchema = z.object({
+  name: roleNameSchema,
+  description: z.string().trim().max(200, 'Keep the description to 200 characters').default(''),
+  moduleIds: z.array(z.number().int().positive()).max(500).default([]),
+});
+
+export const roleUpdateSchema = z
+  .object({
+    name: roleNameSchema.optional(),
+    description: z.string().trim().max(200, 'Keep the description to 200 characters').optional(),
+    moduleIds: z.array(z.number().int().positive()).max(500).optional(),
+  })
+  .refine(
+    (value) => value.name !== undefined || value.description !== undefined || value.moduleIds !== undefined,
+    { message: 'At least one field must be updated' },
   );
 
 export const managedUserPasswordResetSchema = z.object({

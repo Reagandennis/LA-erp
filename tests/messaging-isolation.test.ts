@@ -124,6 +124,40 @@ describe('resolveMessagingRequest', () => {
     expect(result.ctx?.account?.handle).toBe(ADA);
   });
 
+  it('picks one of the caller\'s own accounts with ?account=', async () => {
+    requireRequestAuth.mockResolvedValue({ auth: { user: { id: 77 } }, response: null });
+    getAccount.mockResolvedValue({ id: 12, userId: 77, provider: 'whatsapp', handle: 'laerp-user-77-0a1b2c3d', label: null, session: null });
+
+    const { resolveMessagingRequest } = await import('../lib/messaging-routes');
+    const result = await resolveMessagingRequest(new NextRequest('http://localhost/api/whatsapp/chats?account=12'), 'whatsapp');
+
+    // The id is looked up among the session user's accounts, never on its own.
+    expect(getAccount).toHaveBeenCalledWith(77, 'whatsapp', 12);
+    expect(result.ctx?.account?.id).toBe(12);
+  });
+
+  it('404s an account id that is not the caller\'s, instead of falling back to another', async () => {
+    requireRequestAuth.mockResolvedValue({ auth: { user: { id: 77 } }, response: null });
+    getAccount.mockResolvedValue(null);
+
+    const { resolveMessagingRequest } = await import('../lib/messaging-routes');
+    const result = await resolveMessagingRequest(new NextRequest('http://localhost/api/whatsapp/chats?account=99'), 'whatsapp');
+
+    expect(result.ctx).toBeNull();
+    expect(result.response?.status).toBe(404);
+  });
+
+  it('400s a malformed account id without looking anything up', async () => {
+    requireRequestAuth.mockResolvedValue({ auth: { user: { id: 77 } }, response: null });
+
+    const { resolveMessagingRequest } = await import('../lib/messaging-routes');
+    for (const bad of ['abc', '-1', '1.5', '0']) {
+      const result = await resolveMessagingRequest(new NextRequest(`http://localhost/api/whatsapp/chats?account=${bad}`), 'whatsapp');
+      expect(result.response?.status).toBe(400);
+    }
+    expect(getAccount).not.toHaveBeenCalled();
+  });
+
   it('returns a null account rather than failing when the user has not linked', async () => {
     requireRequestAuth.mockResolvedValue({ auth: { user: { id: 5 } }, response: null });
     getAccount.mockResolvedValue(null);

@@ -1,23 +1,23 @@
 import { redirect } from 'next/navigation';
 
-import AdminClient, {
-  type AdminModule,
-  type AdminRole,
-  type AdminUser,
-} from './admin-client';
-import { getServerAuth } from '@/lib/auth';
+import AdminClient from './admin-client';
+import type { AdminTab } from './_components/admin-types';
+import { getAdminOverview, listActiveSessions } from '@/lib/admin-console';
 import { queryAuditLogs } from '@/lib/audit';
+import { getServerAuth } from '@/lib/auth';
+import { isEmailConfigured } from '@/lib/email';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import {
-  listAllModules,
-  listManagedUsers,
-  listRolesWithPermissions,
-  userHasRole,
-} from '@/lib/user';
+import { listAllModules, listManagedUsers, listRolesForAdmin, userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminPage() {
+const TABS: AdminTab[] = ['overview', 'users', 'roles', 'sessions', 'audit', 'settings'];
+
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
 
   if (!auth) {
@@ -28,20 +28,29 @@ export default async function AdminPage() {
     redirect('/dashboard');
   }
 
-  const [users, roles, modules, audit] = await Promise.all([
+  const [{ tab }, users, roles, modules, audit, overview, sessions] = await Promise.all([
+    searchParams,
     listManagedUsers(),
-    listRolesWithPermissions(),
+    listRolesForAdmin(),
     listAllModules(),
     queryAuditLogs({ page: 1, pageSize: 25 }),
+    getAdminOverview(),
+    listActiveSessions(auth.sessionId),
   ]);
+  const requested = (Array.isArray(tab) ? tab[0] : tab) as AdminTab | undefined;
 
   return (
     <AdminClient
       currentUserId={auth.user.id}
-      initialUsers={users as AdminUser[]}
-      initialRoles={roles as AdminRole[]}
-      initialModules={modules as AdminModule[]}
+      initialTab={requested && TABS.includes(requested) ? requested : 'overview'}
+      initialUsers={users}
+      initialRoles={roles}
+      initialModules={modules}
       initialAudit={audit}
+      initialOverview={overview}
+      initialSessions={sessions}
+      emailConfigured={isEmailConfigured()}
+      renderedAt={overview.generatedAt}
     />
   );
 }

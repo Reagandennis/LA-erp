@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { isAppWacliAccountName } from './messaging-accounts';
 import { runWacli, wacliScratch } from './wacli-runtime';
 
 /**
@@ -93,6 +94,33 @@ export async function getStatus(account: string): Promise<WacliStatus> {
       error: e instanceof Error ? e.message : 'wacli unavailable',
     };
   }
+}
+
+// ---- Accounts ----
+
+/**
+ * Forget a wacli account for good: sign this device out of WhatsApp (so it
+ * drops off the phone's Linked devices list), remove it from wacli's config,
+ * and delete its store, which holds the local message mirror and downloaded
+ * media.
+ *
+ * The account's `sync --follow` must be stopped first, since it holds the store
+ * lock that logout needs. Every step is best-effort: a store that was never
+ * paired has nothing to log out of.
+ */
+export async function removeAccount(account: string, options: { logout: boolean }): Promise<void> {
+  if (!isAppWacliAccountName(account)) return;
+  if (options.logout) await logout(account);
+  const shown = await run<{ store_dir?: string }>(['accounts', 'show', account], 10_000).catch(() => null);
+  await run<unknown>(['accounts', 'remove', account], 10_000).catch(() => {});
+  // Only ever the directory wacli itself placed for this exact account.
+  const dir = shown?.store_dir ?? '';
+  if (dir.endsWith(`/accounts/${account}`)) await wacliScratch().remove(dir).catch(() => {});
+}
+
+/** Sign a store out of WhatsApp but keep it, for an account that stays linked. */
+export async function logout(account: string): Promise<void> {
+  await run<unknown>(['--lock-wait', '15s', 'auth', 'logout'], 45_000, account).catch(() => {});
 }
 
 // ---- Chats ----

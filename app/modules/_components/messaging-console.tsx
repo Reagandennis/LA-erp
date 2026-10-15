@@ -2,7 +2,7 @@
 
 import { APP_LOCALE } from '@/lib/locale';
 import { startVisibleInterval } from '@/lib/visible-interval';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import MessageMediaView, { type MessageMedia } from './message-media';
 import MessagingLinkPanel from './messaging-link-panel';
@@ -25,6 +25,11 @@ export interface MessagingConsoleConfig {
   connectionNoun: string;
   /** Hint for the "start a new chat" field — the address form this provider takes. */
   newChatPlaceholder: string;
+  /**
+   * The provider lets one user link several accounts (WhatsApp). Adds the
+   * account switcher, "Add number" and "Unlink".
+   */
+  multiAccount?: boolean;
 }
 
 export interface MessagingConsoleProps {
@@ -35,6 +40,15 @@ export interface MessagingConsoleProps {
    * complete a QR login.
    */
   signIn?: (props: { onSignedIn: () => void }) => React.ReactNode;
+  /** Account to open first (from `?account=`); the first linked one otherwise. */
+  initialAccountId?: number | null;
+}
+
+interface AccountSummary {
+  id: number;
+  label: string | null;
+  /** Chats with unread messages. */
+  unread: number;
 }
 
 interface Status {
@@ -45,6 +59,9 @@ interface Status {
   counts: { chats: number; messages: number };
   hint?: string;
   error?: string;
+  /** Multi-account providers: the account this status describes, and all of them. */
+  accountId?: number | null;
+  accounts?: AccountSummary[];
 }
 
 interface Chat {
@@ -100,8 +117,14 @@ function GroupIcon() {
   );
 }
 
-export default function MessagingConsole({ config, signIn }: MessagingConsoleProps) {
+export default function MessagingConsole({ config, signIn, initialAccountId }: MessagingConsoleProps) {
   const base = `/api/${config.service}`;
+  /** The account picked in the switcher; null means the server's default (the first linked). */
+  const [accountId, setAccountId] = useState<number | null>(initialAccountId ?? null);
+  const [adding, setAdding] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  /** Bumped to force an immediate status + chats reload. */
+  const [reloadKey, reload] = useReducer((n: number) => n + 1, 0);
   const [status, setStatus] = useState<Status | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatsError, setChatsError] = useState<string | null>(null);
@@ -119,27 +142,66 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
   const fileRef = useRef<HTMLInputElement>(null);
   /** Mirrors the open chat so the SSE handler doesn't need to re-subscribe. */
   const selectedRef = useRef<string | null>(null);
+  /**
+   * The picked account, kept current for async callbacks: a response that
+   * comes back after the user switched accounts is dropped, never shown
+   * under the other number.
+   */
+  const accountRef = useRef<number | null>(accountId);
+
+  /** Append `account=` when one is picked, so every request names its account. */
+  const scoped = useCallback(
+    (path: string) => (accountId ? `${path}${path.includes('?') ? '&' : '?'}account=${accountId}` : path),
+    [accountId],
+  );
+
+  /** Show another account: clear everything that belonged to the previous one. */
+  const chooseAccount = useCallback((id: number | null) => {
+    accountRef.current = id;
+    setAccountId(id);
+    setAdding(false);
+    setSelectedId(null);
+    setChats([]);
+    setThread([]);
+    setSearch('');
+    setNewChatOpen(false);
+    setError(null);
+    setChatsError(null);
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('account', String(id));
+    else url.searchParams.delete('account');
+    window.history.replaceState(null, '', url);
+  }, []);
 
   const loadStatus = useCallback(async () => {
+    const requested = accountId;
     try {
-      const r = await fetch(`${base}/status`, { credentials: 'include' });
+      const r = await fetch(scoped(`${base}/status`), { credentials: 'include' });
+      if (accountRef.current !== requested) return;
+      // The account was unlinked elsewhere (another tab, an old link).
+      if (r.status === 404 && requested) {
+        chooseAccount(null);
+        return;
+      }
       const d = (await r.json().catch(() => null)) as Status | null;
       if (d) setStatus(d);
     } catch {
       /* ignore */
     }
-  }, [base]);
+  }, [base, scoped, accountId, chooseAccount]);
 
   const loadChats = useCallback(async () => {
+    const requested = accountId;
     try {
-      const r = await fetch(`${base}/chats`, { credentials: 'include' });
+      const r = await fetch(scoped(`${base}/chats`), { credentials: 'include' });
       const d = (await r.json().catch(() => null)) as { chats?: Chat[]; error?: string } | null;
+      if (accountRef.current !== requested) return;
       if (d?.chats) setChats(d.chats);
       setChatsError(d?.error ?? null);
     } catch {
       setChatsError('Could not reach the server.');
     }
-  }, [base]);
+  }, [base, scoped, accountId]);
 
   // Updates arrive over SSE; this slow tick only covers a dropped stream or a
   // status change (link/unlink) that produces no message event. It pauses
@@ -154,8 +216,14 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
         60_000,
         { immediate: true },
       ),
-    [loadStatus, loadChats],
+    // reloadKey is a dependency only so bumping it restarts with an immediate load.
+    [loadStatus, loadChats, reloadKey],
   );
+
+  const accounts = useMemo(() => status?.accounts ?? [], [status]);
+  /** The account on screen: the one picked, else the one the server defaulted to. */
+  const shownAccountId = accountId ?? status?.accountId ?? null;
+  const shownAccount = accounts.find((a) => a.id === shownAccountId) ?? null;
 
   const sorted = useMemo(() => {
     return [...chats].sort((a, b) => +new Date(b.lastMessageTs) - +new Date(a.lastMessageTs));
@@ -172,17 +240,19 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
 
   const loadThread = useCallback(
     async (id: string) => {
+      const requested = accountId;
       try {
-        const r = await fetch(`${base}/thread?id=${encodeURIComponent(id)}&limit=200`, {
+        const r = await fetch(scoped(`${base}/thread?id=${encodeURIComponent(id)}&limit=200`), {
           credentials: 'include',
         });
         const d = (await r.json().catch(() => null)) as { messages?: Message[] } | null;
+        if (accountRef.current !== requested) return;
         if (d?.messages) setThread(d.messages);
       } catch {
         /* ignore */
       }
     },
-    [base],
+    [base, scoped, accountId],
   );
 
   // Clear the pane the moment the selection changes (adjusted during render),
@@ -200,6 +270,12 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
     })();
   }, [effectiveSelected, loadThread]);
 
+  /** What the SSE handler needs, kept current without re-opening the stream. */
+  const liveRef = useRef({ loadStatus, loadChats, loadThread, shownAccountId, accountIds: [] as number[] });
+  useEffect(() => {
+    liveRef.current = { loadStatus, loadChats, loadThread, shownAccountId, accountIds: accounts.map((a) => a.id) };
+  });
+
   /**
    * Live updates. The server pushes only the affected chat ids, so we refetch
    * from the mirror rather than trusting the event payload — a dropped or
@@ -208,19 +284,25 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
   useEffect(() => {
     const source = new EventSource('/api/messaging/stream', { withCredentials: true });
     source.addEventListener('messaging', (event) => {
-      let chatIds: string[] = [];
+      let payload: { chatIds?: string[]; accountId?: number };
       try {
-        chatIds = (JSON.parse((event as MessageEvent).data) as { chatIds?: string[] }).chatIds ?? [];
+        payload = JSON.parse((event as MessageEvent).data) as typeof payload;
       } catch {
         return;
       }
-      void loadChats();
-      if (selectedRef.current && chatIds.includes(selectedRef.current)) {
-        void loadThread(selectedRef.current);
+      const live = liveRef.current;
+      if (payload.accountId && live.shownAccountId && payload.accountId !== live.shownAccountId) {
+        // Another of this user's numbers: only the switcher's unread badges change.
+        if (live.accountIds.includes(payload.accountId)) void live.loadStatus();
+        return;
+      }
+      void live.loadChats();
+      if (selectedRef.current && payload.chatIds?.includes(selectedRef.current)) {
+        void live.loadThread(selectedRef.current);
       }
     });
     return () => source.close();
-  }, [loadChats, loadThread]);
+  }, []);
 
   useEffect(() => {
     selectedRef.current = effectiveSelected;
@@ -236,7 +318,7 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
     setError(null);
     setSending(true);
     try {
-      const r = await fetch(`${base}/reply`, {
+      const r = await fetch(scoped(`${base}/reply`), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -266,7 +348,7 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
     setCreatingChat(true);
     setNewChatError(null);
     try {
-      const r = await fetch('/api/messaging/new-chat', {
+      const r = await fetch(scoped('/api/messaging/new-chat'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -298,7 +380,7 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
       form.append('chatId', effectiveSelected);
       form.append('caption', text.trim());
       form.append('file', file);
-      const r = await fetch(`${base}/send-media`, {
+      const r = await fetch(scoped(`${base}/send-media`), {
         method: 'POST',
         credentials: 'include',
         body: form,
@@ -315,6 +397,42 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
     } finally {
       setSending(false);
     }
+  };
+
+  /** Unlink the account on screen, after the user confirms. */
+  const unlinkAccount = async () => {
+    if (!shownAccount || unlinking) return;
+    const name = shownAccount.label ?? `this ${config.title} account`;
+    const confirmed = window.confirm(
+      `Unlink ${name}?\n\nIts conversations are removed from LA-ERP and LA-ERP is signed out of that ${config.title}. Your phone keeps all its chats.`,
+    );
+    if (!confirmed) return;
+    setUnlinking(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/messaging/link?provider=${config.service}&account=${shownAccount.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!r.ok) {
+        const d = (await r.json().catch(() => null)) as { error?: string } | null;
+        setError(d?.error ?? `Could not unlink ${name}.`);
+        return;
+      }
+      chooseAccount(null);
+      setStatus(null);
+      reload();
+    } catch {
+      setError(`Could not unlink ${name}.`);
+    } finally {
+      setUnlinking(false);
+    }
+  };
+
+  const onLinked = (linkedId: number | null) => {
+    setAdding(false);
+    if (config.multiAccount && linkedId) chooseAccount(linkedId);
+    reload();
   };
 
   const statusPill = (() => {
@@ -346,7 +464,55 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
         </span>
       </header>
 
-      {status && !status.authenticated && (status.hint || status.error) && (
+      {config.multiAccount && accounts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 bg-white px-4 py-2 sm:px-6">
+          <div role="group" aria-label={`${config.title} accounts`} className="flex flex-wrap items-center gap-2">
+            {accounts.map((a) => {
+              const active = !adding && a.id === shownAccountId;
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => (a.id === shownAccountId ? setAdding(false) : chooseAccount(a.id))}
+                  className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium tabular-nums transition ${active ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                >
+                  {a.label ?? config.title}
+                  {a.unread > 0 && !active && (
+                    <span className="min-w-5 rounded-full bg-emerald-500 px-1.5 text-center text-[11px] font-semibold leading-5 text-white">
+                      {a.unread}
+                      <span className="sr-only"> unread chats</span>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            aria-pressed={adding}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed px-3 py-1.5 text-sm font-medium transition ${adding ? 'border-primary/50 bg-primary/5 text-primary' : 'border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-900'}`}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add number
+          </button>
+          {shownAccount && !adding && (
+            <button
+              type="button"
+              onClick={() => void unlinkAccount()}
+              disabled={unlinking}
+              className="ml-auto shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-500 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+            >
+              {unlinking ? 'Unlinking…' : 'Unlink number'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {status && !status.authenticated && !adding && (status.hint || status.error) && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 sm:px-6">
           {status.hint ?? status.error}
         </div>
@@ -362,14 +528,30 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
         </div>
       )}
 
-      {status?.available && !status.authenticated ? (
+      {adding || (status?.available && !status.authenticated) ? (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
           <MessagingLinkPanel
+            // A fresh panel per purpose, so a QR for one never shows under another.
+            key={adding ? 'add' : `link-${shownAccountId ?? 'first'}`}
             provider={config.service}
             title={config.title}
-            onLinked={() => void loadStatus().then(() => loadChats())}
+            onLinked={onLinked}
+            {...(adding
+              ? {
+                  heading: `Add another ${config.title} number`,
+                  description:
+                    'Scan with the phone whose number you want to add. Each number keeps its own conversations, and only you can see them.',
+                  onCancel: () => setAdding(false),
+                }
+              : shownAccount
+                ? {
+                    accountId: shownAccount.id,
+                    heading: `Link ${shownAccount.label ?? config.title} again`,
+                    description: `${config.title} signed this number out. Scan with the same phone to pick up where it left off.`,
+                  }
+                : {})}
           >
-            {signIn?.({ onSignedIn: () => void loadStatus().then(() => loadChats()) })}
+            {signIn?.({ onSignedIn: reload })}
           </MessagingLinkPanel>
         </div>
       ) : (
@@ -530,6 +712,7 @@ export default function MessagingConsole({ config, signIn }: MessagingConsolePro
                           {m.media && (
                             <div className={m.text ? 'mb-1.5' : ''}>
                               <MessageMediaView
+                                accountId={shownAccountId}
                                 service={config.service}
                                 chatId={m.chatId}
                                 media={m.media}

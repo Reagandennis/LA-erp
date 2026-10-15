@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAccount } from '@/lib/messaging-accounts';
+import { findAccount, getAccount } from '@/lib/messaging-accounts';
 import { wacliToIngest } from '@/lib/messaging-ingest';
 import { ingestMessages } from '@/lib/messaging-repo';
 import { webhookSecret } from '@/lib/messaging-webhook-secret';
@@ -26,13 +26,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  // `account` names the MessagingAccount the process syncs. A process started
+  // before multi-account support carries `user` instead, which meant that
+  // user's one WhatsApp account.
+  const accountId = Number(searchParams.get('account'));
   const userId = Number(searchParams.get('user'));
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return NextResponse.json({ error: 'bad-request' }, { status: 400 });
-  }
+  let account: Awaited<ReturnType<typeof findAccount>> = null;
+  if (Number.isSafeInteger(accountId) && accountId > 0) account = await findAccount(accountId);
+  else if (Number.isSafeInteger(userId) && userId > 0) account = await getAccount(userId, 'whatsapp');
+  else return NextResponse.json({ error: 'bad-request' }, { status: 400 });
 
-  const account = await getAccount(userId, 'whatsapp');
-  if (!account) return NextResponse.json({ error: 'not-linked' }, { status: 409 });
+  if (!account || account.provider !== 'whatsapp') {
+    return NextResponse.json({ error: 'not-linked' }, { status: 409 });
+  }
 
   const body = (await request.json().catch(() => null)) as unknown;
   if (!body) return NextResponse.json({ error: 'bad-request' }, { status: 400 });

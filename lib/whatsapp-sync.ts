@@ -20,14 +20,15 @@ import {
  * messages only land there while `sync --follow` is running. Telegram serves
  * history on demand, and Signal is drained per request, so neither needs this.
  *
- * One process per linked user is the real operational cost of per-user
- * WhatsApp. Processes are restarted with backoff if they exit, and stopped when
+ * One process per linked account is the real operational cost of per-user
+ * WhatsApp (a user with two numbers runs two). Processes are restarted with backoff if they exit, and stopped when
  * the account is unlinked. Everything is keyed by the wacli account name.
  */
 
 interface SyncProcess {
   account: string;
-  userId?: number;
+  /** MessagingAccount id the webhook files messages under. */
+  accountId?: number;
   child: ChildProcess;
   /** The exact wacli argv, needed to stop the process inside a container. */
   args: string[];
@@ -79,10 +80,11 @@ export function syncStatus(account: string): SyncState {
  *
  * `--webhook` is what makes WhatsApp live: wacli POSTs each incoming message
  * straight to /api/messaging/webhook, which writes it to Postgres and pushes an
- * SSE event. `userId` is required for that — without it the process still syncs
- * its local mirror, but nothing reaches the console until the next backfill.
+ * SSE event. `accountId` is required for that — without it the process still
+ * syncs its local mirror, but nothing reaches the console until the next
+ * backfill.
  */
-export function startSync(account: string, userId?: number, restarts = 0): void {
+export function startSync(account: string, accountId?: number, restarts = 0): void {
   if (!account) return;
   const existing = processes().get(account);
   if (existing && !existing.child.killed) return;
@@ -98,13 +100,13 @@ export function startSync(account: string, userId?: number, restarts = 0): void 
   // opened. The only thing pre-download buys is old media that WhatsApp's
   // servers have since expired.
   if (/^(1|true|yes)$/i.test((process.env.WACLI_DOWNLOAD_MEDIA ?? '').trim())) args.push('--download-media');
-  if (userId) {
+  if (accountId) {
     // The webhook always points at this app on the same host (or the Docker
     // host gateway), which wacli refuses as a private address unless told
     // explicitly that it is allowed.
     args.push(
       '--webhook',
-      `${webhookBase()}/api/messaging/webhook?token=${webhookSecret()}&user=${userId}`,
+      `${webhookBase()}/api/messaging/webhook?token=${webhookSecret()}&account=${accountId}`,
       '--webhook-allow-private',
     );
   }
@@ -118,7 +120,7 @@ export function startSync(account: string, userId?: number, restarts = 0): void 
     startedAt: Date.now(),
     restarts,
     stopping: false,
-    userId,
+    accountId,
   };
   processes().set(account, proc);
 
@@ -146,7 +148,7 @@ export function startSync(account: string, userId?: number, restarts = 0): void 
 
     const timer = setTimeout(() => {
       timers().delete(account);
-      startSync(account, proc.userId, nextRestarts);
+      startSync(account, proc.accountId, nextRestarts);
     }, delay);
     // Don't hold the event loop open on a restart timer.
     timer.unref?.();
@@ -232,7 +234,7 @@ export async function reconcileSyncProcesses(): Promise<SyncState[]> {
     if (!account.handle) continue;
     // Clear any leftover process from a previous run before claiming the lock.
     if (!processes().has(account.handle)) await reapOrphans(account.handle);
-    startSync(account.handle, account.userId);
+    startSync(account.handle, account.id);
   }
   for (const account of [...processes().keys()]) {
     if (!wanted.has(account)) stopSync(account);

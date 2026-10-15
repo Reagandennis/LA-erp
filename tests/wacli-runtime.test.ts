@@ -88,6 +88,14 @@ describe('native mode', () => {
     expect(cp.execFile.mock.calls[0]![1]).toEqual(['-f', '(^|/)wacli --account laerp-user-1 sync( |$)']);
     kill.mockRestore();
   });
+
+  it('never matches a user\'s other accounts, which share the name as a prefix', async () => {
+    const rt = await load({});
+    const pattern = new RegExp(rt.wacliProcessPattern('laerp-user-1', 'sync'));
+    expect(pattern.test('wacli --account laerp-user-1 sync --follow')).toBe(true);
+    expect(pattern.test('wacli --account laerp-user-1-0a1b2c3d sync --follow')).toBe(false);
+    expect(pattern.test('wacli --account laerp-user-10 sync --follow')).toBe(false);
+  });
 });
 
 describe('docker mode', () => {

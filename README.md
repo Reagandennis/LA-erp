@@ -277,7 +277,7 @@ The data model lives in [`prisma/schema.prisma`](prisma/schema.prisma) (~50
 models). Major groups:
 
 - **Identity & access** — `User`, `Role`, `Permission`, `RolePermission`,
-  `UserRole`, `Module`, `UserModule`, `Session`, `AuditLog`, `RateLimitBucket`,
+  `RoleModule`, `UserRole`, `Module`, `UserModule`, `Session`, `AuditLog`, `RateLimitBucket`,
   `UploadLimitSettings`.
 - **Sales & finance** — `Customer`, `Deal`, `CrmActivity`, `Quote`, `QuoteItem`,
   `QuoteTemplate`, `Product`, `BrandProfile`, `Invoice`, `InvoiceItem`,
@@ -307,16 +307,23 @@ npm run db:seed                  # seed roles, permissions, modules, admin
 - **Sessions:** the session cookie holds a signed JWT (user id, session id,
   session version). Active sessions live in PostgreSQL and are revoked on
   logout, role change, and status change.
-- **Roles** (seeded in [`lib/rbac.ts`](lib/rbac.ts)):
-  - `admin` — full platform access (all permissions).
-  - `editor` — create / read / update business content.
-  - `viewer` — read-only access to assigned content.
+- **Roles** decide which modules people can open. A user's access is every
+  module from each of their roles plus any granted to them directly
+  (`RoleModule` ∪ `UserModule`). `admin` (seeded in [`lib/rbac.ts`](lib/rbac.ts))
+  always opens everything, including `/admin`, and can't be renamed or deleted.
+  `editor` and `viewer` are seeded too; admins can edit them and create their
+  own roles (e.g. "Finance") from the Roles tab. Role changes apply on the
+  holder's next page load; a role still held by someone can't be deleted.
 - **Permissions:** `user:create/read/update/delete`, `role:manage`,
   `audit:read`, `content:create/read/update/delete`.
-- **Admin controls (`/admin`):** create, suspend, and delete users; assign roles
-  and modules; **reset any user's password** (which revokes the target's other
-  sessions); adjust **upload size limits** per category from the Settings tab;
-  and review the audit log.
+- **Admin controls (`/admin`):** an overview that flags what needs attention
+  (a single admin, failed sign-ins, people with no module access, unused
+  accounts) alongside system health and 14 days of sign-ins; create, edit,
+  suspend and delete users and change their roles and modules; create and edit
+  custom roles; see every signed-in session and sign people out; **reset any
+  user's password** (which revokes the target's other sessions); adjust
+  **upload size limits** per category from the Settings tab; and review and
+  export the audit log.
 - **Safeguards:** passwords hashed with `bcryptjs`; auth and admin mutation
   routes are rate-limited via the database; audit events written for login
   success/failure, logout, user create/update/delete, password resets, and
@@ -355,6 +362,8 @@ Route handlers live under `app/api/`, grouped by domain:
 Example auth routes: `POST /api/auth/login`, `POST /api/auth/logout`,
 `GET /api/auth/session`; admin routes: `POST /api/admin/users`,
 `PUT /api/admin/users/[userId]`, `DELETE /api/admin/users/[userId]`,
+`GET|POST /api/admin/roles`, `PUT|DELETE /api/admin/roles/[roleId]`,
+`GET|DELETE /api/admin/sessions`, `GET /api/admin/overview`,
 `GET /api/admin/audit`.
 
 ---
@@ -380,6 +389,12 @@ admin override on the message routes.
 | WhatsApp | QR → WhatsApp → Linked devices | the bundled `wacli` Docker container (`WACLI_CONTAINER=la-erp-wacli`), or the `wacli` binary on the host (`WACLI_BIN`) |
 | Signal | QR → Signal → Linked devices | the `signal-cli` binary (`SIGNAL_CLI_BIN` if not on PATH) |
 | Telegram | QR → Telegram → Devices, or phone + code | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` from [my.telegram.org](https://my.telegram.org) |
+
+WhatsApp allows several numbers per user (up to 5): **Add number** in the
+module links another one, the switcher above the chat list moves between
+them, and **Unlink number** signs LA-ERP out of that number and deletes its
+mirrored conversations. Each number runs its own `wacli sync --follow`.
+Telegram and Signal stay at one account per user.
 
 Photos, video, audio and documents work in both directions on all three;
 attachments are streamed through `GET /api/<provider>/media` behind the same

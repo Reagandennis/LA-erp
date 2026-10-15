@@ -119,7 +119,7 @@ export async function ingestMessages(
   // the client refetches the affected thread rather than trusting the event.
   if (fresh.length > 0) {
     const chatIds = [...new Set(fresh.map((m) => m.chatId))];
-    publish(ownerUserId, 'messaging', { chatIds, count: fresh.length });
+    publish(ownerUserId, 'messaging', { accountId, chatIds, count: fresh.length });
   }
   return fresh;
 }
@@ -231,6 +231,17 @@ export async function counts(accountId: number): Promise<{ chats: number; messag
     prisma.messagingMessage.count({ where: { accountId } }),
   ]);
   return { chats, messages };
+}
+
+/** How many chats have unread messages, per account — the account switcher's badges. */
+export async function unreadChatCounts(accountIds: number[]): Promise<Map<number, number>> {
+  if (accountIds.length === 0) return new Map();
+  const rows = await prisma.messagingChat.groupBy({
+    by: ['accountId'],
+    where: { accountId: { in: accountIds }, unreadCount: { gt: 0 } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((r) => [r.accountId, r._count._all]));
 }
 
 /** Newest mirrored message time — the high-water mark for incremental backfill. */

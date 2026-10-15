@@ -1,7 +1,7 @@
 import 'server-only';
 
-import { listCustomerAccounts } from './accounts';
 import { computeStats as computeLicenseStats, listDriverLicenses, type DriverLicenseStats } from './drivers';
+import { crossRate, type RateTable } from './exchange-rates';
 import { listInvoices, type InvoiceStatus, type InvoiceSummary } from './invoices';
 import { listQuotesForUser, type QuoteStatus, type QuoteSummary } from './quotes';
 import {
@@ -62,9 +62,22 @@ export interface ResourceUtilization {
   idle: number;
 }
 
+export interface ReportFx {
+  /** Every rate applied: one per source currency that differs from the report's. */
+  conversions: { from: string; to: string; rate: number }[];
+  /** When the provider published the rates used; null when nothing needed converting. */
+  asOf: string | null;
+  /** The rates are the last saved table because the latest refresh failed. */
+  stale: boolean;
+  /** Records left out of money totals because no rate exists for their currency. */
+  skipped: { invoices: number; quotes: number; currencies: string[] };
+}
+
 export interface ReportData {
   generatedAt: string;
+  /** Every amount below is in this currency. */
   currency: string;
+  fx: ReportFx;
   finance: {
     totalBilled: number;
     totalCollected: number;
@@ -113,6 +126,32 @@ export interface ReportData {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * Re-express each record's money `fields` in `currency`. Records in a
+ * currency with no rate come back in `skipped`, so the report leaves them out
+ * of the sums and says so instead of adding shillings to dollars.
+ */
+export function toCurrency<T extends { currency: string }>(
+  items: T[],
+  fields: readonly (keyof T)[],
+  currency: string,
+  rates: RateTable | null,
+): { converted: T[]; skipped: T[] } {
+  const converted: T[] = [];
+  const skipped: T[] = [];
+  for (const item of items) {
+    const rate = crossRate(rates, item.currency, currency);
+    if (rate === null) {
+      skipped.push(item);
+      continue;
+    }
+    const next = { ...item, currency } as Record<keyof T, unknown>;
+    for (const field of fields) next[field] = round2(Number(item[field]) * rate);
+    converted.push(next as T);
+  }
+  return { converted, skipped };
 }
 
 /** The last `n` calendar months ending with the month of `now`, oldest first. */
@@ -221,12 +260,9 @@ function utilization(total: number, busyIds: Set<number>): ResourceUtilization {
   return { total, busy, idle: Math.max(0, total - busy) };
 }
 
-function buildFinance(
-  invoices: InvoiceSummary[],
-  accounts: Awaited<ReturnType<typeof listCustomerAccounts>>,
-  months: MonthBucket[],
-): ReportData['finance'] {
-  const live = invoices.filter((i) => i.status !== 'Void');
+/** Counts come from every invoice; money only from those already in the report currency. */
+function buildFinance(invoices: InvoiceSummary[], inCurrency: InvoiceSummary[], months: MonthBucket[]): ReportData['finance'] {
+  const live = inCurrency.filter((i) => i.status !== 'Void');
   const totalBilled = round2(live.reduce((acc, i) => acc + i.total, 0));
   const totalCollected = round2(live.reduce((acc, i) => acc + i.amountPaid, 0));
   const outstanding = round2(live.reduce((acc, i) => acc + i.balanceDue, 0));
@@ -244,10 +280,15 @@ function buildFinance(
     collected: monthlyRaw[idx].collected,
   }));
 
-  const topCustomers = accounts
-    .filter((a) => a.balance > 0)
-    .slice(0, 8)
-    .map((a) => ({ name: a.company || a.name, balance: a.balance, overdue: a.overdue }));
+  const byCustomer = new Map<number, { name: string; balance: number; overdue: number }>();
+  for (const i of live) {
+    if (i.balanceDue <= 0) continue;
+    const entry = byCustomer.get(i.customer.id) ?? { name: i.customer.company || i.customer.name, balance: 0, overdue: 0 };
+    entry.balance = round2(entry.balance + i.balanceDue);
+    if (i.isOverdue) entry.overdue = round2(entry.overdue + i.balanceDue);
+    byCustomer.set(i.customer.id, entry);
+  }
+  const topCustomers = [...byCustomer.values()].sort((a, b) => b.balance - a.balance).slice(0, 8);
 
   return {
     totalBilled,
@@ -259,20 +300,21 @@ function buildFinance(
     paidCount: invoices.filter((i) => i.status === 'Paid').length,
     statusCounts: tallyByStatus(invoices, INVOICE_STATUSES),
     monthly,
-    aging: computeAging(invoices),
+    aging: computeAging(inCurrency),
     topCustomers,
   };
 }
 
-function buildSales(quotes: QuoteSummary[], months: MonthBucket[]): ReportData['sales'] {
-  const totalQuoted = round2(quotes.reduce((acc, q) => acc + q.total, 0));
+/** Counts come from every quote; money only from those already in the report currency. */
+function buildSales(quotes: QuoteSummary[], inCurrency: QuoteSummary[], months: MonthBucket[]): ReportData['sales'] {
+  const totalQuoted = round2(inCurrency.reduce((acc, q) => acc + q.total, 0));
   const approvedValue = round2(
-    quotes.filter((q) => QUOTE_WON.includes(q.status)).reduce((acc, q) => acc + q.total, 0),
+    inCurrency.filter((q) => QUOTE_WON.includes(q.status)).reduce((acc, q) => acc + q.total, 0),
   );
   const winLoss = computeConversion(quotes);
 
   const monthlyRaw = bucketByMonth(
-    quotes,
+    inCurrency,
     (q) => q.issueDate,
     {
       quoted: (q) => q.total,
@@ -287,7 +329,7 @@ function buildSales(quotes: QuoteSummary[], months: MonthBucket[]): ReportData['
   }));
 
   const byCustomer = new Map<string, { value: number; count: number }>();
-  for (const q of quotes) {
+  for (const q of inCurrency) {
     const name = q.customer.company || q.customer.name;
     const entry = byCustomer.get(name) ?? { value: 0, count: 0 };
     entry.value = round2(entry.value + q.total);
@@ -348,14 +390,22 @@ function buildOperations(
   };
 }
 
-export async function getReportData(params: { userId: number; currency: string }): Promise<ReportData> {
-  const { userId, currency } = params;
+/**
+ * Everything on the reports page, with money in `currency`. Invoices and quotes
+ * carry their own currency, so each is converted with `rates` before anything
+ * is summed; `fx` records what was applied and what had to be left out.
+ */
+export async function getReportData(params: {
+  userId: number;
+  currency: string;
+  rates: (RateTable & { stale?: boolean }) | null;
+}): Promise<ReportData> {
+  const { userId, currency, rates } = params;
   const months = lastNMonths(12);
 
-  const [invoices, accounts, quotes, trips, assignments, vehicles, drivers, officers, licenses] =
+  const [invoices, quotes, trips, assignments, vehicles, drivers, officers, licenses] =
     await Promise.all([
       listInvoices(),
-      listCustomerAccounts(currency),
       listQuotesForUser({ userId, isAdmin: true }),
       listTripsForUser({ userId, isAdmin: true }),
       listAssignments(),
@@ -378,11 +428,30 @@ export async function getReportData(params: { userId: number; currency: string }
       status: l.status,
     }));
 
+  const inv = toCurrency(invoices, ['total', 'amountPaid', 'balanceDue'], currency, rates);
+  const quo = toCurrency(quotes, ['total'], currency, rates);
+
+  const sourceCurrencies = [...new Set([...invoices, ...quotes].map((r) => r.currency))].filter((c) => c !== currency);
+  const conversions = sourceCurrencies.flatMap((from) => {
+    const rate = crossRate(rates, from, currency);
+    return rate === null ? [] : [{ from, to: currency, rate }];
+  });
+
   return {
     generatedAt: new Date().toISOString(),
     currency,
-    finance: buildFinance(invoices, accounts, months),
-    sales: buildSales(quotes, months),
+    fx: {
+      conversions,
+      asOf: conversions.length > 0 && rates ? rates.asOf : null,
+      stale: conversions.length > 0 && Boolean(rates?.stale),
+      skipped: {
+        invoices: inv.skipped.length,
+        quotes: quo.skipped.length,
+        currencies: [...new Set([...inv.skipped, ...quo.skipped].map((r) => r.currency))],
+      },
+    },
+    finance: buildFinance(invoices, inv.converted, months),
+    sales: buildSales(quotes, quo.converted, months),
     operations: buildOperations(trips, assignments, vehicles.length, drivers.length, officers.length),
     compliance: {
       license: computeLicenseStats(licenses),

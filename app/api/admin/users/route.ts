@@ -12,7 +12,7 @@ import {
   getUserByEmail,
   listAllModules,
   listManagedUsers,
-  listRolesWithPermissions,
+  listRolesForAdmin,
 } from '@/lib/user';
 import { managedUserSchema } from '@/lib/validation';
 
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
 
   const [users, roles, modules] = await Promise.all([
     listManagedUsers(),
-    listRolesWithPermissions(),
+    listRolesForAdmin(),
     listAllModules(),
   ]);
 

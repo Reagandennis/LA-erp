@@ -19,8 +19,9 @@ export interface MessageMedia {
   sizeBytes: number | null;
 }
 
-export function mediaUrl(service: string, chatId: string, ref: string): string {
-  return `/api/${service}/media?chatId=${encodeURIComponent(chatId)}&ref=${encodeURIComponent(ref)}`;
+export function mediaUrl(service: string, chatId: string, ref: string, accountId?: number | null): string {
+  const account = accountId ? `&account=${accountId}` : '';
+  return `/api/${service}/media?chatId=${encodeURIComponent(chatId)}&ref=${encodeURIComponent(ref)}${account}`;
 }
 
 function humanSize(bytes: number | null): string {
@@ -66,14 +67,17 @@ export default function MessageMediaView({
   chatId,
   media,
   out,
+  accountId,
 }: {
   service: string;
   chatId: string;
   media: MessageMedia;
   out: boolean;
+  /** Which of the user's accounts the message belongs to, when they have several. */
+  accountId?: number | null;
 }) {
   const [failed, setFailed] = useState(false);
-  const href = media.ref ? mediaUrl(service, chatId, media.ref) : null;
+  const href = media.ref ? mediaUrl(service, chatId, media.ref, accountId) : null;
 
   if (!href || failed) return <FileChip media={media} out={out} href={href} />;
 
