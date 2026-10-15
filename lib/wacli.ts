@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFile } from 'child_process';
+import { runWacli, wacliScratch } from './wacli-runtime';
 
 /**
  * Thin wrapper around the `wacli` binary (https://wacli.sh) — an unofficial
@@ -10,18 +10,14 @@ import { execFile } from 'child_process';
  * it can see and reply to BOTH direct chats and groups. It keeps a local SQLite
  * mirror; we shell out to read/send and never touch that DB directly.
  *
- * Requirements on the host (an always-on server, NOT serverless):
- *   - the `wacli` binary on PATH (or set WACLI_BIN to its absolute path)
- *   - a paired session: run `wacli auth` once and scan the QR
- *   - `wacli sync --follow` running under a process manager so new inbound
- *     messages keep landing in the local store
- *
- * Env:
- *   WACLI_BIN        absolute path to the binary (default: "wacli" on PATH)
- *   WACLI_STORE_DIR  store directory (wacli reads this itself; default ~/.wacli)
+ * Requirements (an always-on server, NOT serverless):
+ *   - wacli reachable the way lib/wacli-runtime.ts describes: either the
+ *     binary on PATH / WACLI_BIN, or the bundled Docker container named by
+ *     WACLI_CONTAINER (the default for deployments)
+ *   - a paired session per user, created from the module's QR panel
+ *   - `wacli sync --follow` running for each linked account, which
+ *     lib/whatsapp-sync.ts supervises
  */
-
-const BIN = (process.env.WACLI_BIN ?? '').trim() || 'wacli';
 
 interface Envelope<T> {
   success: boolean;
@@ -30,36 +26,24 @@ interface Envelope<T> {
 }
 
 /** Run wacli with the given args (no shell — args are passed as an array). */
-function run<T>(args: string[], timeoutMs = 30_000, account?: string): Promise<T> {
+async function run<T>(args: string[], timeoutMs = 30_000, account?: string): Promise<T> {
   // `--json` and `--account` are global flags and must precede the subcommand.
   // Scoping by account keeps each user on their own isolated wacli store.
   const fullArgs = account ? ['--json', '--account', account, ...args] : ['--json', ...args];
-  return new Promise<T>((resolve, reject) => {
-    execFile(
-      BIN,
-      fullArgs,
-      { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: process.env },
-      (err, stdout, stderr) => {
-        // wacli keeps human progress/errors on stderr and JSON on stdout.
-        if (!stdout) {
-          reject(new Error(err ? `wacli failed: ${stderr || err.message}` : 'wacli returned no output'));
-          return;
-        }
-        let env: Envelope<T>;
-        try {
-          env = JSON.parse(stdout) as Envelope<T>;
-        } catch {
-          reject(new Error(`wacli returned non-JSON output: ${stdout.slice(0, 200)}`));
-          return;
-        }
-        if (!env.success) {
-          reject(new Error(env.error || 'wacli reported failure'));
-          return;
-        }
-        resolve(env.data);
-      },
-    );
-  });
+  const { stdout, stderr, error } = await runWacli(fullArgs, { timeoutMs });
+
+  // wacli keeps human progress/errors on stderr and JSON on stdout.
+  if (!stdout) {
+    throw new Error(error ? `wacli failed: ${stderr || error.message}` : 'wacli returned no output');
+  }
+  let env: Envelope<T>;
+  try {
+    env = JSON.parse(stdout) as Envelope<T>;
+  } catch {
+    throw new Error(`wacli returned non-JSON output: ${stdout.slice(0, 200)}`);
+  }
+  if (!env.success) throw new Error(env.error || 'wacli reported failure');
+  return env.data;
 }
 
 // ---- Status ----
@@ -214,20 +198,50 @@ export async function listThread(account: string, jid: string, limit = 100): Pro
 export interface SendResult {
   ok: boolean;
   error?: string;
+  /** WhatsApp's id for the sent message, when the send was accepted. */
+  messageId?: string;
+}
+
+interface SentData {
+  id?: string;
+  sent?: boolean;
+}
+
+/**
+ * Run a `send …` command the fast way.
+ *
+ * While `sync --follow` is running it holds the store lock for good and
+ * accepts sends over its delegate socket instead. A `--lock-wait` therefore
+ * never succeeds — it only delays the hand-off by its full duration (15s per
+ * message, measured) — so sends don't wait for the lock at all; the one case
+ * where the lock is briefly unavailable (sync still starting) gets a single
+ * quick retry. `--post-send-wait` keeps a standalone session open for receipts
+ * after the send; the long-lived sync handles those itself, so it is skipped
+ * when our sync is up.
+ */
+async function send(account: string, args: string[], timeoutMs: number): Promise<SendResult> {
+  const { syncStatus } = await import('./whatsapp-sync');
+  const fast = syncStatus(account).running ? ['--post-send-wait', '0'] : [];
+  const fullArgs = ['send', ...args, ...fast];
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const data = await run<SentData>(fullArgs, timeoutMs, account);
+      return { ok: true, messageId: data?.id || undefined };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'send failed';
+      if (attempt === 0 && /lock/i.test(message)) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+      return { ok: false, error: message };
+    }
+  }
 }
 
 /** Send a text message to a chat or group by JID. */
-export async function sendText(account: string, jid: string, message: string): Promise<SendResult> {
-  try {
-    await run<unknown>(
-      ['--lock-wait', '15s', 'send', 'text', '--to', jid, '--message', message],
-      60_000,
-      account,
-    );
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'send failed' };
-  }
+export function sendText(account: string, jid: string, message: string): Promise<SendResult> {
+  return send(account, ['text', '--to', jid, '--message', message], 60_000);
 }
 
 /** "254712345678@s.whatsapp.net" -> "254712345678"; group JIDs are returned as-is. */
@@ -244,7 +258,8 @@ export function jidToNumber(jid: string): string {
  * document) from the MIME, so `--as auto` is left implicit.
  *
  * wacli takes a filesystem path rather than bytes, so the upload is spooled to
- * a private temp file and removed immediately afterwards.
+ * a private temp file (next to wacli, which may be inside a container) and
+ * removed immediately afterwards.
  */
 export async function sendMedia(
   account: string,
@@ -252,28 +267,25 @@ export async function sendMedia(
   file: { bytes: Buffer; mimeType: string; fileName: string },
   caption = '',
 ): Promise<SendResult> {
-  const { mkdtemp, writeFile, rm } = await import('fs/promises');
-  const { tmpdir } = await import('os');
-  const { join } = await import('path');
+  const scratch = wacliScratch();
 
   let dir: string | null = null;
   try {
-    dir = await mkdtemp(join(tmpdir(), 'laerp-wa-'));
+    dir = await scratch.mkdtemp('laerp-wa-');
     // basename() strips any path separators a caller-supplied name might carry.
     const safeName = (await import('path')).basename(file.fileName) || 'upload';
-    const path = join(dir, safeName);
-    await writeFile(path, file.bytes, { mode: 0o600 });
+    const path = scratch.join(dir, safeName);
+    await scratch.writeFile(path, file.bytes);
 
-    const args = ['--lock-wait', '15s', 'send', 'file', '--to', jid, '--file', path];
+    const args = ['file', '--to', jid, '--file', path];
     if (caption) args.push('--caption', caption);
     if (file.mimeType) args.push('--mime', file.mimeType);
 
-    await run<unknown>(args, 120_000, account);
-    return { ok: true };
+    return await send(account, args, 120_000);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'send failed' };
   } finally {
-    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+    if (dir) await scratch.remove(dir).catch(() => {});
   }
 }
 
@@ -291,28 +303,26 @@ export interface FetchedMedia {
  * lock held by `wacli sync --follow`.
  */
 export async function getMedia(account: string, jid: string, messageId: string): Promise<FetchedMedia | null> {
-  const { mkdtemp, readFile, readdir, rm } = await import('fs/promises');
-  const { tmpdir } = await import('os');
-  const { join } = await import('path');
+  const scratch = wacliScratch();
 
   let dir: string | null = null;
   try {
-    dir = await mkdtemp(join(tmpdir(), 'laerp-wa-dl-'));
+    dir = await scratch.mkdtemp('laerp-wa-dl-');
     await run<unknown>(
       ['--read-only', 'media', 'download', '--chat', jid, '--id', messageId, '--output', dir],
       120_000,
       account,
     );
-    const entries = await readdir(dir);
+    const entries = await scratch.readdir(dir);
     if (entries.length === 0) return null;
 
     const fileName = entries[0]!;
-    const bytes = await readFile(join(dir, fileName));
+    const bytes = await scratch.readFile(scratch.join(dir, fileName));
     return { bytes, mimeType: mimeFromName(fileName), fileName };
   } catch {
     return null;
   } finally {
-    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+    if (dir) await scratch.remove(dir).catch(() => {});
   }
 }
 

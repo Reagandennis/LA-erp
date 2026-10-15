@@ -10,6 +10,20 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
   try {
+    const { describeWacliRuntime, ensureWacliContainer } = await import('@/lib/wacli-runtime');
+    // With WACLI_CONTAINER set, wacli lives in the bundled Docker service; bring
+    // it up with the app so a fresh server needs no manual `docker compose up`.
+    const boot = await ensureWacliContainer();
+    if (boot !== 'native') {
+      console.log(`[wacli] using ${describeWacliRuntime()} (${boot}).`);
+    }
+  } catch (error) {
+    // The sync supervisor retries with backoff, so the module recovers once
+    // the container is up; until then the status endpoint reports why not.
+    console.error('[wacli] container is not available:', error instanceof Error ? error.message : error);
+  }
+
+  try {
     const { installShutdownHooks, reconcileSyncProcesses } = await import('@/lib/whatsapp-sync');
     // Without this, killing the server orphans its wacli children, which keep
     // holding the store lock and block the next start.

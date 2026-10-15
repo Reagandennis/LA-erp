@@ -124,7 +124,43 @@ export async function ingestMessages(
   return fresh;
 }
 
-/** Refresh chat metadata without touching messages (names, membership). */
+/**
+ * Mirror a message this user just sent, so it shows in the thread at once.
+ *
+ * Providers that don't echo our own sends (wacli stores them locally but never
+ * posts them to its webhook) would otherwise leave the message invisible until
+ * the next backfill. Keyed on the provider's message id, so when the backfill
+ * does come round it is a no-op rather than a duplicate.
+ */
+export async function recordOutgoing(
+  accountId: number,
+  ownerUserId: number,
+  message: { chatId: string; messageId: string; text: string; media?: StoredMedia | null },
+): Promise<void> {
+  const chat = await prisma.messagingChat.findUnique({
+    where: { accountId_chatId: { accountId, chatId: message.chatId } },
+    select: { name: true, kind: true },
+  });
+  await ingestMessages(accountId, ownerUserId, [
+    {
+      chatId: message.chatId,
+      chatName: chat?.name ?? message.chatId.split('@')[0] ?? message.chatId,
+      chatKind: chat?.kind === 'group' ? 'group' : 'dm',
+      messageId: message.messageId,
+      senderName: 'You',
+      fromMe: true,
+      text: message.text,
+      at: new Date(),
+      media: message.media ?? null,
+    },
+  ]);
+}
+
+/**
+ * Refresh chat metadata without touching messages (names, membership, and —
+ * when the provider reports it — last activity, so a chat sorts correctly
+ * before its history has been mirrored).
+ */
 export async function upsertChats(
   accountId: number,
   chats: Array<{ chatId: string; name: string; kind: 'dm' | 'group'; lastMessageAt?: Date }>,
@@ -139,7 +175,11 @@ export async function upsertChats(
         name: chat.name,
         lastMessageAt: chat.lastMessageAt ?? new Date(0),
       },
-      update: { name: chat.name, kind: chat.kind },
+      update: {
+        name: chat.name,
+        kind: chat.kind,
+        ...(chat.lastMessageAt ? { lastMessageAt: chat.lastMessageAt } : {}),
+      },
     });
   }
 }

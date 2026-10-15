@@ -204,8 +204,8 @@ public/          Static assets
 # 1. Environment
 cp .env.example .env        # then fill in the values (see below)
 
-# 2. Database (PostgreSQL 16 via Docker)
-docker compose up -d postgres
+# 2. Database (PostgreSQL 16) and the wacli WhatsApp bridge, via Docker
+docker compose up -d
 
 # 3. Dependencies
 npm install
@@ -255,7 +255,9 @@ The seed step creates or updates the bootstrap administrator from these values.
 | `FR24_API_TOKEN`                  | Flight Tracker (FlightRadar24) |
 | `OPENSKY_USERNAME`, `OPENSKY_PASSWORD` | Flight Tracker (OpenSky)  |
 | `ZELLO_*`                         | Radio / Zello (see below) |
-| `WACLI_BIN`                       | WhatsApp (path to the `wacli` binary) |
+| `WACLI_CONTAINER`                 | WhatsApp (name of the bundled wacli Docker container, `la-erp-wacli`) |
+| `WACLI_BIN`                       | WhatsApp (path to a host-installed `wacli` binary, used when `WACLI_CONTAINER` is empty) |
+| `WACLI_WEBHOOK_BASE`              | WhatsApp (override for the URL `wacli sync` posts inbound messages to) |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | Telegram (app credentials from my.telegram.org) |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | Telegram (app credentials from my.telegram.org) |
 | `SIGNAL_CLI_BIN`                  | Signal (path to `signal-cli`; accounts are linked per user) |
@@ -375,7 +377,7 @@ admin override on the message routes.
 
 | Provider | Linked with | Server prerequisite |
 | --- | --- | --- |
-| WhatsApp | QR → WhatsApp → Linked devices | the `wacli` binary (`WACLI_BIN` if not on PATH) |
+| WhatsApp | QR → WhatsApp → Linked devices | the bundled `wacli` Docker container (`WACLI_CONTAINER=la-erp-wacli`), or the `wacli` binary on the host (`WACLI_BIN`) |
 | Signal | QR → Signal → Linked devices | the `signal-cli` binary (`SIGNAL_CLI_BIN` if not on PATH) |
 | Telegram | QR → Telegram → Devices, or phone + code | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` from [my.telegram.org](https://my.telegram.org) |
 
@@ -410,6 +412,22 @@ account at boot and restarts them with backoff; they stop when an account is
 unlinked. Plan host memory accordingly: N linked users means N wacli processes.
 Telegram holds one MTProto connection per signed-in user; Signal spawns a short
 `receive` per tick.
+
+**wacli in Docker.** `docker-compose.yml` ships wacli as the `wacli` service
+(built from `docker/wacli/Dockerfile`, pinned to a release, sessions on the
+`la-erp-wacli-data` volume). With `WACLI_CONTAINER=la-erp-wacli` in `.env` the
+app runs every wacli command inside that container via `docker exec`
+(`lib/wacli-runtime.ts`), stops sync/auth processes *inside* the container
+rather than just their exec client, and streams attachments through
+stdin/stdout so nothing is bind-mounted. At boot the app starts the container
+if it is stopped or not yet created; `deploy.sh` builds the image and brings it
+up before restarting the app. Requirements: the user the app runs as can run
+`docker`, the app listens on `0.0.0.0` (the default for `next start`) so the
+container can reach `host.docker.internal:3000` for the webhook, and the
+service's working directory is the repo so `docker-compose.yml` is found (or
+set `COMPOSE_FILE`). Back up the `la-erp-wacli-data` volume alongside the
+database — it holds the linked WhatsApp sessions. To use a host-installed
+binary instead, leave `WACLI_CONTAINER` empty and set `WACLI_BIN`.
 
 Telegram accounts with two-step verification cannot complete a QR login — the
 module offers phone → code → password sign-in for those. Telegram serves history

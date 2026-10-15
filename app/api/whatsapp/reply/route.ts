@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { recordOutgoing } from '@/lib/messaging-repo';
 import { resolveMessagingRequest } from '@/lib/messaging-routes';
 import { sendText } from '@/lib/wacli';
 
@@ -24,6 +25,11 @@ export async function POST(request: NextRequest) {
   const result = await sendText(ctx.account.handle, id, message);
   if (!result.ok) {
     return NextResponse.json({ error: result.error ?? 'Send failed.' }, { status: 502 });
+  }
+  // wacli doesn't echo our own sends to the webhook; mirror it now so the
+  // thread shows it on the reload that follows this response.
+  if (result.messageId) {
+    await recordOutgoing(ctx.account.id, ctx.userId, { chatId: id, messageId: result.messageId, text: message });
   }
   return NextResponse.json({ ok: true });
 }

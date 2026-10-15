@@ -8,6 +8,7 @@ import {
 } from './messaging-accounts';
 import { ingestMessages, latestMessageAt, upsertChats, type IngestMessage } from './messaging-repo';
 import type { MediaKind, StoredMedia } from './messaging-store';
+import { runWacli } from './wacli-runtime';
 
 /**
  * Background ingest: providers → Postgres.
@@ -22,7 +23,6 @@ import type { MediaKind, StoredMedia } from './messaging-store';
  */
 
 const SIGNAL_BIN = (process.env.SIGNAL_CLI_BIN ?? '').trim() || 'signal-cli';
-const WACLI_BIN = (process.env.WACLI_BIN ?? '').trim() || 'wacli';
 const GROUP_PREFIX = 'group:';
 
 declare global {
@@ -55,7 +55,14 @@ function run(bin: string, args: string[], timeoutMs: number): Promise<string> {
   });
 }
 
-function mediaKindFromMime(mime: string): MediaKind {
+/** Same contract as `run`, with wacli located by lib/wacli-runtime.ts. */
+async function wacli(args: string[], timeoutMs: number): Promise<string> {
+  const { stdout, stderr, error } = await runWacli(args, { timeoutMs, maxBuffer: 64 * 1024 * 1024 });
+  if (error && !stdout) throw new Error(String(stderr || error.message).trim());
+  return stdout;
+}
+
+export function mediaKindFromMime(mime: string): MediaKind {
   const m = mime.toLowerCase();
   if (m.startsWith('image/')) return 'image';
   if (m.startsWith('video/')) return 'video';
@@ -198,9 +205,22 @@ async function drainSignal(account: LinkedAccount): Promise<void> {
 
 // --- WhatsApp --------------------------------------------------------------
 
+/**
+ * A wacli message in either of the two shapes wacli produces:
+ *
+ *   `messages list`     ChatJID / MsgID, flat MediaType + MediaCaption
+ *   `sync --webhook`    Chat / ID, a nested Media object, optional EventType
+ *
+ * They describe the same record, so both are accepted here; the webhook shape
+ * is what makes WhatsApp live, and dropping it meant every inbound message
+ * waited for the next backfill.
+ */
 interface WacliRawMessage {
   ChatJID?: string;
+  Chat?: string;
+  ChatName?: string;
   MsgID?: string;
+  ID?: string;
   SenderJID?: string;
   SenderName?: string;
   Timestamp?: string;
@@ -208,42 +228,63 @@ interface WacliRawMessage {
   Text?: string;
   MediaType?: string;
   MediaCaption?: string;
+  Media?: {
+    Type?: string;
+    Caption?: string;
+    Filename?: string;
+    MimeType?: string;
+    FileLength?: number;
+  } | null;
   Revoked?: boolean;
   DeletedForMe?: boolean;
+  /** Webhook only; absent means `message`. Receipts and presence are not messages. */
+  EventType?: string;
+}
+
+function mediaKindFromWacli(type: string): MediaKind {
+  if (type === 'image' || type === 'photo') return 'image';
+  if (type === 'video' || type === 'gif') return 'video';
+  if (type === 'audio' || type === 'ptt' || type === 'voice') return 'audio';
+  if (type === 'sticker') return 'sticker';
+  return 'document';
 }
 
 export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMessage | null {
-  if (!raw.MsgID || !raw.ChatJID || raw.DeletedForMe) return null;
-  const isGroup = raw.ChatJID.endsWith('@g.us');
-  const text = raw.Text || raw.MediaCaption || '';
-  const mediaType = (raw.MediaType ?? '').toLowerCase();
+  if (raw.EventType && raw.EventType !== 'message') return null;
+  const chatId = raw.ChatJID || raw.Chat;
+  const messageId = raw.MsgID || raw.ID;
+  if (!messageId || !chatId || raw.DeletedForMe) return null;
+
+  const isGroup = chatId.endsWith('@g.us');
+  const caption = raw.MediaCaption || raw.Media?.Caption || '';
+  const text = raw.Text || caption;
+  const mediaType = (raw.MediaType || raw.Media?.Type || '').toLowerCase();
 
   const media: StoredMedia | null = mediaType
     ? {
-        kind:
-          mediaType === 'image' || mediaType === 'photo'
-            ? 'image'
-            : mediaType === 'video' || mediaType === 'gif'
-              ? 'video'
-              : mediaType === 'audio' || mediaType === 'ptt' || mediaType === 'voice'
-                ? 'audio'
-                : mediaType === 'sticker'
-                  ? 'sticker'
-                  : 'document',
-        ref: raw.MsgID,
-        mimeType: null,
-        fileName: null,
-        sizeBytes: null,
+        kind: mediaKindFromWacli(mediaType),
+        ref: messageId,
+        mimeType: raw.Media?.MimeType || null,
+        fileName: raw.Media?.Filename || null,
+        sizeBytes: typeof raw.Media?.FileLength === 'number' ? raw.Media.FileLength : null,
       }
     : null;
 
   if (!text && !media && !raw.Revoked) return null;
 
+  // wacli's ChatName is the saved contact or group subject; it falls back to
+  // the bare JID when there is none. The sender's name is only a usable chat
+  // name for a direct chat *they* sent — on our own messages it would be us.
+  const chatLabel = raw.ChatName && raw.ChatName !== chatId ? raw.ChatName : '';
+  const senderLabel = !isGroup && !raw.FromMe ? raw.SenderName || '' : '';
+  const local = chatId.split('@')[0] || chatId;
+  const numberLabel = !isGroup && /^\d+$/.test(local) ? `+${local}` : local;
+
   return {
-    chatId: raw.ChatJID,
-    chatName: chatName || raw.SenderName || raw.ChatJID.split('@')[0] || raw.ChatJID,
+    chatId,
+    chatName: chatName || chatLabel || senderLabel || numberLabel,
     chatKind: isGroup ? 'group' : 'dm',
-    messageId: raw.MsgID,
+    messageId,
     senderName: raw.FromMe ? 'You' : raw.SenderName || raw.SenderJID || 'Unknown',
     fromMe: Boolean(raw.FromMe),
     text: raw.Revoked ? 'This message was deleted' : text,
@@ -259,42 +300,77 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
  * closes the gap for anything that landed while the app was down, using the
  * newest mirrored message as the cursor.
  */
+const WHATSAPP_PAGE = 500;
+/** Upper bound per pass; a freshly linked account with years of history takes a few passes. */
+const WHATSAPP_MAX_PAGES = 40;
+
 async function backfillWhatsApp(account: LinkedAccount): Promise<void> {
-  const since = await latestMessageAt(account.id);
-  const args = ['--json', '--account', account.handle, 'messages', 'list', '--limit', '500', '--asc'];
-  if (since) args.push('--after', since.toISOString());
+  // Chats first: they carry wacli's names and last-activity times, so the
+  // list is correctly named and ordered even before its messages arrive.
+  await refreshWhatsAppChats(account);
 
-  const raw = await run(WACLI_BIN, args, 120_000);
-  const parsed = JSON.parse(raw) as { success?: boolean; data?: { messages?: WacliRawMessage[] } };
-  const messages = parsed?.data?.messages ?? [];
+  // Page forward from the newest mirrored message until wacli runs dry. A
+  // single page per tick would take an hour to catch up a new link.
+  for (let page = 0; page < WHATSAPP_MAX_PAGES; page++) {
+    const since = await latestMessageAt(account.id);
+    const args = ['--json', '--account', account.handle, 'messages', 'list', '--limit', String(WHATSAPP_PAGE), '--asc'];
+    if (since) args.push('--after', since.toISOString());
 
-  const batch = messages
-    .map((m) => wacliToIngest(m))
-    .filter((m): m is IngestMessage => m !== null);
-  await ingestMessages(account.id, account.userId, batch);
+    const raw = await wacli(args, 120_000);
+    const parsed = JSON.parse(raw) as { success?: boolean; data?: { messages?: WacliRawMessage[] } };
+    const messages = parsed?.data?.messages ?? [];
 
-  // Refresh chat names separately — message rows only carry sender names.
-  try {
-    const chatsRaw = await run(
-      WACLI_BIN,
-      ['--json', '--account', account.handle, 'chats', 'list', '--limit', '500', '--no-archived'],
-      60_000,
-    );
-    const chats = (JSON.parse(chatsRaw) as { data?: Array<{ jid?: string; name?: string; kind?: string }> })
-      .data ?? [];
-    await upsertChats(
-      account.id,
-      chats
-        .filter((c) => c.jid)
-        .map((c) => ({
-          chatId: c.jid!,
-          name: c.name || c.jid!.split('@')[0]!,
-          kind: c.kind === 'group' ? ('group' as const) : ('dm' as const),
-        })),
-    );
-  } catch {
-    // Names are cosmetic.
+    const batch = messages
+      .map((m) => wacliToIngest(m))
+      .filter((m): m is IngestMessage => m !== null);
+    await ingestMessages(account.id, account.userId, batch);
+
+    if (messages.length < WHATSAPP_PAGE) break;
+    // `--after` is exclusive, so a page must advance the cursor to be useful.
+    const newest = messages[messages.length - 1]?.Timestamp;
+    if (!newest || (since && new Date(newest) <= since)) break;
   }
+}
+
+interface WacliRawChat {
+  jid?: string;
+  name?: string;
+  kind?: string;
+  last_message_ts?: string;
+}
+
+/**
+ * Mirror wacli's chat list: names, kind and last activity. wacli reports an
+ * unsaved number's name as its bare JID; show the number instead.
+ */
+async function refreshWhatsAppChats(account: LinkedAccount): Promise<void> {
+  const chatsRaw = await wacli(
+    ['--json', '--account', account.handle, 'chats', 'list', '--limit', '2000', '--no-archived'],
+    60_000,
+  );
+  const chats = (JSON.parse(chatsRaw) as { data?: WacliRawChat[] }).data ?? [];
+  await upsertChats(
+    account.id,
+    chats
+      .filter((c): c is WacliRawChat & { jid: string } => Boolean(c.jid) && (c.kind === 'dm' || c.kind === 'group'))
+      .map((c) => {
+        const at = c.last_message_ts ? new Date(c.last_message_ts) : null;
+        return {
+          chatId: c.jid,
+          name: whatsappDisplayName(c.jid, c.name),
+          kind: c.kind === 'group' ? ('group' as const) : ('dm' as const),
+          lastMessageAt: at && !Number.isNaN(at.getTime()) ? at : undefined,
+        };
+      }),
+  );
+}
+
+/** A chat's display name, falling back to the phone number rather than a JID. */
+function whatsappDisplayName(jid: string, name: string | undefined): string {
+  const trimmed = (name ?? '').trim();
+  if (trimmed && trimmed !== jid) return trimmed;
+  const local = jid.split('@')[0] || jid;
+  return jid.endsWith('@s.whatsapp.net') && /^\d+$/.test(local) ? `+${local}` : local;
 }
 
 // --- Scheduler -------------------------------------------------------------
@@ -307,7 +383,20 @@ const SIGNAL_POLL_MS = 10_000;
 /** WhatsApp only needs a periodic catch-up; the webhook carries live traffic. */
 const WHATSAPP_BACKFILL_MS = 5 * 60 * 1000;
 
-function schedule(key: string, everyMs: number, task: () => Promise<void>): void {
+/**
+ * Extra runs shortly after a loop is created. A WhatsApp account linked a
+ * moment ago has an empty store while wacli pulls history from the phone, so
+ * the immediate tick finds nothing; these catch the history as it lands
+ * instead of waiting for the next regular interval.
+ */
+const WARMUP_DELAYS_MS = [15_000, 45_000, 90_000, 180_000];
+
+function schedule(
+  key: string,
+  everyMs: number,
+  task: () => Promise<void>,
+  options: { warmup?: boolean } = {},
+): void {
   if (timers().has(key)) return;
   const tick = async () => {
     if (busy().has(key)) return;
@@ -323,13 +412,27 @@ function schedule(key: string, everyMs: number, task: () => Promise<void>): void
   const timer = setInterval(() => void tick(), everyMs);
   timer.unref?.();
   timers().set(key, timer);
+
+  if (options.warmup) {
+    WARMUP_DELAYS_MS.forEach((delay, i) => {
+      const warmKey = `${key}#warmup${i}`;
+      const once = setTimeout(() => {
+        timers().delete(warmKey);
+        void tick();
+      }, delay);
+      once.unref?.();
+      timers().set(warmKey, once);
+    });
+  }
   void tick();
 }
 
 function unschedule(prefix: string, keep: Set<string>): void {
   for (const [key, timer] of timers()) {
-    if (key.startsWith(prefix) && !keep.has(key)) {
-      clearInterval(timer);
+    // Warm-up timers share their loop's key before the `#`.
+    const loopKey = key.split('#')[0]!;
+    if (key.startsWith(prefix) && !keep.has(loopKey)) {
+      clearTimeout(timer);
       timers().delete(key);
     }
   }
@@ -354,7 +457,7 @@ export async function reconcileIngest(): Promise<{ signal: number; whatsapp: num
   for (const account of whatsappAccounts) {
     const key = `whatsapp:${account.id}`;
     waKeys.add(key);
-    schedule(key, WHATSAPP_BACKFILL_MS, () => backfillWhatsApp(account));
+    schedule(key, WHATSAPP_BACKFILL_MS, () => backfillWhatsApp(account), { warmup: true });
   }
   unschedule('whatsapp:', waKeys);
 

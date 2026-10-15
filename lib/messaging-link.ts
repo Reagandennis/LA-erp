@@ -10,6 +10,7 @@ import {
 } from './messaging-accounts';
 import { adoptClient, apiCredentials, isConfigured, newAuthClient, startTelegramMirror } from './telegram';
 import { getStatus as wacliStatus } from './wacli';
+import { spawnWacli, terminateWacli } from './wacli-runtime';
 import { reconcileIngest } from './messaging-ingest';
 import { startSync } from './whatsapp-sync';
 
@@ -206,8 +207,6 @@ async function startSignalLink(session: LinkSession): Promise<void> {
 
 // --- WhatsApp --------------------------------------------------------------
 
-const WACLI_BIN = (process.env.WACLI_BIN ?? '').trim() || 'wacli';
-
 /**
  * Each user gets an isolated wacli account (its own store, mirror DB and media
  * directory), created on first link. `--qr-format text` prints the raw pairing
@@ -218,16 +217,13 @@ async function startWhatsAppLink(session: LinkSession): Promise<void> {
 
   // Idempotent: adding an existing account is a no-op, so this is safe to retry.
   await new Promise<void>((resolve) => {
-    const add = spawn(WACLI_BIN, ['accounts', 'add', account, '--no-auth'], { env: process.env });
+    const add = spawnWacli(['accounts', 'add', account, '--no-auth'], { stdio: 'ignore' });
     add.on('close', () => resolve());
     add.on('error', () => resolve());
   });
 
-  const child = spawn(
-    WACLI_BIN,
-    ['--account', account, 'auth', '--qr-format', 'text', '--events'],
-    { env: process.env },
-  );
+  const authArgs = ['--account', account, 'auth', '--qr-format', 'text', '--events'];
+  const child = spawnWacli(authArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
 
   /**
    * Pairing success is confirmed by polling `wacli doctor` rather than by
@@ -248,7 +244,9 @@ async function startWhatsAppLink(session: LinkSession): Promise<void> {
 
   session.dispose = () => {
     clearInterval(poll);
-    child.kill('SIGTERM');
+    // Stops the process wherever it lives — plain `kill` would leave a
+    // containerised `auth` running after its docker exec client died.
+    terminateWacli(child, authArgs);
   };
   child.on('error', (err) => {
     clearInterval(poll);
@@ -286,8 +284,8 @@ async function startWhatsAppLink(session: LinkSession): Promise<void> {
     if (url) session.payload = url;
   };
 
-  child.stdout.on('data', (c: Buffer) => consumeStdout(c.toString('utf8')));
-  child.stderr.on('data', (c: Buffer) => consumeEvents(c.toString('utf8')));
+  child.stdout?.on('data', (c: Buffer) => consumeStdout(c.toString('utf8')));
+  child.stderr?.on('data', (c: Buffer) => consumeEvents(c.toString('utf8')));
   child.on('close', (code) => {
     clearInterval(poll);
     if (session.status === 'pending') {

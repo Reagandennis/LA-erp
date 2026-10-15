@@ -1,9 +1,16 @@
 import 'server-only';
 
-import { type ChildProcess, execFile, spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 
 import { listAccountsForProvider } from './messaging-accounts';
 import { webhookSecret } from './messaging-webhook-secret';
+import {
+  killStrayWacli,
+  spawnWacli,
+  terminateWacli,
+  wacliProcessPattern,
+  webhookBase,
+} from './wacli-runtime';
 
 /**
  * Supervisor for the per-account `wacli sync --follow` processes.
@@ -22,6 +29,8 @@ interface SyncProcess {
   account: string;
   userId?: number;
   child: ChildProcess;
+  /** The exact wacli argv, needed to stop the process inside a container. */
+  args: string[];
   startedAt: number;
   restarts: number;
   /** Set when we killed it deliberately, so `close` doesn't restart it. */
@@ -43,7 +52,6 @@ function timers(): Map<string, NodeJS.Timeout> {
   return globalThis.whatsappSyncTimersGlobal;
 }
 
-const BIN = (process.env.WACLI_BIN ?? '').trim() || 'wacli';
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 /** Treat a process that survived this long as healthy and reset its backoff. */
@@ -79,18 +87,39 @@ export function startSync(account: string, userId?: number, restarts = 0): void 
   const existing = processes().get(account);
   if (existing && !existing.child.killed) return;
 
-  const args = ['--account', account, 'sync', '--follow', '--download-media'];
+  // `--refresh-contacts` imports saved contact names from the session store
+  // at startup (a local read, no network), so chats are named rather than
+  // bare numbers. `contacts refresh` can't be run separately: this process
+  // holds the store lock for as long as it follows.
+  const args = ['--account', account, 'sync', '--follow', '--refresh-contacts'];
+  // Pre-downloading every attachment in the account's history is opt-in: it
+  // pulled 4 GB in the first half hour of one link and keeps growing, while
+  // the app fetches attachments on demand (and caches them) when a thread is
+  // opened. The only thing pre-download buys is old media that WhatsApp's
+  // servers have since expired.
+  if (/^(1|true|yes)$/i.test((process.env.WACLI_DOWNLOAD_MEDIA ?? '').trim())) args.push('--download-media');
   if (userId) {
-    const base = (process.env.APP_INTERNAL_URL ?? '').trim() || 'http://127.0.0.1:3000';
+    // The webhook always points at this app on the same host (or the Docker
+    // host gateway), which wacli refuses as a private address unless told
+    // explicitly that it is allowed.
     args.push(
       '--webhook',
-      `${base}/api/messaging/webhook?token=${webhookSecret()}&user=${userId}`,
+      `${webhookBase()}/api/messaging/webhook?token=${webhookSecret()}&user=${userId}`,
+      '--webhook-allow-private',
     );
   }
 
-  const child = spawn(BIN, args, { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawnWacli(args, { stdio: ['ignore', 'ignore', 'pipe'] });
 
-  const proc: SyncProcess = { account, child, startedAt: Date.now(), restarts, stopping: false, userId };
+  const proc: SyncProcess = {
+    account,
+    child,
+    args,
+    startedAt: Date.now(),
+    restarts,
+    stopping: false,
+    userId,
+  };
   processes().set(account, proc);
 
   // wacli keeps progress and errors on stderr; surface only the tail on exit so
@@ -129,31 +158,23 @@ export function startSync(account: string, userId?: number, restarts = 0): void 
  * Kill any `wacli … sync` still running for this account from a previous server
  * process.
  *
- * When the app is killed, its children are re-parented to init and keep running.
- * They hold wacli's store lock — so the new process can never start its own sync
- * — and they post to the webhook with the previous run's secret, which is now
- * rejected. Reaping them on boot is what makes a restart or deploy recover.
+ * When the app is killed, its children are re-parented to init and keep running
+ * (and in container mode they were never our children at all — only the
+ * `docker exec` client was). They hold wacli's store lock — so the new process
+ * can never start its own sync — and they post to the webhook with the previous
+ * run's secret, which is now rejected. Reaping them on boot is what makes a
+ * restart or deploy recover.
  */
-function reapOrphans(account: string): Promise<void> {
-  return new Promise((resolve) => {
-    execFile('pgrep', ['-f', `wacli --account ${account} sync`], (err, stdout) => {
-      if (err || !stdout.trim()) return resolve();
-      const ours = new Set([...processes().values()].map((p) => p.child.pid));
-      for (const line of stdout.trim().split('\n')) {
-        const pid = Number(line.trim());
-        // Never signal a child this process is already supervising.
-        if (!Number.isInteger(pid) || pid === process.pid || ours.has(pid)) continue;
-        try {
-          process.kill(pid, 'SIGTERM');
-          console.log(`[whatsapp-sync] reaped orphaned sync process ${pid} for ${account}`);
-        } catch {
-          // Already gone, or not ours to signal.
-        }
-      }
-      // Give the lock a moment to clear before the caller respawns.
-      setTimeout(resolve, 1500);
-    });
-  });
+async function reapOrphans(account: string): Promise<void> {
+  // Never signal a child this process is already supervising.
+  const ours = new Set([...processes().values()].map((p) => p.child.pid));
+  const reaped = await killStrayWacli(wacliProcessPattern(account, 'sync'), ours);
+  if (reaped.length === 0) return;
+  for (const pid of reaped) {
+    console.log(`[whatsapp-sync] reaped orphaned sync process ${pid} for ${account}`);
+  }
+  // Give the lock a moment to clear before the caller respawns.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
 }
 
 /** Stop every supervised sync — used when the server itself is shutting down. */
@@ -195,7 +216,7 @@ export function stopSync(account: string): void {
   const proc = processes().get(account);
   if (!proc) return;
   proc.stopping = true;
-  proc.child.kill('SIGTERM');
+  terminateWacli(proc.child, proc.args);
   processes().delete(account);
 }
 

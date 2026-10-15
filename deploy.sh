@@ -4,10 +4,11 @@
 #   1. Pull latest code (fast-forward only)
 #   2. Install dependencies — only if the lockfile changed
 #   3. Build
-#   4. Take a pre-deploy database snapshot (insurance before migrations run)
-#   5. Restart the service — this automatically runs `prisma migrate deploy`
+#   4. Build and start the wacli (WhatsApp) container from docker-compose.yml
+#   5. Take a pre-deploy database snapshot (insurance before migrations run)
+#   6. Restart the service — this automatically runs `prisma migrate deploy`
 #      and the seed via the systemd ExecStartPre hooks
-#   6. Wait until the app is serving, or fail loudly with logs
+#   7. Wait until the app is serving, or fail loudly with logs
 #
 # Usage:  ./deploy.sh
 set -euo pipefail
@@ -34,6 +35,12 @@ fi
 
 log "Building"
 npm run build
+
+log "Building and starting the wacli (WhatsApp) container"
+# Cached unless docker/wacli/Dockerfile changed. Done here, not by the app at
+# boot, so a slow image build never holds up the health check below.
+docker compose build wacli
+docker compose up -d --no-deps wacli
 
 log "Taking pre-deploy database snapshot"
 sudo systemctl start la-erp-backup.service

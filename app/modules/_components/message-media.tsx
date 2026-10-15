@@ -85,6 +85,10 @@ export default function MessageMediaView({
         <img
           src={href}
           alt={media.fileName ?? 'Attachment'}
+          // Only fetch photos as they scroll into view; a long thread would
+          // otherwise request every attachment the moment it opens.
+          loading="lazy"
+          decoding="async"
           onError={() => setFailed(true)}
           className={`max-h-72 w-auto max-w-full rounded-lg object-cover ${
             media.kind === 'sticker' ? 'bg-transparent' : ''

@@ -186,6 +186,56 @@ describe('signal ingest', () => {
 describe('wacliToIngest', () => {
   beforeEach(() => vi.resetModules());
 
+  it('accepts the live webhook shape, which names its fields differently from the store', async () => {
+    const { wacliToIngest } = await import('../lib/messaging-ingest');
+    // `wacli sync --webhook` posts `Chat`/`ID` and a nested `Media` object;
+    // `messages list` returns `ChatJID`/`MsgID` and flat `MediaType` fields.
+    const out = wacliToIngest({
+      Chat: '254712345678@s.whatsapp.net',
+      ID: '3EB0LIVE',
+      SenderJID: '254712345678@s.whatsapp.net',
+      Timestamp: '2026-07-25T10:00:00Z',
+      FromMe: false,
+      Text: '',
+      ChatName: 'Alice',
+      Media: { Type: 'image', Caption: 'look', Filename: 'a.jpg', MimeType: 'image/jpeg', FileLength: 1234 },
+    });
+    expect(out).toMatchObject({
+      chatId: '254712345678@s.whatsapp.net',
+      chatName: 'Alice',
+      messageId: '3EB0LIVE',
+      text: 'look',
+      media: { kind: 'image', ref: '3EB0LIVE', mimeType: 'image/jpeg', fileName: 'a.jpg', sizeBytes: 1234 },
+    });
+
+    // Receipt and presence events must never be mirrored as messages.
+    expect(
+      wacliToIngest({ EventType: 'receipt', Chat: '1@s.whatsapp.net', ID: 'R', MessageIDs: ['x'] } as never),
+    ).toBeNull();
+  });
+
+  it('names a direct chat after the contact, never after ourselves', async () => {
+    const { wacliToIngest } = await import('../lib/messaging-ingest');
+    const base = { ChatJID: '254712345678@s.whatsapp.net', MsgID: 'M', Timestamp: '2026-01-01T00:00:00Z' };
+
+    // wacli's ChatName is the saved contact name when there is one…
+    expect(
+      wacliToIngest({ ...base, ChatName: 'Jane', SenderName: 'Me', FromMe: true, Text: 'hi' })?.chatName,
+    ).toBe('Jane');
+    // …and the bare JID when there isn't, which must not be shown as-is.
+    expect(
+      wacliToIngest({ ...base, ChatName: base.ChatJID, SenderName: 'Me', FromMe: true, Text: 'hi' })?.chatName,
+    ).toBe('+254712345678');
+    // An inbound message from an unsaved number can still use the sender's push name.
+    expect(
+      wacliToIngest({ ...base, ChatName: base.ChatJID, SenderName: 'Jane', FromMe: false, Text: 'hi' })?.chatName,
+    ).toBe('Jane');
+    // A group member's name is never the group's name.
+    expect(
+      wacliToIngest({ ...base, ChatJID: '1@g.us', ChatName: '1@g.us', SenderName: 'Jane', Text: 'hi' })?.chatName,
+    ).toBe('1');
+  });
+
   it('maps a wacli message onto the shared shape', async () => {
     const { wacliToIngest } = await import('../lib/messaging-ingest');
     const out = wacliToIngest({

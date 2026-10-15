@@ -12,5 +12,34 @@ services:
     volumes:
       - la-erp-postgres-data:/var/lib/postgresql/data
 
+  # WhatsApp bridge. The app runs `wacli` inside this container via
+  # `docker exec` when WACLI_CONTAINER=la-erp-wacli is set in .env, so wacli
+  # never has to be installed on the host. Linked sessions live on the
+  # la-erp-wacli-data volume — back it up with the database.
+  wacli:
+    build:
+      context: ./docker/wacli
+      args:
+        WACLI_VERSION: "0.21.0"
+    image: la-erp/wacli:0.21.0
+    container_name: la-erp-wacli
+    restart: unless-stopped
+    # tini as PID 1 reaps processes started with `docker exec`.
+    init: true
+    # `wacli sync --webhook` posts inbound messages back to the app. From inside
+    # the container the host is host.docker.internal (the app must listen on
+    # 0.0.0.0, which `next start` does by default). If the app is bound to
+    # 127.0.0.1 only, swap extra_hosts for `network_mode: host` (Linux only)
+    # and set WACLI_WEBHOOK_BASE=http://127.0.0.1:3000 in .env.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # One `sync --follow` per linked account at ~50-100 MB each, so this
+    # covers several accounts with room to spare while still protecting the
+    # host; if it is ever hit the container restarts and the app reconnects.
+    mem_limit: ${WACLI_MEM_LIMIT:-1g}
+    volumes:
+      - la-erp-wacli-data:/data
+
 volumes:
   la-erp-postgres-data:
+  la-erp-wacli-data:

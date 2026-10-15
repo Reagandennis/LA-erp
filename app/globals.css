@@ -23,6 +23,23 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/*
+ * A screen that fits the viewport exactly, for chat-style pages that scroll
+ * inside their own panes rather than as a document. The app shell pads the
+ * content below a fixed 3rem ticker bar (see app/layout.tsx), so a plain
+ * `h-screen` overflows by that much and pushes the composer off the bottom.
+ * dvh keeps mobile browsers' collapsing toolbars out of the sum.
+ */
+.screen-fit {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+body:has(.ticker-bar) .screen-fit {
+  height: calc(100vh - 3rem);
+  height: calc(100dvh - 3rem);
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }

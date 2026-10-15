@@ -26,6 +26,14 @@ export interface FetchedMedia {
 export interface SendOutcome {
   ok: boolean;
   error?: string;
+  /** Provider's id for the sent message, when it reports one. */
+  messageId?: string;
+}
+
+export interface SentFile {
+  mimeType: string;
+  fileName: string;
+  sizeBytes: number;
 }
 
 interface MediaRouteConfig<S> {
@@ -44,6 +52,11 @@ interface MediaRouteConfig<S> {
     file: { bytes: Buffer; mimeType: string; fileName: string },
     caption: string,
   ) => Promise<SendOutcome>;
+  /**
+   * Called after a successful send, for providers that don't echo our own
+   * messages back and so need the mirror updated by hand.
+   */
+  onSent?: (ctx: MessagingContext, chatId: string, result: SendOutcome, file: SentFile, caption: string) => Promise<void>;
 }
 
 /**
@@ -63,6 +76,40 @@ const INLINE_SAFE = new Set([
   'audio/mp4',
   'application/pdf',
 ]);
+
+/**
+ * At most this many provider downloads in flight per server process.
+ *
+ * A thread with 200 photos fires 200 media requests on first open. Each one
+ * holds a whole attachment in memory (and, for wacli, a `docker exec`
+ * process), so without a ceiling the peak is 200 × attachment size. Requests
+ * beyond the ceiling wait their turn; the browser shows them a moment later.
+ */
+const MAX_CONCURRENT_DOWNLOADS = 4;
+
+declare global {
+  var messagingMediaDownloadQueueGlobal: { active: number; waiting: Array<() => void> } | undefined;
+}
+
+function downloadQueue() {
+  globalThis.messagingMediaDownloadQueueGlobal ??= { active: 0, waiting: [] };
+  return globalThis.messagingMediaDownloadQueueGlobal;
+}
+
+/** Run `task` once a download slot is free. */
+async function withDownloadSlot<T>(task: () => Promise<T>): Promise<T> {
+  const queue = downloadQueue();
+  if (queue.active >= MAX_CONCURRENT_DOWNLOADS) {
+    await new Promise<void>((resolve) => queue.waiting.push(resolve));
+  }
+  queue.active++;
+  try {
+    return await task();
+  } finally {
+    queue.active--;
+    queue.waiting.shift()?.();
+  }
+}
 
 /** Strip anything that could break out of a quoted header value. */
 function safeFileName(name: string | null): string {
@@ -109,7 +156,7 @@ export function createMediaGET<S>(config: MediaRouteConfig<S>) {
 
     if (!media) {
       try {
-        media = await config.getMedia(scope, chatId, ref);
+        media = await withDownloadSlot(() => config.getMedia(scope, chatId, ref));
       } catch {
         media = null;
       }
@@ -186,20 +233,17 @@ export function createSendMediaPOST<S>(config: MediaRouteConfig<S>) {
     }
 
     const bytes = Buffer.from(await file.arrayBuffer());
-    const result = await config.sendMedia(
-      scope,
-      chatId,
-      {
-        bytes,
-        mimeType: file.type || 'application/octet-stream',
-        fileName: safeFileName(file.name),
-      },
-      caption,
-    );
+    const sent: SentFile = {
+      mimeType: file.type || 'application/octet-stream',
+      fileName: safeFileName(file.name),
+      sizeBytes: bytes.length,
+    };
+    const result = await config.sendMedia(scope, chatId, { bytes, ...sent }, caption);
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error ?? 'Send failed.' }, { status: 502 });
     }
+    if (config.onSent) await config.onSent(ctx, chatId, result, sent, caption);
     return NextResponse.json({ ok: true });
   };
 }
