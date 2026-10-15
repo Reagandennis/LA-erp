@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { tripForViewer } from '@/lib/trip-costs';
 import { duplicateTripDay } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripDayDuplicateSchema } from '@/lib/validation';
@@ -58,5 +59,5 @@ export async function POST(
     request,
   });
 
-  return NextResponse.json({ trip: result }, { status: 201 });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) }, { status: 201 });
 }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { tripForViewer } from '@/lib/trip-costs';
 import { deleteTrip, getTripForUser, updateTrip } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripUpdateSchema } from '@/lib/validation';
@@ -29,7 +30,7 @@ export async function GET(
   const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
   const trip = await getTripForUser({ id, userId: auth.user.id, isAdmin });
   if (!trip) return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
-  return NextResponse.json({ trip });
+  return NextResponse.json({ trip: tripForViewer(trip, auth.user) });
 }
 
 export async function PATCH(
@@ -101,7 +102,7 @@ export async function PATCH(
     });
   }
 
-  return NextResponse.json({ trip: result });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) });
 }
 
 export async function DELETE(

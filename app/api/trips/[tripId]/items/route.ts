@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { canSeeTripCosts, tripForViewer } from '@/lib/trip-costs';
 import { addTripItems } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripItineraryItemAddSchema } from '@/lib/validation';
@@ -55,7 +56,8 @@ export async function POST(
       description: item.description,
       subtitle: item.subtitle ?? null,
       quantity: item.quantity,
-      unitPrice: item.unitPrice ?? null,
+      // Costs are quote prices: only people who can see quotes may set them.
+      unitPrice: canSeeTripCosts(auth.user) ? (item.unitPrice ?? null) : null,
       sourceQuoteItemId: item.sourceQuoteItemId ?? null,
       scheduledAt: item.scheduledAt ?? null,
       endsAt: item.endsAt ?? null,
@@ -83,5 +85,5 @@ export async function POST(
     request,
   });
 
-  return NextResponse.json({ trip: result }, { status: 201 });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) }, { status: 201 });
 }

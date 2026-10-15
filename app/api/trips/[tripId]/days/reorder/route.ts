@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { tripForViewer } from '@/lib/trip-costs';
 import { reorderTripDays } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripDayReorderSchema } from '@/lib/validation';
@@ -48,5 +49,5 @@ export async function POST(
 
   // Reordering days shifts every downstream date, so the client needs the full
   // refreshed trip back rather than an acknowledgement.
-  return NextResponse.json({ trip: result });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) });
 }

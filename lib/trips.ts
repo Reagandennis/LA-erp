@@ -99,6 +99,8 @@ export interface TripSummary {
 export interface TripDetail extends TripSummary {
   items: TripItineraryItemSummary[];
   days: TripDaySummary[];
+  /** Set when item costs were left out because the viewer can't see quotes (see lib/trip-costs.ts). */
+  costsHidden?: boolean;
 }
 
 interface TripRecord {

@@ -59,7 +59,8 @@ interface ItemPayload {
   imageUrl: string | null;
   confirmationCode: string | null;
   quantity: number;
-  unitPrice: number | null;
+  /** Left out entirely for people who can't see costs, so a save never clears one. */
+  unitPrice?: number | null;
 }
 
 const ALL_STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
@@ -225,7 +226,7 @@ function editorFromItem(item: TripItineraryItemSummary): EditorState {
   };
 }
 
-function editorToPayload(editor: EditorState): ItemPayload | { error: string } {
+function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload | { error: string } {
   const description = editor.description.trim();
   if (!description) return { error: 'Give it a name' };
   const scheduledAt = editor.date ? combineDateTime(editor.date, editor.time || null) : null;
@@ -237,7 +238,7 @@ function editorToPayload(editor: EditorState): ItemPayload | { error: string } {
   if (scheduledAt == null && reminderMinutesBefore != null) {
     return { error: 'Reminders need a scheduled time' };
   }
-  const price = editor.unitPrice.trim();
+  const price = includeCost ? editor.unitPrice.trim() : '';
   if (price && !Number.isFinite(Number(price))) {
     return { error: 'Cost must be a number' };
   }
@@ -264,7 +265,7 @@ function editorToPayload(editor: EditorState): ItemPayload | { error: string } {
     imageUrl: editor.imageUrl.trim() || null,
     confirmationCode: editor.confirmationCode.trim() || null,
     quantity: 1,
-    unitPrice: price ? Number(price) : null,
+    ...(includeCost ? { unitPrice: price ? Number(price) : null } : {}),
   };
 }
 
@@ -328,7 +329,7 @@ export default function ItineraryPageClient({
   };
 
   const submitAdd = async () => {
-    const payload = editorToPayload(editor);
+    const payload = editorToPayload(editor, !trip.costsHidden);
     if ('error' in payload) {
       setError(payload.error);
       return;
@@ -356,7 +357,7 @@ export default function ItineraryPageClient({
 
   const submitEdit = async () => {
     if (editingItemId == null) return;
-    const payload = editorToPayload(editor);
+    const payload = editorToPayload(editor, !trip.costsHidden);
     if ('error' in payload) {
       setError(payload.error);
       return;
@@ -850,6 +851,7 @@ export default function ItineraryPageClient({
 
             <ItemList
               items={activeItems}
+              showCost={!trip.costsHidden}
               canEdit={canEdit}
               registerEvent={registerEvent}
               onPointerDownItem={onEventPointerDown}
@@ -938,6 +940,7 @@ export default function ItineraryPageClient({
 
 interface ItemListProps {
   items: TripItineraryItemSummary[];
+  showCost: boolean;
   registerEvent: (id: number) => (el: HTMLElement | null) => (() => void) | undefined;
   onPointerDownItem: (event: React.PointerEvent<HTMLElement>, itemId: number) => void;
   dragItemId: number | null;
@@ -961,6 +964,7 @@ interface ItemListProps {
 
 function ItemList({
   items,
+  showCost,
   registerEvent,
   onPointerDownItem,
   dragItemId,
@@ -992,6 +996,7 @@ function ItemList({
             onCancel={onCancel}
             submitting={pendingItemId === item.id}
             submitLabel="Save"
+            showCost={showCost}
           />
         ) : (
           <div
@@ -1059,6 +1064,7 @@ function ItemList({
           onCancel={onCancel}
           submitting={pending === 'add'}
           submitLabel="Add"
+          showCost={showCost}
         />
       )}
 
@@ -1376,7 +1382,10 @@ function ItemEditor({
   onCancel,
   submitting,
   submitLabel,
+  showCost,
 }: {
+  /** Costs are quote prices; hidden from people without access to quotes. */
+  showCost: boolean;
   editor: EditorState;
   setEditor: (e: EditorState) => void;
   onSubmit: () => void;
@@ -1589,7 +1598,7 @@ function ItemEditor({
 
       <details className="rounded-xl border border-gray-100 px-3 py-2">
         <summary className="cursor-pointer text-xs font-medium text-gray-500">
-          More — contact, link, cost, reminder
+          {showCost ? 'More — contact, link, cost, reminder' : 'More — contact, link, reminder'}
         </summary>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <label className="col-span-2 block">
@@ -1621,17 +1630,19 @@ function ItemEditor({
               />
             </label>
           )}
-          <label className="col-span-2 block sm:col-span-1">
-            <span className={labelClass}>Cost</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={editor.unitPrice}
-              onChange={(e) => patch({ unitPrice: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
+          {showCost && (
+            <label className="col-span-2 block sm:col-span-1">
+              <span className={labelClass}>Cost</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={editor.unitPrice}
+                onChange={(e) => patch({ unitPrice: e.target.value })}
+                className={fieldClass}
+              />
+            </label>
+          )}
           <label className="col-span-2 block sm:col-span-1">
             <span className={labelClass}>Reminder</span>
             <select

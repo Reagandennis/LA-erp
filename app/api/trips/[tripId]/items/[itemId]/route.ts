@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { canSeeTripCosts, tripForViewer } from '@/lib/trip-costs';
 import { deleteTripItem, updateTripItem } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripItineraryItemUpdateSchema } from '@/lib/validation';
@@ -44,7 +45,8 @@ export async function PATCH(
     itemId,
     userId: auth.user.id,
     isAdmin,
-    input: validation.data,
+    // Without access to quotes a cost can't be changed, only left as it is.
+    input: canSeeTripCosts(auth.user) ? validation.data : { ...validation.data, unitPrice: undefined },
   });
 
   if ('error' in result) {
@@ -69,7 +71,7 @@ export async function PATCH(
     request,
   });
 
-  return NextResponse.json({ trip: result });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) });
 }
 
 export async function DELETE(
@@ -101,5 +103,5 @@ export async function DELETE(
     request,
   });
 
-  return NextResponse.json({ trip: result });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) });
 }

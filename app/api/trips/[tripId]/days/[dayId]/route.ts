@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { tripForViewer } from '@/lib/trip-costs';
 import { deleteTripDay, updateTripDay } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripDayUpdateSchema } from '@/lib/validation';
@@ -58,7 +59,7 @@ export async function PATCH(
     request,
   });
 
-  return NextResponse.json({ trip: result });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) });
 }
 
 export async function DELETE(
@@ -92,5 +93,5 @@ export async function DELETE(
     request,
   });
 
-  return NextResponse.json({ trip: result });
+  return NextResponse.json({ trip: tripForViewer(result, auth.user) });
 }

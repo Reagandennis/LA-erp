@@ -85,6 +85,8 @@ export interface TripSummary {
 export interface TripDetail extends TripSummary {
   items: TripItineraryItemSummary[];
   days: TripDaySummary[];
+  /** Item costs were left out: the viewer doesn't have access to quotes. */
+  costsHidden?: boolean;
 }
 
 export interface OwnerOption {

@@ -20,6 +20,10 @@ vi.mock('../lib/trips', () => ({
   listTripsForUser,
   createTrip,
 }));
+vi.mock('../lib/trip-costs', () => ({
+  canSeeTripCosts: () => true,
+  tripForViewer: (trip: unknown) => trip,
+}));
 vi.mock('../lib/audit', () => ({ recordAuditEvent }));
 vi.mock('../lib/rate-limit', () => ({ enforceRateLimit }));
 vi.mock('../lib/user', () => ({

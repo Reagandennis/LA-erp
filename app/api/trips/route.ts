@@ -4,6 +4,7 @@ import { recordAuditEvent } from '@/lib/audit';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
+import { canSeeTripCosts, tripForViewer } from '@/lib/trip-costs';
 import { createTrip, listTripsForUser } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripCreateSchema } from '@/lib/validation';
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
       description: item.description,
       subtitle: item.subtitle ?? null,
       quantity: item.quantity,
-      unitPrice: item.unitPrice ?? null,
+      unitPrice: canSeeTripCosts(auth.user) ? (item.unitPrice ?? null) : null,
       sourceQuoteItemId: item.sourceQuoteItemId ?? null,
       scheduledAt: item.scheduledAt ?? null,
       endsAt: item.endsAt ?? null,
@@ -85,5 +86,5 @@ export async function POST(request: NextRequest) {
     request,
   });
 
-  return NextResponse.json({ trip }, { status: 201 });
+  return NextResponse.json({ trip: tripForViewer(trip, auth.user) }, { status: 201 });
 }
