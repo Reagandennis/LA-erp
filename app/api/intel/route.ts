@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { computeStats, createAssessment, isConfigured, listAssessments } from '@/lib/intel';
+import { checkAiAllowed, consumeAllowance } from '@/lib/ai-budget';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
 
@@ -40,6 +41,17 @@ export async function POST(request: NextRequest) {
   const location = typeof body.location === 'string' ? body.location : '';
   if (!location.trim()) {
     return NextResponse.json({ error: 'Enter a location or place to assess.' }, { status: 400 });
+  }
+
+  // Each report is two Gemini calls with web search: within the AI budget,
+  // and a few per person per day (Admin → Settings → AI usage).
+  const allowed = await checkAiAllowed('intel');
+  if (!allowed.ok) {
+    return NextResponse.json({ error: allowed.reason, retryAfterSeconds: allowed.retryAfterSeconds }, { status: 429 });
+  }
+  const allowance = await consumeAllowance('intel', auth.user.id);
+  if (!allowance.ok) {
+    return NextResponse.json({ error: allowance.reason, retryAfterSeconds: allowance.retryAfterSeconds }, { status: 429 });
   }
 
   try {

@@ -280,7 +280,12 @@ export default function ZelloConsole() {
         const res = await fetch('/api/zello/transcribe', {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'audio/wav' },
+          headers: {
+            'Content-Type': 'audio/wav',
+            // Every console on the channel hears the same transmission; this
+            // lets the server transcribe (and pay for) it once.
+            'X-Zello-Transmission': `${cfg.network}/${cfg.channel}/${clip.streamId}/${clip.from}`,
+          },
           body: clip.wav,
         });
         const d = (await res.json().catch(() => null)) as
@@ -288,7 +293,8 @@ export default function ZelloConsole() {
           | null;
         // A key/config failure means every burst will fail the same way — flip auto-transcription
         // off after the first one so we don't spam Gemini or clutter the log. Playback still works.
-        if (d?.error && /not-configured|gemini_http_(400|401|403)|Forbidden/.test(d.error)) {
+        // So do a missing model and a paused AI budget (or transcription switched off).
+        if (d?.error && /not-configured|gemini_http_(400|401|403|404)|Forbidden|ai-paused/.test(d.error)) {
           transcribeOffRef.current = true;
           setTranscribeOff(true);
         }

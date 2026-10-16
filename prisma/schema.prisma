@@ -1784,6 +1784,53 @@ model UploadLimitSettings {
   updatedAt   DateTime @updatedAt
 }
 
+/// One Gemini API call: what it cost, for the AI budget (Admin → Settings → AI usage).
+model AiUsage {
+  id             Int      @id @default(autoincrement())
+  at             DateTime @default(now())
+  /// 'chatbot' | 'web_search' | 'intel' | 'radio'
+  feature        String
+  /// The model that actually answered (Gemini reports it; aliases resolve to a version).
+  model          String
+  userId         Int?
+  inputTokens    Int      @default(0)
+  /// Of the input, tokens served from Gemini's cache (billed at the cached rate).
+  cachedTokens   Int      @default(0)
+  /// Of the input, audio tokens (billed at the audio rate).
+  audioTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  thinkingTokens Int      @default(0)
+  /// Grounded in Google Search (billed per request beyond the free monthly allowance).
+  grounded       Boolean  @default(false)
+  /// Estimated from Google's published prices.
+  costUsd        Float    @default(0)
+
+  @@index([at])
+  @@index([feature, at])
+  @@index([userId, at])
+}
+
+/// Limits on AI spending (one row, id = 1), edited in Admin → Settings → AI usage.
+model AiSettings {
+  id                        Int     @id @default(1)
+  /// Master switch for every AI feature.
+  enabled                   Boolean @default(true)
+  dailyBudgetUsd            Float   @default(2)
+  monthlyBudgetUsd          Float   @default(30)
+  chatMessagesPerUserPerDay Int     @default(60)
+  /// Across everyone: keeps grounded search inside Google's free monthly allowance.
+  webSearchesPerDay         Int     @default(150)
+  intelReportsPerUserPerDay Int     @default(10)
+  radioTranscription        Boolean @default(true)
+  /// Emailed at 80% and 100% of the monthly budget (comma-separated).
+  alertEmails               String  @default("")
+  /// "2026-10:80" — the last budget alert sent, so each is sent once a month.
+  lastAlert                 String?
+
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
+}
+
 /// Google Drive backups (one row, id = 1), edited in Admin → Settings → Backups.
 model BackupSettings {
   id      Int     @id @default(1)

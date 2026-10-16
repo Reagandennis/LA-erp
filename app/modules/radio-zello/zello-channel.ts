@@ -39,6 +39,11 @@ export interface ZelloLogEntry {
 /** A finished incoming transmission, captured for replay and transcription. */
 export interface ZelloVoiceClip {
   id: string;
+  /**
+   * Zello's id for the transmission, the same for every listener on the
+   * channel — lets the server transcribe it once however many consoles hear it.
+   */
+  streamId: number;
   from: string;
   at: number; // when the transmission started (ms epoch)
   durationMs: number;
@@ -637,6 +642,7 @@ export class ZelloChannel {
         const wav = encodeWav(pcm, STORE_RATE);
         this.handlers.onVoiceClip({
           id: makeId(),
+          streamId,
           from: entry.from,
           at: entry.startedAt,
           durationMs: Math.round((entry.frames / entry.captureRate) * 1000),

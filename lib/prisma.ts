@@ -38,6 +38,8 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     roleModule?: unknown;
     backupSettings?: unknown;
     backupRun?: unknown;
+    aiUsage?: unknown;
+    aiSettings?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -63,7 +65,9 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.exchangeRateSnapshot &&
       candidate.roleModule &&
       candidate.backupSettings &&
-      candidate.backupRun,
+      candidate.backupRun &&
+      candidate.aiUsage &&
+      candidate.aiSettings,
   );
 }
 

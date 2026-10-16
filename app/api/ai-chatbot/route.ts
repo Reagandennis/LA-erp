@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { checkAiAllowed, consumeAllowance } from '@/lib/ai-budget';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
@@ -12,6 +13,7 @@ import {
   type GeminiContent,
   type GeminiPart,
 } from '@/lib/assistant/gemini';
+import { MAX_PROMPT_CHARS, trimHistory } from '@/lib/assistant/history';
 import { findScopedTool, scopeToolsForUser } from '@/lib/assistant/scope';
 import type { ToolContext, ToolDefinition } from '@/lib/assistant/types';
 
@@ -20,13 +22,6 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const MAX_TOOL_ROUNDS = 5;
-const MAX_HISTORY_TURNS = 8;
-
-interface ChatTurn {
-  role: 'user' | 'assistant';
-  text: string;
-}
-
 interface Action {
   tool: string;
   result: unknown;
@@ -47,17 +42,6 @@ function buildSystemInstruction(user: AccessUser): string {
     '- After tools run, confirm briefly in plain language what you did. Never claim success unless a tool returned it.',
     '- If a tool returns an "error" field, explain it to the user and suggest a fix. Be concise.',
   ].join('\n');
-}
-
-function trimHistory(history: unknown): GeminiContent[] {
-  if (!Array.isArray(history)) return [];
-  const turns = history
-    .filter((t): t is ChatTurn => !!t && typeof t === 'object' && typeof (t as ChatTurn).text === 'string')
-    .slice(-MAX_HISTORY_TURNS);
-  return turns.map((t) => ({
-    role: t.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: t.text }],
-  }));
 }
 
 function confirmationLabel(name: string, args: Record<string, unknown>): string {
@@ -84,11 +68,19 @@ async function runLoop(
   const actions: Action[] = [...seedActions];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-    const res = await generateWithTools({ systemInstruction, contents, functionDeclarations: declarations });
+    // A long chain of tool steps must not run past the budget either.
+    if (round > 0) {
+      const allowed = await checkAiAllowed('chatbot');
+      if (!allowed.ok) return { reply: allowed.reason, actions };
+    }
+    const res = await generateWithTools({ systemInstruction, contents, functionDeclarations: declarations, userId: ctx.userId });
     if (res.error) return { reply: `The assistant hit an error: ${res.error}`, actions };
 
     const calls = res.parts.filter((p) => p.functionCall);
     if (calls.length === 0) {
+      if (!res.text && res.finishReason === 'MAX_TOKENS') {
+        return { reply: 'That answer ran too long and was cut off. Try asking for something more specific.', actions };
+      }
       return { reply: res.text || 'Done.', actions };
     }
 
@@ -158,6 +150,22 @@ export async function POST(request: NextRequest) {
     | { prompt?: string; history?: unknown; confirmToken?: string }
     | null;
   if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  if (typeof body.prompt === 'string' && body.prompt.trim().length > MAX_PROMPT_CHARS) {
+    return NextResponse.json(
+      { error: `Messages are limited to ${MAX_PROMPT_CHARS.toLocaleString('en-US')} characters. Shorten it, or ask about one part at a time.` },
+      { status: 413 },
+    );
+  }
+
+  // The AI budget (Admin → Settings → AI usage), then this person's daily allowance.
+  const allowed = await checkAiAllowed('chatbot');
+  if (!allowed.ok) {
+    return NextResponse.json({ error: allowed.reason, retryAfterSeconds: allowed.retryAfterSeconds }, { status: 429 });
+  }
+  const allowance = await consumeAllowance('chat', auth.user.id);
+  if (!allowance.ok) {
+    return NextResponse.json({ error: allowance.reason, retryAfterSeconds: allowance.retryAfterSeconds }, { status: 429 });
+  }
 
   const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
   const scopedTools = scopeToolsForUser(auth.user);

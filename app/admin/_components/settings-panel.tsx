@@ -39,6 +39,11 @@ const LINKS = [
     detail: 'Check the mail server settings and send a test email.',
   },
   {
+    href: '/admin/ai-usage',
+    title: 'AI usage',
+    detail: 'What Gemini costs, daily and monthly budgets, and per-person limits for the assistant and Intel.',
+  },
+  {
     href: '/admin/backups',
     title: 'Backups',
     detail: 'Encrypted daily snapshots of the whole platform in a Google Shared Drive, with version history.',

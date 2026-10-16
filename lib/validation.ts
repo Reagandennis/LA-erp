@@ -777,3 +777,21 @@ export const backupConnectionSchema = z.object({
   serviceAccountJson: z.string().max(20_000).optional(),
   driveLink: z.string().trim().min(10, 'Paste the Shared Drive or folder link').max(500),
 });
+
+export const aiSettingsUpdateSchema = z.object({
+  enabled: z.boolean(),
+  dailyBudgetUsd: z.number().min(0, 'The daily budget can’t be negative').max(1000, 'The daily budget is at most $1,000'),
+  monthlyBudgetUsd: z.number().min(0, 'The monthly budget can’t be negative').max(20000, 'The monthly budget is at most $20,000'),
+  chatMessagesPerUserPerDay: z.number().int().min(0).max(10000),
+  webSearchesPerDay: z.number().int().min(0).max(10000),
+  intelReportsPerUserPerDay: z.number().int().min(0).max(1000),
+  radioTranscription: z.boolean(),
+  alertEmails: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (value) => value === '' || value.split(',').every((e) => z.email().safeParse(e.trim()).success),
+      'Alert emails must be addresses separated by commas',
+    ),
+});

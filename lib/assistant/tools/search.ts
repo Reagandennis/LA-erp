@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { checkAiAllowed, consumeAllowance } from '../../ai-budget';
 import { webSearch } from '../gemini';
 import { asString, type ToolDefinition } from '../types';
 
@@ -15,10 +16,16 @@ const webSearchTool: ToolDefinition = {
       required: ['query'],
     },
   },
-  async handler(args) {
+  async handler(args, ctx) {
     const query = asString(args.query);
     if (!query) return { error: 'A search query is required.' };
-    const { answer, error } = await webSearch(query);
+    // Grounded searches beyond Google's free monthly allowance are billed per
+    // request, so there is a shared daily cap on top of the AI budget.
+    const allowed = await checkAiAllowed('web_search');
+    if (!allowed.ok) return { error: allowed.reason };
+    const allowance = await consumeAllowance('web_search', ctx.userId);
+    if (!allowance.ok) return { error: `${allowance.reason} Answer from the platform's own data instead.` };
+    const { answer, error } = await webSearch(query, ctx.userId);
     if (error) return { error };
     return { answer };
   },

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { type GeminiUsage, recordAiUsage } from '@/lib/ai-budget';
 import { prisma } from '@/lib/prisma';
 
 // ---------------------------------------------------------------------------
@@ -366,30 +367,64 @@ type GeminiCandidate = {
   groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
 };
 
+/**
+ * How much each step thinks (billed as output, the dearest tokens). Research
+ * benefits from a little; turning prose into JSON needs none.
+ */
+function researchThinking(): string {
+  return process.env.INTEL_RESEARCH_THINKING?.trim() || 'low';
+}
+function structureThinking(): string {
+  return process.env.INTEL_STRUCTURE_THINKING?.trim() || 'minimal';
+}
+
 /** POST to Gemini generateContent and return the first candidate's text + candidate. */
-async function callGemini(body: Record<string, unknown>): Promise<{ text: string; candidate: GeminiCandidate }> {
+async function callGemini(
+  body: Record<string, unknown>,
+  meta: { userId: number; grounded?: boolean; thinkingLevel?: string },
+): Promise<{ text: string; candidate: GeminiCandidate }> {
   const key = geminiKey();
   if (!key) throw new Error('The AI service is not configured. Set AI_ASSISTANT_API_KEY.');
 
-  let res: Response;
-  try {
-    res = await fetch(`${GEMINI_API_URL}/models/${geminiModel()}:generateContent?key=${key}`, {
+  type Reply = { candidates?: GeminiCandidate[]; usageMetadata?: GeminiUsage; modelVersion?: string; error?: { message?: string } };
+  const send = async (payload: Record<string, unknown>) => {
+    const res = await fetch(`${GEMINI_API_URL}/models/${geminiModel()}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      // In a header rather than the URL, so the key never lands in proxy or error logs.
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify(payload),
       cache: 'no-store',
     });
+    return { res, data: (await res.json().catch(() => null)) as Reply | null };
+  };
+
+  const config = (body.generationConfig ?? {}) as Record<string, unknown>;
+  const withThinking = meta.thinkingLevel
+    ? { ...body, generationConfig: { ...config, thinkingConfig: { thinkingLevel: meta.thinkingLevel } } }
+    : body;
+
+  let reply: Awaited<ReturnType<typeof send>>;
+  try {
+    reply = await send(withThinking);
+    // A model that doesn't take this thinking level refuses the request; ask again without it.
+    if (reply.res.status === 400 && meta.thinkingLevel && /think/i.test(reply.data?.error?.message ?? '')) {
+      reply = await send(body);
+    }
   } catch {
     throw new Error('Could not reach the AI service.');
   }
 
-  const data = (await res.json().catch(() => null)) as
-    | { candidates?: GeminiCandidate[]; error?: { message?: string } }
-    | null;
-
+  const { res, data } = reply;
   if (!res.ok || !data || data.error) {
     throw new Error(data?.error?.message ?? `AI request failed (${res.status})`);
   }
+  await recordAiUsage({
+    feature: 'intel',
+    model: data.modelVersion || geminiModel(),
+    userId: meta.userId,
+    usage: data.usageMetadata,
+    grounded: meta.grounded,
+  });
 
   const candidate = data.candidates?.[0] ?? {};
   const text = (candidate.content?.parts ?? []).map((p) => p.text ?? '').join('').trim();
@@ -447,6 +482,7 @@ function pickRisk(value: unknown): RiskLevel {
 async function groundedResearch(
   location: string,
   context: string | null,
+  userId: number,
 ): Promise<{ text: string; sources: AssessmentSource[] }> {
   const userPrompt =
     `Research and write a detailed security & travel-risk assessment for: ${location}.` +
@@ -458,7 +494,7 @@ async function groundedResearch(
     systemInstruction: { parts: [{ text: RESEARCH_PROMPT }] },
     tools: [{ googleSearch: {} }],
     generationConfig: { temperature: 0.2, maxOutputTokens: 6000 },
-  });
+  }, { userId, grounded: true, thinkingLevel: researchThinking() });
 
   if (text.length < 200) {
     throw new Error('The AI could not gather enough information for this location. Try a more specific place name.');
@@ -467,7 +503,7 @@ async function groundedResearch(
 }
 
 /** Step 2: structure the prose into strict JSON (no tools, schema-constrained). */
-async function structureReport(researchText: string, location: string): Promise<GeneratedReport> {
+async function structureReport(researchText: string, location: string, userId: number): Promise<GeneratedReport> {
   const { text } = await callGemini({
     contents: [
       {
@@ -487,7 +523,7 @@ async function structureReport(researchText: string, location: string): Promise<
       responseMimeType: 'application/json',
       responseSchema: STRUCTURE_SCHEMA,
     },
-  });
+  }, { userId, thinkingLevel: structureThinking() });
 
   let parsed: Record<string, unknown> | null = null;
   try {
@@ -516,9 +552,9 @@ async function structureReport(researchText: string, location: string): Promise<
   };
 }
 
-async function generateReport(location: string, context: string | null): Promise<GeneratedReport> {
-  const research = await groundedResearch(location, context);
-  const structured = await structureReport(research.text, location);
+async function generateReport(location: string, context: string | null, userId: number): Promise<GeneratedReport> {
+  const research = await groundedResearch(location, context, userId);
+  const structured = await structureReport(research.text, location, userId);
   return { ...structured, sources: research.sources };
 }
 
@@ -534,7 +570,7 @@ export async function createAssessment(input: {
   const context = input.context?.trim() || null;
 
   // 1) Geocode (best effort) and 2) the AI report run concurrently.
-  const [geo, report] = await Promise.all([geocode(location), generateReport(location, context)]);
+  const [geo, report] = await Promise.all([geocode(location), generateReport(location, context, input.userId)]);
 
   // 3) Imagery (only if we have coordinates and a maps key).
   let map: { mime: string; content: Buffer } | null = null;
