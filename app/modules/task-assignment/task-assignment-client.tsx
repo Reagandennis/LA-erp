@@ -324,6 +324,33 @@ type PhotoHandler = (id: number, file: File) => void;
 
 type Sender = (url: string, method: 'POST' | 'PATCH' | 'DELETE', body?: unknown) => Promise<boolean>;
 
+const CURRENT_STATUSES = new Set(['Planned', 'Confirmed', 'Active']);
+
+/**
+ * Completed and cancelled assignments (years of them, from FileMaker) stay out
+ * of view until searched for; a search covers the whole history.
+ */
+function visibleAssignments(all: AssignmentSummary[], q: string): AssignmentSummary[] {
+  return all.filter((a) => {
+    if (!q) return CURRENT_STATUSES.has(a.status);
+    const hay = [a.trip?.reference, a.trip?.title, a.trip?.customerName, a.vehicle?.registration, a.driver?.name, a.officer?.name]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return hay.includes(q);
+  });
+}
+
+function PastAssignmentsHint({ all, q }: { all: AssignmentSummary[]; q: string }) {
+  const past = all.filter((a) => !CURRENT_STATUSES.has(a.status)).length;
+  if (q || past === 0) return null;
+  return (
+    <p className="mb-3 text-xs text-gray-400">
+      Showing current assignments. Search to find {past.toLocaleString()} past ones.
+    </p>
+  );
+}
+
 function EmptyState({ label }: { label: string }) {
   return (
     <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-gray-200">
@@ -470,19 +497,21 @@ function AssignmentList({
   send: Sender;
   onEdit: (a: AssignmentSummary) => void;
 }) {
-  const items = data.assignments.filter((a) => {
-    if (!q) return true;
-    const hay = [a.trip?.reference, a.trip?.title, a.trip?.customerName, a.vehicle?.registration, a.driver?.name, a.officer?.name]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    return hay.includes(q);
-  });
+  const items = visibleAssignments(data.assignments, q);
 
-  if (items.length === 0) return <EmptyState label="assignments" />;
+  const hint = <PastAssignmentsHint all={data.assignments} q={q} />;
+  if (items.length === 0) {
+    return (
+      <>
+        {hint}
+        <EmptyState label={q ? 'matching assignments' : 'current assignments'} />
+      </>
+    );
+  }
 
   return (
     <div className="space-y-3">
+      {hint}
       {items.map((a) => (
         <div key={a.id} className="bg-white rounded-2xl border border-gray-100 p-4">
           <div className="flex items-start justify-between gap-4">
@@ -1031,16 +1060,16 @@ function Dashboard({ data, q }: { data: TaskAssignmentData; q: string }) {
   const dById = new Map(data.drivers.map((d) => [d.id, d]));
   const oById = new Map(data.officers.map((o) => [o.id, o]));
 
-  const items = data.assignments.filter((a) => {
-    if (!q) return true;
-    const hay = [a.trip?.reference, a.trip?.title, a.trip?.customerName, a.vehicle?.registration, a.driver?.name, a.officer?.name]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    return hay.includes(q);
-  });
+  const items = visibleAssignments(data.assignments, q);
 
-  if (items.length === 0) return <EmptyState label="assignments to visualise" />;
+  if (items.length === 0) {
+    return (
+      <>
+        <PastAssignmentsHint all={data.assignments} q={q} />
+        <EmptyState label={q ? 'matching assignments' : 'current assignments to visualise'} />
+      </>
+    );
+  }
 
   const carFallback = (
     <div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: BRAND }}>

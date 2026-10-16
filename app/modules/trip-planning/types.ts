@@ -80,6 +80,8 @@ export interface TripSummary {
   sourceQuote: { id: number; reference: string } | null;
   itemCount: number;
   assignmentCount: number;
+  /** Entries in the trip's operations log. */
+  logCount: number;
 }
 
 export interface TripDetail extends TripSummary {

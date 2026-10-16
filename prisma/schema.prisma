@@ -54,6 +54,7 @@ model User {
   recordedInvoicePayments        InvoicePayment[]                @relation("InvoicePaymentCreatedBy")
   organizationUpdates            OrganizationSettings[]          @relation("OrganizationUpdatedBy")
   createdTrips                   Trip[]                          @relation("TripCreatedBy")
+  tripLogEntries                 TripLogEntry[]                  @relation("TripLogEntryCreatedBy")
   ownedTrips                     Trip[]                          @relation("TripOwner")
   tripItineraryItemNotifications TripItineraryItemNotification[]
   createdConversations           Conversation[]                  @relation("ConversationCreatedBy")
@@ -864,6 +865,7 @@ model Trip {
   assignments   TripAssignment[]
   days          TripDay[]
   travelers     TripTraveler[]
+  logEntries    TripLogEntry[]
 
   @@index([createdById, status])
   @@index([ownerId, status])
@@ -961,6 +963,30 @@ model TripItineraryItemNotification {
 model TripSequence {
   year       Int @id
   lastNumber Int @default(0)
+}
+
+/// One line in a trip's operations log: what was reported, by whom, and the
+/// action taken. Imported from FileMaker's task log and added to from the trip page.
+model TripLogEntry {
+  id             Int      @id @default(autoincrement())
+  tripId         Int
+  loggedAt       DateTime
+  detail         String
+  /// Who reported it (FileMaker "detail received by"), free text.
+  receivedFrom   String?
+  actionItem     String?
+  /// Duty controller on shift, free text: FileMaker names have no user account.
+  dutyController String?
+  comments       String?
+  escalated      Boolean  @default(false)
+  createdById    Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  trip           Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdBy      User?    @relation("TripLogEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tripId, loggedAt])
+  @@index([escalated])
 }
 
 // --- Task assignment: fleet & protection resources allocated to trips ---

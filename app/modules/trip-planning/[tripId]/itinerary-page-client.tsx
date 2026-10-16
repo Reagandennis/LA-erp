@@ -22,6 +22,7 @@ import {
   reorderPayload,
 } from './itinerary-model';
 import FlightCard from './_components/flight-card';
+import TripLogPanel from './trip-log-panel';
 import { useItineraryDrag, type DragTarget } from './_components/use-itinerary-drag';
 import {
   CATEGORY_META,
@@ -288,6 +289,9 @@ export default function ItineraryPageClient({
     activeDayId === null || trip.days.some((day) => day.id === activeDayId)
       ? activeDayId
       : (trip.days[0]?.id ?? null);
+  /** The right-hand pane shows the trip log instead of a day. */
+  const [showLog, setShowLog] = useState(false);
+  const [logCount, setLogCount] = useState(initialTrip.logCount);
   const [addingHere, setAddingHere] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editor, setEditor] = useState<EditorState>(blankEditor(null));
@@ -630,7 +634,10 @@ export default function ItineraryPageClient({
           <div className="border-b border-gray-100 p-3">
             <button
               type="button"
-              onClick={() => void addDay()}
+              onClick={() => {
+                setShowLog(false);
+                void addDay();
+              }}
               disabled={!canEdit || pending === 'day'}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
@@ -642,7 +649,10 @@ export default function ItineraryPageClient({
             {trip.days.length > 0 && canEdit && (
               <button
                 type="button"
-                onClick={() => void addDay(true)}
+                onClick={() => {
+                  setShowLog(false);
+                  void addDay(true);
+                }}
                 disabled={pending === 'day'}
                 className="mt-1.5 w-full rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 hover:text-primary disabled:opacity-50"
               >
@@ -651,16 +661,37 @@ export default function ItineraryPageClient({
             )}
           </div>
 
+          {/* Above the day list so it stays in reach on a long trip. */}
+          <button
+            type="button"
+            onClick={() => setShowLog(true)}
+            aria-pressed={showLog}
+            className={`flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left transition-colors ${
+              showLog ? 'bg-primary/5' : 'hover:bg-gray-50'
+            }`}
+          >
+            <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5h10M9 12h10M9 19h10M5 5h.01M5 12h.01M5 19h.01" />
+              </svg>
+              Trip log
+            </span>
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">{logCount}</span>
+          </button>
+
           <div className="max-h-[22rem] overflow-y-auto lg:max-h-[calc(100vh-11rem)]">
             {groups.map(({ day, items }) => {
               const label = dayLabel(day);
-              const active = day.id === currentDayId;
+              const active = !showLog && day.id === currentDayId;
               return (
                 <button
                   key={day.id}
                   ref={registerDayCard(day.id)}
                   type="button"
-                  onClick={() => setActiveDayId(day.id)}
+                  onClick={() => {
+                    setShowLog(false);
+                    setActiveDayId(day.id);
+                  }}
                   className={`flex w-full items-start gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors ${
                     active ? 'bg-primary/5' : 'hover:bg-gray-50'
                   } ${
@@ -709,9 +740,12 @@ export default function ItineraryPageClient({
             <button
               ref={registerDayCard(null)}
               type="button"
-              onClick={() => setActiveDayId(null)}
+              onClick={() => {
+                setShowLog(false);
+                setActiveDayId(null);
+              }}
               className={`flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left transition-colors ${
-                currentDayId === null ? 'bg-primary/5' : 'hover:bg-gray-50'
+                !showLog && currentDayId === null ? 'bg-primary/5' : 'hover:bg-gray-50'
               } ${
                 drag?.target?.dayId === null && drag.target.index === Number.MAX_SAFE_INTEGER
                   ? 'ring-2 ring-inset ring-primary/50'
@@ -729,152 +763,165 @@ export default function ItineraryPageClient({
         {/* ── Day panel ────────────────────────────────────────────── */}
         <main ref={registerPane} className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl px-4 py-6 sm:px-8">
-            <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-4">
-                {activeLabel && (
-                  <div className="shrink-0 text-center">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
-                      {activeLabel.month}
-                    </p>
-                    <p className="text-2xl font-bold leading-tight text-gray-900">
-                      {activeLabel.dayOfMonth}
-                    </p>
+            {showLog ? (
+              <TripLogPanel
+                tripId={trip.id}
+                description={trip.description}
+                notes={trip.notes}
+                currentUserId={currentUser.id}
+                isAdmin={isAdmin}
+                onCountChange={setLogCount}
+              />
+            ) : (
+              <>
+                <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-4">
+                    {activeLabel && (
+                      <div className="shrink-0 text-center">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
+                          {activeLabel.month}
+                        </p>
+                        <p className="text-2xl font-bold leading-tight text-gray-900">
+                          {activeLabel.dayOfMonth}
+                        </p>
+                      </div>
+                    )}
+                    <div className="min-w-0 border-l border-gray-200 pl-4">
+                      {activeGroup ? (
+                        <>
+                          <input
+                            value={activeGroup.day.title ?? ''}
+                            placeholder={activeLabel?.weekday || `Day ${activeGroup.day.dayNumber}`}
+                            disabled={!canEdit}
+                            onChange={(event) => {
+                              const title = event.target.value;
+                              setTrip((current) => ({
+                                ...current,
+                                days: current.days.map((day) =>
+                                  day.id === activeGroup.day.id ? { ...day, title } : day,
+                                ),
+                              }));
+                            }}
+                            onBlur={(event) =>
+                              void patchDay(activeGroup.day.id, { title: event.target.value.trim() || null })
+                            }
+                            className="w-full truncate rounded-md border border-transparent bg-transparent px-1 py-0.5 text-xl font-bold text-gray-900 transition-colors hover:border-gray-200 focus:border-primary focus:outline-none disabled:hover:border-transparent"
+                          />
+                          <input
+                            type="date"
+                            value={activeGroup.day.dateKey ?? ''}
+                            disabled={!canEdit}
+                            onChange={(event) =>
+                              void patchDay(activeGroup.day.id, { dateKey: event.target.value || null })
+                            }
+                            className="mt-1 rounded-md border border-transparent px-1 py-0.5 text-xs text-gray-500 transition-colors hover:border-gray-200 focus:border-primary focus:outline-none"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <h2 className="text-xl font-bold text-gray-900">Unscheduled</h2>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Anything without a day yet. Give it a date to place it.
+                          </p>
+                        </>
+                      )}
+                    </div>
                   </div>
-                )}
-                <div className="min-w-0 border-l border-gray-200 pl-4">
-                  {activeGroup ? (
-                    <>
-                      <input
-                        value={activeGroup.day.title ?? ''}
-                        placeholder={activeLabel?.weekday || `Day ${activeGroup.day.dayNumber}`}
-                        disabled={!canEdit}
-                        onChange={(event) => {
-                          const title = event.target.value;
-                          setTrip((current) => ({
-                            ...current,
-                            days: current.days.map((day) =>
-                              day.id === activeGroup.day.id ? { ...day, title } : day,
-                            ),
-                          }));
-                        }}
-                        onBlur={(event) =>
-                          void patchDay(activeGroup.day.id, { title: event.target.value.trim() || null })
-                        }
-                        className="w-full truncate rounded-md border border-transparent bg-transparent px-1 py-0.5 text-xl font-bold text-gray-900 transition-colors hover:border-gray-200 focus:border-primary focus:outline-none disabled:hover:border-transparent"
-                      />
-                      <input
-                        type="date"
-                        value={activeGroup.day.dateKey ?? ''}
-                        disabled={!canEdit}
-                        onChange={(event) =>
-                          void patchDay(activeGroup.day.id, { dateKey: event.target.value || null })
-                        }
-                        className="mt-1 rounded-md border border-transparent px-1 py-0.5 text-xs text-gray-500 transition-colors hover:border-gray-200 focus:border-primary focus:outline-none"
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <h2 className="text-xl font-bold text-gray-900">Unscheduled</h2>
-                      <p className="mt-1 text-xs text-gray-500">
-                        Anything without a day yet. Give it a date to place it.
-                      </p>
-                    </>
-                  )}
-                </div>
-              </div>
 
-              <div className="flex items-center gap-2">
-                {activeGroup && canEdit && (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setDayMenuOpen((open) => !open)}
-                      aria-label="Day options"
-                      className="rounded-lg border border-gray-200 px-2.5 py-2 text-gray-500 transition-colors hover:bg-gray-50"
-                    >
-                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM18 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
-                    </button>
-                    {dayMenuOpen && (
-                      <>
+                  <div className="flex items-center gap-2">
+                    {activeGroup && canEdit && (
+                      <div className="relative">
                         <button
                           type="button"
-                          aria-label="Close menu"
-                          className="fixed inset-0 z-10 cursor-default"
-                          onClick={() => setDayMenuOpen(false)}
-                        />
-                        <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-gray-100 bg-white py-1 shadow-lg">
-                          <button
-                            type="button"
-                            onClick={() => void duplicateDay(activeGroup.day.id)}
-                            className="block w-full px-4 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50"
-                          >
-                            Duplicate day
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void removeDay(activeGroup.day.id)}
-                            className="block w-full px-4 py-2 text-left text-sm text-rose-600 transition-colors hover:bg-rose-50"
-                          >
-                            Delete day
-                          </button>
-                        </div>
-                      </>
+                          onClick={() => setDayMenuOpen((open) => !open)}
+                          aria-label="Day options"
+                          className="rounded-lg border border-gray-200 px-2.5 py-2 text-gray-500 transition-colors hover:bg-gray-50"
+                        >
+                          <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM18 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                        </button>
+                        {dayMenuOpen && (
+                          <>
+                            <button
+                              type="button"
+                              aria-label="Close menu"
+                              className="fixed inset-0 z-10 cursor-default"
+                              onClick={() => setDayMenuOpen(false)}
+                            />
+                            <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-gray-100 bg-white py-1 shadow-lg">
+                              <button
+                                type="button"
+                                onClick={() => void duplicateDay(activeGroup.day.id)}
+                                className="block w-full px-4 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50"
+                              >
+                                Duplicate day
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void removeDay(activeGroup.day.id)}
+                                className="block w-full px-4 py-2 text-left text-sm text-rose-600 transition-colors hover:bg-rose-50"
+                              >
+                                Delete day
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => startAdd()}
+                        className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+                        </svg>
+                        New Event
+                      </button>
                     )}
                   </div>
+                </div>
+
+                {activeGroup?.day.summary && (
+                  <p className="mb-5 whitespace-pre-line text-sm text-gray-600">{activeGroup.day.summary}</p>
                 )}
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => startAdd()}
-                    className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
-                    </svg>
-                    New Event
-                  </button>
+
+                {activeItems.length === 0 && !addingHere && (
+                  <p className="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-400">
+                    Nothing here yet.
+                  </p>
                 )}
-              </div>
-            </div>
 
-            {activeGroup?.day.summary && (
-              <p className="mb-5 whitespace-pre-line text-sm text-gray-600">{activeGroup.day.summary}</p>
+                <ItemList
+                  items={activeItems}
+                  showCost={!trip.costsHidden}
+                  canEdit={canEdit}
+                  registerEvent={registerEvent}
+                  onPointerDownItem={onEventPointerDown}
+                  dragItemId={drag?.itemId ?? null}
+                  ghost={
+                    drag && drag.target && drag.target.dayId === currentDayId
+                      ? { index: drag.target.index, height: drag.height }
+                      : null
+                  }
+                  pendingItemId={pendingItemId}
+                  editingItemId={editingItemId}
+                  editor={editor}
+                  setEditor={setEditor}
+                  addingHere={addingHere}
+                  onStartEdit={startEdit}
+                  onSubmitEdit={submitEdit}
+                  onSubmitAdd={submitAdd}
+                  onCancel={cancelAddOrEdit}
+                  onDelete={deleteItem}
+                  onToggleComplete={toggleComplete}
+                  onStartAdd={startAdd}
+                  pending={pending}
+                />
+              </>
             )}
-
-            {activeItems.length === 0 && !addingHere && (
-              <p className="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-400">
-                Nothing here yet.
-              </p>
-            )}
-
-            <ItemList
-              items={activeItems}
-              showCost={!trip.costsHidden}
-              canEdit={canEdit}
-              registerEvent={registerEvent}
-              onPointerDownItem={onEventPointerDown}
-              dragItemId={drag?.itemId ?? null}
-              ghost={
-                drag && drag.target && drag.target.dayId === currentDayId
-                  ? { index: drag.target.index, height: drag.height }
-                  : null
-              }
-              pendingItemId={pendingItemId}
-              editingItemId={editingItemId}
-              editor={editor}
-              setEditor={setEditor}
-              addingHere={addingHere}
-              onStartEdit={startEdit}
-              onSubmitEdit={submitEdit}
-              onSubmitAdd={submitAdd}
-              onCancel={cancelAddOrEdit}
-              onDelete={deleteItem}
-              onToggleComplete={toggleComplete}
-              onStartAdd={startAdd}
-              pending={pending}
-            />
 
             <div className="mt-10 border-t border-gray-100 pt-6">
               <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">

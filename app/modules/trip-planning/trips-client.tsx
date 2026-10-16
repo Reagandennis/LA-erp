@@ -107,6 +107,7 @@ export default function TripsClient({
         sourceQuote: trip.sourceQuote,
         itemCount: 'items' in trip ? trip.items.length : trip.itemCount,
         assignmentCount: 'assignmentCount' in trip ? trip.assignmentCount : 0,
+        logCount: trip.logCount,
       };
       return [summary, ...without];
     });

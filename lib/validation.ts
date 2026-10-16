@@ -416,12 +416,13 @@ export const tripCreateSchema = z.object({
   customerId: z.number().int().positive('Customer is required'),
   ownerId: z.number().int().positive().optional().nullable(),
   title: z.string().trim().min(1, 'Title is required').max(200),
-  description: z.string().trim().max(2000).optional().nullable(),
+  description: z.string().trim().max(10000).optional().nullable(),
   status: tripStatusSchema.optional(),
   startDate: z.string().trim().optional().nullable(),
   endDate: z.string().trim().optional().nullable(),
   currency: currencySchema.default('USD'),
-  notes: z.string().trim().max(2000).optional().nullable(),
+  // Long enough for a FileMaker resource summary carried over in the notes.
+  notes: z.string().trim().max(10000).optional().nullable(),
   items: z.array(tripItineraryItemDraftSchema).min(0).max(200),
 });
 
@@ -430,12 +431,12 @@ export const tripUpdateSchema = z
     customerId: z.number().int().positive().optional(),
     ownerId: z.number().int().positive().optional().nullable(),
     title: z.string().trim().min(1).max(200).optional(),
-    description: z.string().trim().max(2000).optional().nullable(),
+    description: z.string().trim().max(10000).optional().nullable(),
     status: tripStatusSchema.optional(),
     startDate: z.string().trim().optional().nullable(),
     endDate: z.string().trim().optional().nullable(),
     currency: currencySchema.optional(),
-    notes: z.string().trim().max(2000).optional().nullable(),
+    notes: z.string().trim().max(10000).optional().nullable(),
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated');
 
@@ -478,6 +479,21 @@ const dateKeySchema = z
   .string()
   .trim()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
+
+export const tripLogEntryCreateSchema = z.object({
+  detail: z.string().trim().min(1, 'Describe what happened').max(4000),
+  receivedFrom: z.string().trim().max(200).optional().nullable(),
+  actionItem: z.string().trim().max(2000).optional().nullable(),
+  comments: z.string().trim().max(2000).optional().nullable(),
+  escalated: z.boolean().optional(),
+  /** ISO time; defaults to now. */
+  loggedAt: z
+    .string()
+    .trim()
+    .refine((value) => !Number.isNaN(Date.parse(value)), 'Invalid log time')
+    .optional()
+    .nullable(),
+});
 
 export const tripDayCreateSchema = z.object({
   afterDayId: z.number().int().positive().optional().nullable(),

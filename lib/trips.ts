@@ -94,6 +94,7 @@ export interface TripSummary {
   sourceQuote: { id: number; reference: string } | null;
   itemCount: number;
   assignmentCount: number;
+  logCount: number;
 }
 
 export interface TripDetail extends TripSummary {
@@ -126,8 +127,11 @@ interface TripRecord {
   sourceQuote: { id: number; reference: string } | null;
   items: TripItineraryItemRecord[];
   days: TripDayRecord[];
-  _count?: { assignments: number };
+  _count?: { assignments: number; logEntries?: number; items?: number };
 }
+
+/** What the list query returns: counts in place of the itinerary. */
+type TripListRecord = Omit<TripRecord, 'items' | 'days'> & { items?: undefined };
 
 interface TripDayRecord {
   id: number;
@@ -182,15 +186,24 @@ const tripInclude = {
   days: {
     orderBy: [{ dayNumber: 'asc' as const }],
   },
-  _count: { select: { assignments: true } },
+  _count: { select: { assignments: true, logEntries: true } },
+};
+
+/** The list needs counts only; a FileMaker-sized history has thousands of stops. */
+const tripListInclude = {
+  customer: tripInclude.customer,
+  createdBy: tripInclude.createdBy,
+  owner: tripInclude.owner,
+  sourceQuote: tripInclude.sourceQuote,
+  _count: { select: { assignments: true, logEntries: true, items: true } },
 };
 
 type TripCollectionClient = {
   findMany: (args: {
     where?: unknown;
-    include?: typeof tripInclude;
+    include?: typeof tripInclude | typeof tripListInclude;
     orderBy?: Array<{ createdAt?: 'asc' | 'desc'; updatedAt?: 'asc' | 'desc' }>;
-  }) => Promise<TripRecord[]>;
+  }) => Promise<Array<TripRecord | TripListRecord>>;
   findUnique: (args: { where: { id: number }; include?: typeof tripInclude }) => Promise<TripRecord | null>;
   create: (args: { data: Record<string, unknown>; include?: typeof tripInclude }) => Promise<TripRecord>;
   update: (args: { where: { id: number }; data: Record<string, unknown>; include?: typeof tripInclude }) => Promise<TripRecord>;
@@ -366,7 +379,7 @@ function parseScheduledAt(value: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function serializeSummary(record: TripRecord): TripSummary {
+function serializeSummary(record: TripRecord | TripListRecord): TripSummary {
   return {
     id: record.id,
     reference: record.reference,
@@ -384,8 +397,9 @@ function serializeSummary(record: TripRecord): TripSummary {
     createdBy: record.createdBy,
     owner: record.owner,
     sourceQuote: record.sourceQuote,
-    itemCount: record.items?.length ?? 0,
+    itemCount: record.items?.length ?? record._count?.items ?? 0,
     assignmentCount: record._count?.assignments ?? 0,
+    logCount: record._count?.logEntries ?? 0,
   };
 }
 
@@ -435,7 +449,7 @@ export async function listTripsForUser(params: {
 }): Promise<TripSummary[]> {
   const records = await tripClient.findMany({
     where: buildAccessFilter(params.userId, params.isAdmin),
-    include: tripInclude,
+    include: tripListInclude,
     orderBy: [{ updatedAt: 'desc' }],
   });
   return records.map(serializeSummary);
