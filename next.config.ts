@@ -8,8 +8,10 @@ const CONTENT_SECURITY_POLICY = [
   "img-src 'self' data: blob: https://maps.gstatic.com https://*.googleapis.com " +
     'https://*.tile.openstreetmap.org https://*.tile.opentopomap.org ' +
     'https://server.arcgisonline.com https://*.basemaps.cartocdn.com ' +
-    'https://*.tile-cyclosm.openstreetmap.fr https://tileserver.memomaps.de',
-  "connect-src 'self' https://*.googleapis.com https://accounts.google.com",
+    'https://*.tile-cyclosm.openstreetmap.fr https://tileserver.memomaps.de ' +
+    // Aircraft photos in the flight tracker.
+    'https://t.plnspttrs.net',
+  "connect-src 'self' https://*.googleapis.com https://accounts.google.com https://api.planespotters.net",
   "frame-src https://accounts.google.com",
   "frame-ancestors 'none'",
   "object-src 'none'",

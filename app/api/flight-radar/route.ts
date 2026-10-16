@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { findAirport } from '@/lib/airports';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
@@ -8,6 +9,28 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const FR24_BASE = 'https://fr24api.flightradar24.com';
+
+/**
+ * FR24 bills 8 credits per flight returned (1 for an empty answer). The
+ * Explorer plan returns at most 20 flights per request; set
+ * FR24_RESPONSE_LIMIT to the plan's figure after an upgrade (Essential: 300).
+ */
+const RESPONSE_LIMIT = Number(process.env.FR24_RESPONSE_LIMIT) || 20;
+
+/** Identical lookups inside this window share one paid call, across all users. */
+const CACHE_TTL_MS = 60_000;
+const CACHE_MAX_ENTRIES = 200;
+type FlightOut = ReturnType<typeof toFlight>;
+const cache = new Map<string, { at: number; flights: FlightOut[] }>();
+
+function remember(key: string, flights: FlightOut[], at: number) {
+  for (const [k, entry] of cache) {
+    if (at - entry.at > CACHE_TTL_MS) cache.delete(k);
+  }
+  const oldest = cache.keys().next().value;
+  if (cache.size >= CACHE_MAX_ENTRIES && oldest !== undefined) cache.delete(oldest);
+  cache.set(key, { at, flights });
+}
 
 type Fr24Position = {
   fr24_id?: string;
@@ -91,6 +114,12 @@ export async function GET(request: NextRequest) {
     // FR24 bounds order: north, south, west, east
     upstreamQuery = `bounds=${encodeURIComponent(`${lamax},${lamin},${lomin},${lomax}`)}`;
   }
+  upstreamQuery += `&limit=${RESPONSE_LIMIT}`;
+
+  const cached = cache.get(upstreamQuery);
+  if (cached && Date.now() - cached.at <= CACHE_TTL_MS) {
+    return NextResponse.json({ flights: cached.flights, limit: RESPONSE_LIMIT, updatedAt: new Date(cached.at).toISOString() });
+  }
 
   let upstream: Response;
   try {
@@ -120,7 +149,15 @@ export async function GET(request: NextRequest) {
   const data = (await upstream.json().catch(() => null)) as { data?: Fr24Position[] } | null;
   const rows = data?.data ?? [];
 
-  const flights = rows.map((r) => ({
+  const flights = rows.map(toFlight);
+  const at = Date.now();
+  remember(upstreamQuery, flights, at);
+
+  return NextResponse.json({ flights, limit: RESPONSE_LIMIT, updatedAt: new Date(at).toISOString() });
+}
+
+function toFlight(r: Fr24Position) {
+  return {
     id: str(r.fr24_id) ?? str(r.hex) ?? Math.random().toString(36).slice(2),
     flight: str(r.flight),
     callsign: str(r.callsign),
@@ -139,7 +176,8 @@ export async function GET(request: NextRequest) {
     destIata: str(r.dest_iata),
     destIcao: str(r.dest_icao),
     eta: str(r.eta),
-  }));
-
-  return NextResponse.json({ flights, updatedAt: new Date().toISOString() });
+    // City names and coordinates for the cards, route line and progress.
+    origin: findAirport(str(r.orig_icao), str(r.orig_iata)),
+    destination: findAirport(str(r.dest_icao), str(r.dest_iata)),
+  };
 }
