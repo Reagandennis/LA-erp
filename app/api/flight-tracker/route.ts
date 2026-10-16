@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -14,7 +15,7 @@ const parseNumber = (value: string | null) => {
 };
 
 export async function GET(request: NextRequest) {
-  const { auth, response: authResponse } = await requireRequestAuth(request);
+  const { auth, response: authResponse } = await requireModuleRequest(request, ...API_ACCESS.flights);
   if (authResponse || !auth) return authResponse;
 
   const { searchParams } = new URL(request.url);

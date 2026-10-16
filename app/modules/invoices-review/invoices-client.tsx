@@ -30,6 +30,8 @@ interface InvoicesClientProps {
   quickBooks: { configured: boolean; connected: boolean };
   wave: { configured: boolean; connected: boolean };
   approvers: ApproverOption[];
+  /** Invoice to open on arrival (`?open=<id>`); ignored if it isn't in the list. */
+  initialOpenId?: number | null;
 }
 
 const STATUS_FILTERS: StatusFilter[] = [
@@ -81,10 +83,28 @@ export default function InvoicesClient({
   quickBooks,
   wave,
   approvers,
+  initialOpenId = null,
 }: InvoicesClientProps) {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(initialInvoices);
   const [customers, setCustomers] = useState<CustomerOption[]>(initialCustomers);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(() =>
+    initialOpenId !== null && initialInvoices.some((i) => i.id === initialOpenId) ? initialOpenId : null,
+  );
+
+  // A new `?open=` link while this page is already mounted (it isn't remounted):
+  // open that invoice's drawer, as a row click would. Adjusted during render.
+  // The drawer loads by id, so the status filter / search never hides it; ids
+  // missing from both our list and the fresh server list are ignored.
+  const [openIdSource, setOpenIdSource] = useState(initialOpenId);
+  if (openIdSource !== initialOpenId) {
+    setOpenIdSource(initialOpenId);
+    if (
+      initialOpenId !== null &&
+      (invoices.some((i) => i.id === initialOpenId) || initialInvoices.some((i) => i.id === initialOpenId))
+    ) {
+      setSelectedInvoiceId(initialOpenId);
+    }
+  }
   const [builderState, setBuilderState] = useState<
     | { open: false }
     | { open: true; mode: 'create'; invoice: null }
@@ -421,6 +441,8 @@ export default function InvoicesClient({
 
       {selectedInvoiceId !== null && (
         <InvoiceDetailDrawer
+          // Remount when a link swaps the open invoice, so no per-invoice form state carries over.
+          key={selectedInvoiceId}
           invoiceId={selectedInvoiceId}
           currentUser={currentUser}
           isAdmin={isAdmin}
@@ -504,8 +526,8 @@ function QuotePicker({
 }) {
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[220] bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
         <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
             <div>

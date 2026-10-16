@@ -3,14 +3,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { createProduct, listProducts } from '@/lib/products';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { productCreateSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quoteProducts);
   if (response || !auth) return response;
 
   const includeArchived = request.nextUrl.searchParams.get('includeArchived') === 'true';
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quoteProducts);
   if (response || !auth) return response;
 
   const rateLimit = await enforceRateLimit({

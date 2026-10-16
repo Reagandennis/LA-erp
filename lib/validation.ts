@@ -742,3 +742,38 @@ export const mapDeviceTagUpdateSchema = z.object({
   icon: z.string().trim().max(32).nullable().optional(),
   label: z.string().trim().max(80).nullable().optional(),
 });
+
+const retentionCountSchema = (label: string, max: number) =>
+  z.number().int(`${label} must be a whole number`).min(0, `${label} can't be negative`).max(max, `${label} is at most ${max}`);
+
+export const backupSettingsUpdateSchema = z
+  .object({
+    enabled: z.boolean(),
+    scheduleTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a 24-hour time like 02:00'),
+    timezone: z.string().trim().min(1).max(64),
+    keepDaily: retentionCountSchema('Daily snapshots', 90),
+    keepWeekly: retentionCountSchema('Weekly snapshots', 104),
+    keepMonthly: retentionCountSchema('Monthly snapshots', 120),
+    includeDatabase: z.boolean(),
+    includeWhatsapp: z.boolean(),
+    includeWhatsappMedia: z.boolean(),
+    includeSignal: z.boolean(),
+    includeMediaCache: z.boolean(),
+    includeConfig: z.boolean(),
+    lockMonthly: z.boolean(),
+    alertEmails: z
+      .string()
+      .trim()
+      .max(500)
+      .refine(
+        (value) => value === '' || value.split(',').every((e) => z.email().safeParse(e.trim()).success),
+        'Alert emails must be addresses separated by commas',
+      ),
+  })
+  .refine((s) => s.keepDaily + s.keepWeekly + s.keepMonthly > 0, 'Keep at least one snapshot');
+
+export const backupConnectionSchema = z.object({
+  /** The key file's contents; omitted to keep the saved one and only change the destination. */
+  serviceAccountJson: z.string().max(20_000).optional(),
+  driveLink: z.string().trim().min(10, 'Paste the Shared Drive or folder link').max(500),
+});

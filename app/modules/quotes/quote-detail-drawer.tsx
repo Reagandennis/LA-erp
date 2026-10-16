@@ -254,11 +254,12 @@ export default function QuoteDetailDrawer({
 
   return (
     <>
+      {/* Above the top bar (z-200), so the drawer's header and close button are never covered. */}
       <div
-        className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm"
+        className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm"
         onClick={() => (actionPending ? null : onClose())}
       />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-2xl">
+      <div className="fixed right-0 top-0 z-[230] flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-2xl">
         {loading && <div className="p-16 text-center text-sm text-gray-500">Loading…</div>}
 
         {!loading && error && !quote && (

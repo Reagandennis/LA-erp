@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 import { computeStats, createDriverLicense, listDriverLicenses } from '@/lib/drivers';
 import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.licences);
   if (response || !auth) return response;
 
   const items = await listDriverLicenses();

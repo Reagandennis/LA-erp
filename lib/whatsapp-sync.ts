@@ -36,6 +36,8 @@ interface SyncProcess {
   restarts: number;
   /** Set when we killed it deliberately, so `close` doesn't restart it. */
   stopping: boolean;
+  /** WhatsApp signed this device out (removed from the phone); restarting can't help. */
+  loggedOut: boolean;
 }
 
 declare global {
@@ -93,7 +95,27 @@ export function startSync(account: string, accountId?: number, restarts = 0): vo
   // at startup (a local read, no network), so chats are named rather than
   // bare numbers. `contacts refresh` can't be run separately: this process
   // holds the store lock for as long as it follows.
-  const args = ['--account', account, 'sync', '--follow', '--refresh-contacts'];
+  //
+  // The rest keeps the connection honest. A socket can die without closing
+  // (the host sleeps, a NAT drops it, the network changes) and then looks
+  // connected while nothing arrives; `--stale-threshold` reconnects once
+  // keepalives have failed that long, which wacli leaves off by default.
+  // `--max-reconnect 0` keeps reconnecting through a long outage instead of
+  // giving up after wacli's default five minutes. `--events` reports
+  // lifecycle events on stderr, which is how a remote logout is recognised.
+  // (Global flags go after `sync` so wacliProcessPattern still matches.)
+  const args = [
+    '--account',
+    account,
+    'sync',
+    '--events',
+    '--follow',
+    '--refresh-contacts',
+    '--stale-threshold',
+    '60s',
+    '--max-reconnect',
+    '0',
+  ];
   // Pre-downloading every attachment in the account's history is opt-in: it
   // pulled 4 GB in the first half hour of one link and keeps growing, while
   // the app fetches attachments on demand (and caches them) when a thread is
@@ -120,6 +142,7 @@ export function startSync(account: string, accountId?: number, restarts = 0): vo
     startedAt: Date.now(),
     restarts,
     stopping: false,
+    loggedOut: false,
     accountId,
   };
   processes().set(account, proc);
@@ -127,8 +150,16 @@ export function startSync(account: string, accountId?: number, restarts = 0): vo
   // wacli keeps progress and errors on stderr; surface only the tail on exit so
   // a chatty sync doesn't flood the server log.
   let stderr = '';
+  let partial = '';
   child.stderr?.on('data', (chunk: Buffer) => {
-    stderr = (stderr + chunk.toString('utf8')).slice(-2000);
+    const text = chunk.toString('utf8');
+    stderr = (stderr + text).slice(-2000);
+    // One NDJSON event per line; a line can straddle two chunks.
+    const lines = (partial + text).split('\n');
+    partial = (lines.pop() ?? '').slice(-4000);
+    for (const line of lines) {
+      if (line.includes('"logged_out"')) proc.loggedOut = true;
+    }
   });
 
   child.on('error', (err) => {
@@ -138,6 +169,12 @@ export function startSync(account: string, accountId?: number, restarts = 0): vo
   child.on('close', (code) => {
     processes().delete(account);
     if (proc.stopping) return;
+    if (proc.loggedOut) {
+      // The status endpoint now reports the account as not linked, and
+      // linking it again starts a fresh sync.
+      console.error(`[whatsapp-sync] ${account} was signed out from the phone; waiting for it to be linked again.`);
+      return;
+    }
 
     const lived = Date.now() - proc.startedAt;
     const nextRestarts = lived > HEALTHY_AFTER_MS ? 0 : restarts + 1;

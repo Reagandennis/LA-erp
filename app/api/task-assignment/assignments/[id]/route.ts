@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { deleteAssignment, ResourceConflictError, updateAssignment } from '@/lib/task-assignment';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ function optionalId(value: unknown): number | null {
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.taskAssignment);
   if (response || !auth) return response;
 
   const { id: raw } = await params;
@@ -54,7 +55,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.taskAssignment);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

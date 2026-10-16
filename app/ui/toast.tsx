@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { type ReactNode, useSyncExternalStore } from 'react';
 
 import {
   CalendarIcon,
@@ -115,7 +115,7 @@ export function Toast({
 }
 
 /**
- * Fixed stack for incoming notification toasts. Sits top-right under the bell,
+ * Fixed stack for incoming notification toasts. Sits top-right under the top bar,
  * clear of the banner stack in the bottom-right so action feedback and incoming
  * alerts never overlap.
  */
@@ -124,9 +124,65 @@ export function ToastStack({ children }: Readonly<{ children: ReactNode }>) {
     <div
       aria-live="polite"
       aria-atomic="false"
-      className="pointer-events-none fixed right-6 top-28 z-[250] flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2"
+      className="pointer-events-none fixed right-6 top-16 z-[250] flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2"
     >
       {children}
     </div>
   );
+}
+
+// --- Toasts raised from outside the bell ------------------------------------
+
+export interface PushedToast {
+  /** Same key replaces the toast (and restarts its timer) instead of stacking. */
+  key: string;
+  source: ToastSource;
+  title: string;
+  message: string;
+  timestamp?: string;
+  href?: string;
+  actionLabel?: string;
+}
+
+/** Long enough to read a message and click through to it. */
+const PUSHED_TOAST_MS = 8000;
+const MAX_PUSHED_TOASTS = 3;
+
+let pushed: PushedToast[] = [];
+const pushedListeners = new Set<() => void>();
+const pushedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function setPushed(next: PushedToast[]) {
+  pushed = next;
+  for (const listener of pushedListeners) listener();
+}
+
+/**
+ * Show a toast in the same stack as the bell's, so alerts from different
+ * sources never overlap on screen. Rendered by NotificationsBell.
+ */
+export function pushToast(toast: PushedToast): void {
+  clearTimeout(pushedTimers.get(toast.key));
+  setPushed([...pushed.filter((t) => t.key !== toast.key), toast].slice(-MAX_PUSHED_TOASTS));
+  pushedTimers.set(
+    toast.key,
+    setTimeout(() => dismissPushedToast(toast.key), PUSHED_TOAST_MS),
+  );
+}
+
+export function dismissPushedToast(key: string): void {
+  clearTimeout(pushedTimers.get(key));
+  pushedTimers.delete(key);
+  if (pushed.some((t) => t.key === key)) setPushed(pushed.filter((t) => t.key !== key));
+}
+
+const NO_TOASTS: PushedToast[] = [];
+
+function subscribePushed(listener: () => void) {
+  pushedListeners.add(listener);
+  return () => pushedListeners.delete(listener);
+}
+
+export function usePushedToasts(): PushedToast[] {
+  return useSyncExternalStore(subscribePushed, () => pushed, () => NO_TOASTS);
 }

@@ -12,7 +12,11 @@ const { resolveMessagingRequest, enforceRateLimit, getUploadLimitMb, readCache, 
     writeCache: vi.fn(),
   }));
 
-vi.mock('../lib/messaging-media-cache', () => ({ readCache, writeCache }));
+vi.mock('../lib/messaging-media-cache', () => ({
+  readCache,
+  writeCache,
+  withDownloadSlot: <T>(task: () => Promise<T>) => task(),
+}));
 
 vi.mock('../lib/messaging-routes', () => ({ resolveMessagingRequest }));
 vi.mock('../lib/rate-limit', () => ({ enforceRateLimit }));

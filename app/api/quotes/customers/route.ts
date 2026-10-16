@@ -3,14 +3,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { createCustomer, listCustomers } from '@/lib/customers';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { customerCreateSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quoteCustomers);
   if (response || !auth) return response;
 
   const customers = await listCustomers();
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quoteCustomers);
   if (response || !auth) return response;
 
   const rateLimit = await enforceRateLimit({

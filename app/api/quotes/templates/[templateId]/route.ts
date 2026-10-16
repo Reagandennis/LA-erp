@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { deleteTemplate, getTemplate, updateTemplate } from '@/lib/templates';
 import { templateUpdateSchema } from '@/lib/validation';
 
@@ -17,7 +18,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ templateId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
   const { templateId: raw } = await params;
   const id = parseId(raw);
@@ -31,7 +32,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ templateId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
   const { templateId: raw } = await params;
   const id = parseId(raw);
@@ -86,7 +87,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ templateId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
   const { templateId: raw } = await params;
   const id = parseId(raw);

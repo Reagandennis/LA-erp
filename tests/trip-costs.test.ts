@@ -12,7 +12,11 @@ const { requireRequestAuth, recordAuditEvent, enforceRateLimit, createTrip, upda
   updateTripItem: vi.fn(),
 }));
 
-vi.mock('../lib/request-auth', () => ({ requireRequestAuth }));
+vi.mock('../lib/request-auth', () => ({
+  requireRequestAuth,
+  // Module access has its own tests (request-auth-module); these cover the route itself.
+  requireModuleRequest: (request: unknown) => requireRequestAuth(request),
+}));
 vi.mock('../lib/audit', () => ({ recordAuditEvent }));
 vi.mock('../lib/rate-limit', () => ({ enforceRateLimit }));
 // The real cost rules, with only the database writes stubbed.

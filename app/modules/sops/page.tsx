@@ -9,7 +9,11 @@ import SopsClient from './sops-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SopsPage() {
+export default async function SopsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
   if (!auth) {
     redirect('/auth/login');
@@ -20,6 +24,10 @@ export default async function SopsPage() {
     redirect('/dashboard');
   }
 
+  // Global search deep-links straight onto a procedure (?open=<id>).
+  const { open } = await searchParams;
+  const openId = Number(Array.isArray(open) ? open[0] : open);
+
   const [items, stats] = await Promise.all([listSops(auth.user.id), getSopStats()]);
 
   return (
@@ -28,6 +36,7 @@ export default async function SopsPage() {
       isAdmin={isAdmin}
       initialItems={items}
       initialStats={stats}
+      initialOpenId={Number.isInteger(openId) && openId > 0 ? openId : null}
     />
   );
 }

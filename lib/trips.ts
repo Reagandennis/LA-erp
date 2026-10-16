@@ -423,7 +423,8 @@ function pad4(n: number): string {
   return String(n).padStart(4, '0');
 }
 
-function buildAccessFilter(userId: number, isAdmin: boolean) {
+/** Who may see a record: admins everything, others only their own. Shared with global search. */
+export function buildAccessFilter(userId: number, isAdmin: boolean) {
   if (isAdmin) return {};
   return { OR: [{ createdById: userId }, { ownerId: userId }] };
 }

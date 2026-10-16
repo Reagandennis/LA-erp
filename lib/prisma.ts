@@ -36,6 +36,8 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     tripTraveler?: unknown;
     exchangeRateSnapshot?: unknown;
     roleModule?: unknown;
+    backupSettings?: unknown;
+    backupRun?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -59,7 +61,9 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.traveler &&
       candidate.tripTraveler &&
       candidate.exchangeRateSnapshot &&
-      candidate.roleModule,
+      candidate.roleModule &&
+      candidate.backupSettings &&
+      candidate.backupRun,
   );
 }
 

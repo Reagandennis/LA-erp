@@ -248,7 +248,7 @@ export default function PhonePage() {
 
       {/* Active Call Overlay */}
       {isCalling && (
-        <div className="fixed inset-0 z-[100] bg-gray-900/90 backdrop-blur-xl flex flex-col items-center justify-center animate-in zoom-in-110 duration-500">
+        <div className="fixed inset-0 z-[240] bg-gray-900/90 backdrop-blur-xl flex flex-col items-center justify-center animate-in zoom-in-110 duration-500">
           <div className="text-center mb-16">
             <div className={`w-32 h-32 rounded-[3rem] flex items-center justify-center text-white font-black text-4xl shadow-2xl mb-8 mx-auto ${activeCallTarget ? getAvatarColor(activeCallTarget) : 'bg-emerald-600'}`}>
               {activeCallTarget?.substring(0, 2).toUpperCase() || '??'}

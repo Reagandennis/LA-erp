@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 type PersonalTodoLookupClient = {
   findFirst: (args: {
@@ -28,7 +29,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ taskId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.tasks);
 
   if (response || !auth) {
     return response;

@@ -58,6 +58,15 @@ export async function register() {
   }
 
   try {
+    const { scheduleBackups } = await import('@/lib/backup/run');
+    // Runs the daily Google Drive backup when it is due (Admin → Settings → Backups),
+    // and catches up one missed while the server was down.
+    scheduleBackups();
+  } catch (error) {
+    console.error('[backup] could not schedule backups:', error);
+  }
+
+  try {
     const { listAccountsForProvider } = await import('@/lib/messaging-accounts');
     const { startTelegramMirror } = await import('@/lib/telegram');
     for (const account of await listAccountsForProvider('telegram')) {

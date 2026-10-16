@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { deleteEvent, updateEvent } from '@/lib/calendar';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ eventId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.calendar);
   if (response || !auth) return response;
 
   const { eventId: raw } = await params;
@@ -62,7 +63,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ eventId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.calendar);
   if (response || !auth) return response;
 
   const { eventId: raw } = await params;

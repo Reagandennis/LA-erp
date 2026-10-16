@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { subscribe, unsubscribe } from '@/lib/chat-bus';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,7 @@ export const revalidate = 0;
 
 // Server-Sent Events stream: pushes live `message` events to the current user.
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.communication);
   if (response || !auth) return response;
 
   const userId = auth.user.id;

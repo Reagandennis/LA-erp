@@ -8,7 +8,11 @@ import TelegramConsole from './telegram-console';
 
 export const dynamic = 'force-dynamic';
 
-export default async function TelegramPage() {
+export default async function TelegramPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
   if (!auth) redirect('/auth/login');
 
@@ -17,5 +21,7 @@ export default async function TelegramPage() {
     redirect('/dashboard');
   }
 
-  return <TelegramConsole />;
+  // Message alerts link here with `?chat=`; the console only ever opens the user's own chats.
+  const { chat } = await searchParams;
+  return <TelegramConsole initialChatId={(Array.isArray(chat) ? chat[0] : chat) ?? null} />;
 }

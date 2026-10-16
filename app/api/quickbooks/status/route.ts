@@ -3,14 +3,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { disconnectQuickBooks, getQuickBooksStatus } from '@/lib/quickbooks';
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest, requireRequestAuth } from '@/lib/request-auth';
 import { userHasModule, userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.accounting);
   if (response || !auth) return response;
 
   return NextResponse.json(await getQuickBooksStatus());

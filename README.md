@@ -26,6 +26,7 @@ Built on **Next.js 16** (App Router), **React 19**, **TypeScript**, and
 - [Scripts](#scripts)
 - [Testing & verification](#testing--verification)
 - [Deployment](#deployment)
+- [Backups](#backups)
 - [Conventions](#conventions)
 
 ---
@@ -524,6 +525,98 @@ Configure any optional integration variables for the modules you intend to use.
   rejected before reaching the app.
 - Never commit real secrets. If a credential was ever committed, rotate it —
   removing it from history does not protect clones taken beforehand.
+
+---
+
+## Backups
+
+Encrypted daily snapshots of the whole platform go to a **Google Shared Drive**,
+configured in **Admin → Settings → Backups**. Each run is a dated folder holding:
+
+| File | What it is | Restores |
+|---|---|---|
+| `database.dump.enc` | `pg_dump` custom format | every record, user, role, uploaded file and photo, chat mirror, Telegram login |
+| `whatsapp-stores.tar.gz.enc` | consistent `sqlite3 .backup` copies of every wacli store | linked WhatsApp numbers and their history |
+| `whatsapp-files.tar.gz.enc` | the rest of the wacli volume (config, keys) | — with the stores above |
+| `whatsapp-media.tar.enc` | media wacli downloaded itself (optional, large) | old WhatsApp attachments |
+| `signal.tar.gz.enc` | the signal-cli data directory | linked Signal devices |
+| `media-cache.tar.enc` | the chat media cache | photos and videos WhatsApp no longer serves |
+| `config.tar.gz.enc` | `.env` and `/etc/systemd/system/la-erp*` | secrets and service files |
+| `manifest.json` | readable: files, sizes, checksums, app commit, last migration, key fingerprint | — |
+
+**Versions.** Retention is grandfather-father-son: the newest snapshot of each of
+the last 14 days, the first of each of the last 8 weeks and the first of each of
+the last 12 months (all adjustable). Any snapshot can be pinned to keep it
+forever. Expired snapshots are moved to the Drive trash, recoverable there for
+30 days. Each month's first snapshot is locked read-only in Drive.
+
+**Integrity.** Every file is encrypted (AES-256-GCM) before it leaves the server,
+and its MD5 is compared against the checksum Drive computes once it's stored.
+After each run — and whenever **Verify** is pressed — every file is re-checked in
+Drive and the smallest one is downloaded and decrypted, proving the key still
+opens the snapshot.
+
+### Setting up Google Drive (once)
+
+1. In [Google Cloud Console](https://console.cloud.google.com), pick or create a
+   project, enable the **Google Drive API**, create a **service account** (no
+   roles needed) and download a **JSON key** for it.
+2. In Google Drive, create a Shared Drive for backups (or use an existing one)
+   and add the service account's `client_email` as a **Content manager**.
+   Service accounts have no storage of their own, which is why it must be a
+   Shared Drive; its contents count against the organisation's pooled storage.
+3. In **Admin → Settings → Backups**, upload the key and paste the Shared Drive's
+   link. The page tests that it can write there before saving.
+4. **Show recovery key** and store it in the company password manager. Without
+   it no backup can be restored, and after losing the server the copy in the
+   database is gone too.
+5. Turn on the daily schedule and set an alert email.
+
+Server prerequisites: `pg_dump` matching the database's major version (or set
+`BACKUP_PG_CONTAINER=la-erp-postgres` to run it inside the bundled container;
+it is used automatically when the host has no `pg_dump`), and the wacli image
+rebuilt with `sqlite3` (`deploy.sh` does this). Set `MESSAGING_MEDIA_CACHE_DIR`
+to a permanent path — the default under the system temp directory can be wiped
+on reboot. `SIGNAL_CLI_DATA_DIR` overrides the Signal data path
+(`~/.local/share/signal-cli`).
+
+### Restoring
+
+Restores are done on the server by an administrator; nothing in the app can
+overwrite live data.
+
+```bash
+# 1. Download the snapshot folder from Drive, then decrypt it (Node only, no install):
+node scripts/backup-decrypt.mjs --key-file key.txt "2026-10-16 02.00 (scheduled)" restored/
+
+# 2. Stop the app.
+sudo systemctl stop la-erp
+
+# 3. Database (a new or existing one; --clean replaces what is there):
+pg_restore --clean --if-exists --no-owner --no-acl -d "$DATABASE_URL" restored/database.dump
+
+# 4. WhatsApp: restore the files, then the consistent stores over them. Stale
+#    -wal/-shm journals are removed first: SQLite would replay them into the
+#    restored databases. (The volume is named <compose project>_la-erp-wacli-data;
+#    check with `docker volume ls`.)
+docker compose stop wacli
+docker run --rm -v la-erp_la-erp-wacli-data:/data -v "$PWD/restored":/r alpine \
+  sh -c 'find /data \( -name "*.db-wal" -o -name "*.db-shm" \) -delete \
+         && tar -C /data -xf /r/whatsapp-files.tar && tar -C /data -xf /r/whatsapp-stores.tar \
+         && { [ ! -f /r/whatsapp-media.tar ] || tar -C /data -xf /r/whatsapp-media.tar; } && chown -R 10001 /data'
+docker compose start wacli
+
+# 5. Signal, media cache and config:
+mkdir -p ~/.local/share/signal-cli && tar -C ~/.local/share/signal-cli -xf restored/signal.tar
+mkdir -p "$MESSAGING_MEDIA_CACHE_DIR" && tar -C "$MESSAGING_MEDIA_CACHE_DIR" -xf restored/media-cache.tar
+sudo tar -C / -xf restored/config.tar   # .env and the systemd units, at their original paths
+
+# 6. Start the app (it runs any newer migrations on start).
+sudo systemctl start la-erp
+```
+
+Test a restore on a scratch machine now and then — a backup you have never
+restored is a guess.
 
 ---
 

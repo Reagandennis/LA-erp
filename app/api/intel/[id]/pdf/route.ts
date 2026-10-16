@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAssessment } from '@/lib/intel';
 import { buildIntelPdf } from '@/lib/intel-pdf';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -18,7 +19,7 @@ function safeFilename(title: string): string {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.intel);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

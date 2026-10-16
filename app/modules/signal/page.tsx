@@ -8,7 +8,11 @@ import MessagingConsole from '../_components/messaging-console';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SignalPage() {
+export default async function SignalPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
   if (!auth) redirect('/auth/login');
 
@@ -17,8 +21,12 @@ export default async function SignalPage() {
     redirect('/dashboard');
   }
 
+  // Message alerts link here with `?chat=`; the console only ever opens the user's own chats.
+  const { chat } = await searchParams;
+
   return (
     <MessagingConsole
+      initialChatId={(Array.isArray(chat) ? chat[0] : chat) ?? null}
       config={{
         service: 'signal',
         title: 'Signal',

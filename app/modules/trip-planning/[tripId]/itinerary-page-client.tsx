@@ -901,7 +901,7 @@ export default function ItineraryPageClient({
                 <p className="mt-4 text-xs text-gray-500">
                   Built from quote{' '}
                   <Link
-                    href={`/modules/quotes/${trip.sourceQuote.id}`}
+                    href={`/modules/quotes/${trip.sourceQuote.id}/edit`}
                     className="font-medium text-primary hover:underline"
                   >
                     {trip.sourceQuote.reference}

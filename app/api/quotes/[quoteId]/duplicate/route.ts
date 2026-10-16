@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { duplicateQuote } from '@/lib/quotes';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ quoteId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const { quoteId: raw } = await params;

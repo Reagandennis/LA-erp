@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { findAccount, getAccount } from '@/lib/messaging-accounts';
-import { wacliToIngest } from '@/lib/messaging-ingest';
+import { cacheWhatsAppMedia, wacliToIngest } from '@/lib/messaging-ingest';
 import { ingestMessages } from '@/lib/messaging-repo';
 import { webhookSecret } from '@/lib/messaging-webhook-secret';
 
@@ -50,5 +50,7 @@ export async function POST(request: NextRequest) {
     .filter((m): m is NonNullable<typeof m> => m !== null);
 
   const fresh = await ingestMessages(account.id, account.userId, batch);
+  // Fetch new photos and voice notes now, while WhatsApp still serves them.
+  cacheWhatsAppMedia(account, fresh);
   return NextResponse.json({ ok: true, ingested: fresh.length });
 }

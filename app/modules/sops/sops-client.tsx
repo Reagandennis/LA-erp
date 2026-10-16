@@ -1,7 +1,7 @@
 'use client';
 
 import { APP_LOCALE } from '@/lib/locale';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useEffectEvent, useMemo, useState } from 'react';
 
 import type {
   SopDetail,
@@ -37,6 +37,8 @@ type Props = {
   isAdmin: boolean;
   initialItems: SopSummary[];
   initialStats: SopStats;
+  /** Global-search deep link (?open=<id>): open this SOP's drawer on arrival. */
+  initialOpenId?: number | null;
 };
 
 type SopForm = {
@@ -67,7 +69,7 @@ const EMPTY_FORM: SopForm = {
   revisionSummary: '',
 };
 
-export default function SopsClient({ currentUser, isAdmin, initialItems, initialStats }: Props) {
+export default function SopsClient({ currentUser, isAdmin, initialItems, initialStats, initialOpenId = null }: Props) {
   const [items, setItems] = useState<SopSummary[]>(initialItems);
   const [stats, setStats] = useState<SopStats>(initialStats);
   const [search, setSearch] = useState('');
@@ -97,10 +99,7 @@ export default function SopsClient({ currentUser, isAdmin, initialItems, initial
     }
   };
 
-  const openDetail = async (id: number) => {
-    setSelectedId(id);
-    setDetail(null);
-    setDetailLoading(true);
+  const loadDetail = async (id: number) => {
     try {
       const res = await fetch(`/api/sops/${id}`, { credentials: 'include' });
       if (res.ok) {
@@ -111,6 +110,34 @@ export default function SopsClient({ currentUser, isAdmin, initialItems, initial
       setDetailLoading(false);
     }
   };
+
+  const openDetail = async (id: number) => {
+    setSelectedId(id);
+    setDetail(null);
+    setDetailLoading(true);
+    await loadDetail(id);
+  };
+
+  // Deep link (?open=<id>): open the drawer the same way a click does. Tracked
+  // per prop value (adjusted during render) so a new ?open= while already on
+  // the page opens that SOP too. Ids not in the list are ignored.
+  const [linkedOpenId, setLinkedOpenId] = useState<number | null>(null);
+  const [linkedLoad, setLinkedLoad] = useState<{ id: number } | null>(null);
+  if (initialOpenId !== linkedOpenId) {
+    setLinkedOpenId(initialOpenId);
+    if (initialOpenId !== null && items.some((s) => s.id === initialOpenId)) {
+      setSelectedId(initialOpenId);
+      setDetail(null);
+      setDetailLoading(true);
+      setLinkedLoad({ id: initialOpenId });
+    }
+  }
+  const loadLinkedDetail = useEffectEvent((id: number) => {
+    void loadDetail(id);
+  });
+  useEffect(() => {
+    if (linkedLoad) loadLinkedDetail(linkedLoad.id);
+  }, [linkedLoad]);
 
   const closeDetail = () => {
     setSelectedId(null);
@@ -390,8 +417,8 @@ export default function SopsClient({ currentUser, isAdmin, initialItems, initial
       {/* Detail drawer */}
       {selectedId !== null && (
         <>
-          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40" onClick={closeDetail} />
-          <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={closeDetail} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-semibold text-gray-900">Procedure</h2>
               <button onClick={closeDetail} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
@@ -538,7 +565,7 @@ export default function SopsClient({ currentUser, isAdmin, initialItems, initial
 
       {/* Create / Edit modal */}
       {formOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[240] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
               <h2 className="text-lg font-semibold text-gray-900">{editing ? 'Edit SOP' : 'New SOP'}</h2>

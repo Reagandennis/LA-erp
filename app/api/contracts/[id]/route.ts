@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { deleteContract, updateContract } from '@/lib/contracts';
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -12,7 +13,7 @@ function parseId(value: string) {
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.contracts);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

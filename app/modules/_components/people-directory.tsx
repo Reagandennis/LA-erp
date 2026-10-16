@@ -486,8 +486,8 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
       {/* Detail drawer */}
       {selected && (
         <>
-          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40" onClick={() => setSelectedId(null)} />
-          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={() => setSelectedId(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-semibold text-gray-900">Personnel details</h2>
               <button onClick={() => setSelectedId(null)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
@@ -642,7 +642,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
 
       {/* Create / Edit modal */}
       {formOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[240] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
               <h2 className="text-lg font-semibold text-gray-900">{editing ? 'Edit person' : view.addLabel}</h2>

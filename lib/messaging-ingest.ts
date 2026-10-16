@@ -6,8 +6,17 @@ import {
   type LinkedAccount,
   listAccountsForProvider,
 } from './messaging-accounts';
-import { ingestMessages, latestMessageAt, upsertChats, type IngestMessage } from './messaging-repo';
-import type { MediaKind, StoredMedia } from './messaging-store';
+import { MAX_CACHED_BYTES, prefetchMedia } from './messaging-media-cache';
+import {
+  applyProviderUnread,
+  existingMessageIds,
+  ingestMessages,
+  messageCountsByChat,
+  upsertChats,
+  type IngestMessage,
+} from './messaging-repo';
+import type { MediaKind, StoredMedia, StoredMessage } from './messaging-store';
+import { getMedia, markChatRead } from './wacli';
 import { runWacli } from './wacli-runtime';
 
 /**
@@ -228,6 +237,8 @@ interface WacliRawMessage {
   Text?: string;
   MediaType?: string;
   MediaCaption?: string;
+  MimeType?: string;
+  Filename?: string;
   Media?: {
     Type?: string;
     Caption?: string;
@@ -264,8 +275,8 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
     ? {
         kind: mediaKindFromWacli(mediaType),
         ref: messageId,
-        mimeType: raw.Media?.MimeType || null,
-        fileName: raw.Media?.Filename || null,
+        mimeType: raw.Media?.MimeType || raw.MimeType || null,
+        fileName: raw.Media?.Filename || raw.Filename || null,
         sizeBytes: typeof raw.Media?.FileLength === 'number' ? raw.Media.FileLength : null,
       }
     : null;
@@ -280,9 +291,12 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
   const local = chatId.split('@')[0] || chatId;
   const numberLabel = !isGroup && /^\d+$/.test(local) ? `+${local}` : local;
 
+  const realName = chatName || chatLabel || senderLabel;
+
   return {
     chatId,
-    chatName: chatName || chatLabel || senderLabel || numberLabel,
+    chatName: realName || numberLabel,
+    chatNameIsFallback: !realName,
     chatKind: isGroup ? 'group' : 'dm',
     messageId,
     senderName: raw.FromMe ? 'You' : raw.SenderName || raw.SenderJID || 'Unknown',
@@ -293,42 +307,156 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
   };
 }
 
+/** Run a read-only wacli query for one account and unwrap its JSON envelope. */
+async function wacliQuery<T>(account: LinkedAccount, args: string[], timeoutMs: number): Promise<T | null> {
+  const raw = await wacli(['--json', '--account', account.handle, '--read-only', ...args], timeoutMs);
+  const parsed = JSON.parse(raw) as { success?: boolean; data?: T; error?: string | null };
+  if (parsed.success === false) throw new Error(parsed.error || `wacli ${args.slice(0, 2).join(' ')} failed`);
+  return parsed.data ?? null;
+}
+
 /**
- * Catch-up pass for WhatsApp.
+ * Catch-up pass for WhatsApp: make Postgres hold every message wacli stored.
  *
- * Live messages arrive by webhook from `wacli sync --follow --webhook`; this
- * closes the gap for anything that landed while the app was down, using the
- * newest mirrored message as the cursor.
+ * The webhook only covers live traffic, and only on a best-effort basis —
+ * wacli neither retries nor queues a POST that fails. History the phone syncs
+ * after linking, and anything that arrived while the app was down or
+ * restarting, lands in wacli's store without ever reaching the webhook. This
+ * pass finds those messages.
+ *
+ * It reconciles by message id, chat by chat, rather than by time. The old
+ * cursor ("everything after the newest mirrored message") skipped any message
+ * stored after a newer one had been mirrored — which is exactly how history
+ * sync arrives — and lost it for good.
  */
 const WHATSAPP_PAGE = 500;
-/** Upper bound per pass; a freshly linked account with years of history takes a few passes. */
-const WHATSAPP_MAX_PAGES = 40;
+/** Per chat, per pass: 500k messages, far beyond what a phone hands a linked device. */
+const WHATSAPP_MAX_PAGES = 1000;
+
+interface WacliCoverage {
+  chat_jid?: string;
+  kind?: string;
+  message_count?: number;
+}
+
+declare global {
+  /** accountId → chatId → wacli message ids that are deliberately not mirrored. */
+  var whatsappUnmirroredGlobal: Map<number, Map<string, Set<string>>> | undefined;
+}
+
+/**
+ * Rows wacli stores that are not messages anyone reads (protocol and system
+ * entries, deleted-for-me). Remembering them is what lets a chat whose counts
+ * already balance be skipped without listing it. Lost on restart, which only
+ * costs one extra walk of each such chat.
+ */
+function unmirrored(accountId: number): Map<string, Set<string>> {
+  globalThis.whatsappUnmirroredGlobal ??= new Map();
+  let chats = globalThis.whatsappUnmirroredGlobal.get(accountId);
+  if (!chats) {
+    chats = new Map();
+    globalThis.whatsappUnmirroredGlobal.set(accountId, chats);
+  }
+  return chats;
+}
 
 async function backfillWhatsApp(account: LinkedAccount): Promise<void> {
   // Chats first: they carry wacli's names and last-activity times, so the
   // list is correctly named and ordered even before its messages arrive.
   await refreshWhatsAppChats(account);
 
-  // Page forward from the newest mirrored message until wacli runs dry. A
-  // single page per tick would take an hour to catch up a new link.
-  for (let page = 0; page < WHATSAPP_MAX_PAGES; page++) {
-    const since = await latestMessageAt(account.id);
-    const args = ['--json', '--account', account.handle, 'messages', 'list', '--limit', String(WHATSAPP_PAGE), '--asc'];
-    if (since) args.push('--after', since.toISOString());
+  // One cheap count per chat on each side; only chats whose counts disagree
+  // are listed at all.
+  const coverage = await wacliQuery<{ coverage?: WacliCoverage[] }>(
+    account,
+    ['history', 'coverage', '--limit', '100000'],
+    60_000,
+  );
+  const mirrored = await messageCountsByChat(account.id);
+  const skipped = unmirrored(account.id);
 
-    const raw = await wacli(args, 120_000);
-    const parsed = JSON.parse(raw) as { success?: boolean; data?: { messages?: WacliRawMessage[] } };
-    const messages = parsed?.data?.messages ?? [];
+  for (const chat of coverage?.coverage ?? []) {
+    const chatId = chat.chat_jid;
+    if (!chatId || (chat.kind !== 'dm' && chat.kind !== 'group')) continue;
+    const ignored = skipped.get(chatId) ?? new Set<string>();
+    const missing = (chat.message_count ?? 0) - (mirrored.get(chatId) ?? 0) - ignored.size;
+    if (missing <= 0) continue;
 
-    const batch = messages
-      .map((m) => wacliToIngest(m))
-      .filter((m): m is IngestMessage => m !== null);
-    await ingestMessages(account.id, account.userId, batch);
+    await reconcileWhatsAppChat(account, chatId, missing, ignored);
+    skipped.set(chatId, ignored);
+  }
+}
+
+/**
+ * Walk one chat newest-first until `missing` rows Postgres doesn't have have
+ * turned up. A dropped webhook leaves its gap at the recent end, so that is
+ * usually a single page; history synced from the phone is walked back as far
+ * as it goes.
+ */
+async function reconcileWhatsAppChat(
+  account: LinkedAccount,
+  chatId: string,
+  missing: number,
+  ignored: Set<string>,
+): Promise<void> {
+  const seen = new Set<string>();
+  let found = 0;
+  let before: string | undefined;
+
+  for (let page = 0; page < WHATSAPP_MAX_PAGES && found < missing; page++) {
+    const args = ['messages', 'list', '--chat', chatId, '--limit', String(WHATSAPP_PAGE)];
+    if (before) args.push('--before', before);
+    const messages = (await wacliQuery<{ messages?: WacliRawMessage[] }>(account, args, 120_000))?.messages ?? [];
+
+    const unseen = messages.filter((m) => m.MsgID && !seen.has(m.MsgID));
+    if (unseen.length === 0) break;
+    for (const m of unseen) seen.add(m.MsgID!);
+
+    const known = await existingMessageIds(account.id, chatId, unseen.map((m) => m.MsgID!));
+    const batch: IngestMessage[] = [];
+    for (const m of unseen) {
+      if (known.has(m.MsgID!) || ignored.has(m.MsgID!)) continue;
+      found++;
+      const item = wacliToIngest(m);
+      if (item) batch.push(item);
+      else ignored.add(m.MsgID!);
+    }
+    const fresh = await ingestMessages(account.id, account.userId, batch, { history: true });
+    cacheWhatsAppMedia(account, fresh);
 
     if (messages.length < WHATSAPP_PAGE) break;
-    // `--after` is exclusive, so a page must advance the cursor to be useful.
-    const newest = messages[messages.length - 1]?.Timestamp;
-    if (!newest || (since && new Date(newest) <= since)) break;
+    // `--before` is exclusive and only to the second, so step back to just
+    // after the oldest second on this page: messages sharing that second with
+    // the page boundary come round again (and are skipped as seen) instead of
+    // being lost.
+    const oldest = Date.parse(messages[messages.length - 1]?.Timestamp ?? '');
+    if (!Number.isFinite(oldest)) break;
+    before = new Date(oldest + 1000).toISOString();
+  }
+}
+
+/** Media newer than this is downloaded as it arrives, while WhatsApp still serves it. */
+const MEDIA_PREFETCH_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+/** Worth fetching even when the size isn't known: photos, stickers and voice notes are small. */
+const SMALL_MEDIA = new Set<MediaKind>(['image', 'sticker', 'audio']);
+
+/**
+ * Cache the attachments of newly mirrored messages in the background.
+ *
+ * WhatsApp's servers stop serving an attachment some weeks after it was sent,
+ * and this device can't ask the phone to re-upload it while sync holds the
+ * session, so a photo nobody opened in time would otherwise be gone. Only
+ * recent media is fetched; old history is left to on-demand downloads.
+ */
+export function cacheWhatsAppMedia(account: { id: number; handle: string }, messages: StoredMessage[]): void {
+  const cutoff = Date.now() - MEDIA_PREFETCH_WINDOW_MS;
+  for (const message of messages) {
+    const media = message.media;
+    if (!media?.ref || Date.parse(message.timestamp) < cutoff) continue;
+    if (media.sizeBytes ? media.sizeBytes > MAX_CACHED_BYTES : !SMALL_MEDIA.has(media.kind)) continue;
+    prefetchMedia(account.id, message.chatId, media.ref, () =>
+      getMedia(account.handle, message.chatId, media.ref),
+    );
   }
 }
 
@@ -337,18 +465,46 @@ interface WacliRawChat {
   name?: string;
   kind?: string;
   last_message_ts?: string;
+  /** True for counted unread messages and for a chat marked unread by hand. */
+  unread?: boolean;
+  unread_count?: number;
+}
+
+declare global {
+  /** "accountId:chatId" → when the chat was read in this app. */
+  var whatsappReadInAppGlobal: Map<string, number> | undefined;
 }
 
 /**
- * Mirror wacli's chat list: names, kind and last activity. wacli reports an
- * unsaved number's name as its bare JID; show the number instead.
+ * How long a read in this app outranks the phone's count. Marking the chat
+ * read on the phone is a delegated call that lands a moment later; a pass in
+ * between would otherwise see the old count and bring the badge back.
+ */
+const READ_IN_APP_GRACE_MS = 2 * 60 * 1000;
+
+function readInApp(): Map<string, number> {
+  globalThis.whatsappReadInAppGlobal ??= new Map();
+  return globalThis.whatsappReadInAppGlobal;
+}
+
+/**
+ * A chat was read in the app: clear it on the phone too, and keep the
+ * phone's (briefly stale) count from re-marking it unread here meanwhile.
+ */
+export function syncReadToPhone(account: { id: number; handle: string }, chatId: string): void {
+  readInApp().set(`${account.id}:${chatId}`, Date.now());
+  void markChatRead(account.handle, chatId);
+}
+
+/**
+ * Mirror wacli's chat list: names, kind, last activity and unread state.
+ * wacli reports an unsaved number's name as its bare JID; show the number
+ * instead. Archived chats are included: their messages are mirrored, so their
+ * names and read state should be too.
  */
 async function refreshWhatsAppChats(account: LinkedAccount): Promise<void> {
-  const chatsRaw = await wacli(
-    ['--json', '--account', account.handle, 'chats', 'list', '--limit', '2000', '--no-archived'],
-    60_000,
-  );
-  const chats = (JSON.parse(chatsRaw) as { data?: WacliRawChat[] }).data ?? [];
+  const observedAt = new Date();
+  const chats = (await wacliQuery<WacliRawChat[]>(account, ['chats', 'list', '--limit', '2000'], 60_000)) ?? [];
   await upsertChats(
     account.id,
     chats
@@ -363,6 +519,21 @@ async function refreshWhatsAppChats(account: LinkedAccount): Promise<void> {
         };
       }),
   );
+
+  // wacli keeps the phone's unread state: live arrivals add to it, and a read
+  // on the phone clears it. A chat marked unread by hand has no count, so it
+  // shows as one.
+  const unread = new Map<string, number>();
+  for (const c of chats) {
+    if (!c.jid || (c.kind !== 'dm' && c.kind !== 'group')) continue;
+    unread.set(c.jid, Math.max(c.unread_count ?? 0, c.unread ? 1 : 0));
+  }
+  const recent = new Set<string>();
+  for (const [key, at] of readInApp()) {
+    if (Date.now() - at > READ_IN_APP_GRACE_MS) readInApp().delete(key);
+    else if (key.startsWith(`${account.id}:`)) recent.add(key.slice(String(account.id).length + 1));
+  }
+  await applyProviderUnread(account.id, account.userId, unread, observedAt, { skip: recent });
 }
 
 /** A chat's display name, falling back to the phone number rather than a JID. */
@@ -380,8 +551,13 @@ function whatsappDisplayName(jid: string, name: string | undefined): string {
  * never more than one drain at a time per account.
  */
 const SIGNAL_POLL_MS = 10_000;
-/** WhatsApp only needs a periodic catch-up; the webhook carries live traffic. */
-const WHATSAPP_BACKFILL_MS = 5 * 60 * 1000;
+/**
+ * The webhook carries live traffic; this catch-up is the safety net for what
+ * it drops. A pass whose counts balance costs two wacli reads and two
+ * queries, so it can run often enough that a missed message shows up within
+ * a minute rather than five.
+ */
+const WHATSAPP_BACKFILL_MS = 60 * 1000;
 
 /**
  * Extra runs shortly after a loop is created. A WhatsApp account linked a

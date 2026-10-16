@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { tripForViewer } from '@/lib/trip-costs';
 import { deleteTrip, getTripForUser, updateTrip } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
@@ -20,7 +21,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ tripId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.trips);
   if (response || !auth) return response;
 
   const { tripId: raw } = await params;
@@ -37,7 +38,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ tripId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.trips);
   if (response || !auth) return response;
 
   const { tripId: raw } = await params;
@@ -109,7 +110,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ tripId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.trips);
   if (response || !auth) return response;
 
   const { tripId: raw } = await params;

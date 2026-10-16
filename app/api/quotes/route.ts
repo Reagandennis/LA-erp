@@ -4,7 +4,8 @@ import { recordAuditEvent } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { createQuote, listQuotesForUser } from '@/lib/quotes';
 import { userHasRole } from '@/lib/user';
 import { quoteCreateSchema } from '@/lib/validation';
@@ -13,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const rateLimit = await enforceRateLimit({

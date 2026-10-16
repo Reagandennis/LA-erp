@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import {
   deleteQuote,
   getQuoteForUser,
@@ -23,7 +24,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ quoteId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const { quoteId: raw } = await params;
@@ -46,7 +47,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ quoteId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const { quoteId: raw } = await params;
@@ -107,7 +108,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ quoteId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const { quoteId: raw } = await params;

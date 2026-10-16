@@ -4,6 +4,9 @@ import { APP_LOCALE } from '@/lib/locale';
 import { startVisibleInterval } from '@/lib/visible-interval';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
+import { setViewingChat } from '@/app/ui/messaging-alerts-store';
+
+import AlertsMenu from './alerts-menu';
 import MessageMediaView, { type MessageMedia } from './message-media';
 import MessagingLinkPanel from './messaging-link-panel';
 
@@ -42,6 +45,8 @@ export interface MessagingConsoleProps {
   signIn?: (props: { onSignedIn: () => void }) => React.ReactNode;
   /** Account to open first (from `?account=`); the first linked one otherwise. */
   initialAccountId?: number | null;
+  /** Chat to open first (from `?chat=`, which message alerts link to). */
+  initialChatId?: string | null;
 }
 
 interface AccountSummary {
@@ -117,7 +122,7 @@ function GroupIcon() {
   );
 }
 
-export default function MessagingConsole({ config, signIn, initialAccountId }: MessagingConsoleProps) {
+export default function MessagingConsole({ config, signIn, initialAccountId, initialChatId }: MessagingConsoleProps) {
   const base = `/api/${config.service}`;
   /** The account picked in the switcher; null means the server's default (the first linked). */
   const [accountId, setAccountId] = useState<number | null>(initialAccountId ?? null);
@@ -128,7 +133,7 @@ export default function MessagingConsole({ config, signIn, initialAccountId }: M
   const [status, setStatus] = useState<Status | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatsError, setChatsError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialChatId ?? null);
   const [thread, setThread] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -242,7 +247,10 @@ export default function MessagingConsole({ config, signIn, initialAccountId }: M
     async (id: string) => {
       const requested = accountId;
       try {
-        const r = await fetch(scoped(`${base}/thread?id=${encodeURIComponent(id)}&limit=200`), {
+        // A background tab only refreshes: the message stays unread (here and
+        // on the phone) until someone actually looks at it.
+        const hidden = document.visibilityState === 'hidden';
+        const r = await fetch(scoped(`${base}/thread?id=${encodeURIComponent(id)}&limit=200${hidden ? '&read=0' : ''}`), {
           credentials: 'include',
         });
         const d = (await r.json().catch(() => null)) as { messages?: Message[] } | null;
@@ -283,6 +291,22 @@ export default function MessagingConsole({ config, signIn, initialAccountId }: M
    */
   useEffect(() => {
     const source = new EventSource('/api/messaging/stream', { withCredentials: true });
+    // `ready` opens every connection, including the browser's automatic
+    // reconnects. Whatever was pushed while the stream was down (laptop
+    // asleep, network change, server restart) is gone, so resync from the
+    // mirror rather than wait for the next slow tick. The first one coincides
+    // with the initial load and is skipped.
+    let connectedBefore = false;
+    source.addEventListener('ready', () => {
+      if (!connectedBefore) {
+        connectedBefore = true;
+        return;
+      }
+      const live = liveRef.current;
+      void live.loadStatus();
+      void live.loadChats();
+      if (selectedRef.current) void live.loadThread(selectedRef.current);
+    });
     source.addEventListener('messaging', (event) => {
       let payload: { chatIds?: string[]; accountId?: number };
       try {
@@ -307,6 +331,37 @@ export default function MessagingConsole({ config, signIn, initialAccountId }: M
   useEffect(() => {
     selectedRef.current = effectiveSelected;
   }, [effectiveSelected]);
+
+  // Tell the app-wide alerts which chat is on screen, so a message arriving
+  // in it doesn't also pop a toast.
+  useEffect(() => {
+    setViewingChat(shownAccountId && effectiveSelected ? { accountId: shownAccountId, chatId: effectiveSelected } : null);
+  }, [shownAccountId, effectiveSelected]);
+  useEffect(() => () => setViewingChat(null), []);
+
+  // Coming back to the tab is when the open chat actually gets read.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && selectedRef.current) {
+        void liveRef.current.loadThread(selectedRef.current);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
+  // Following an alert's link while already on this page: open that chat.
+  const [linkedChat, setLinkedChat] = useState(initialChatId ?? null);
+  if (initialChatId && initialChatId !== linkedChat) {
+    setLinkedChat(initialChatId);
+    setSelectedId(initialChatId);
+  }
+  useEffect(() => {
+    if (initialChatId && initialAccountId && initialAccountId !== accountRef.current) {
+      chooseAccount(initialAccountId);
+      setSelectedId(initialChatId);
+    }
+  }, [initialAccountId, initialChatId, chooseAccount]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -458,10 +513,13 @@ export default function MessagingConsole({ config, signIn, initialAccountId }: M
             {status?.counts ? ` · ${status.counts.chats} chats · ${status.counts.messages} messages` : ''}
           </p>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium">
-          <span className={`h-2.5 w-2.5 rounded-full ${statusPill.dot}`} />
-          <span className={statusPill.text}>{statusPill.label}</span>
-        </span>
+        <div className="flex items-center gap-2">
+          <AlertsMenu />
+          <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium">
+            <span className={`h-2.5 w-2.5 rounded-full ${statusPill.dot}`} />
+            <span className={statusPill.text}>{statusPill.label}</span>
+          </span>
+        </div>
       </header>
 
       {config.multiAccount && accounts.length > 0 && (

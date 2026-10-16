@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getContactPhoto, setContactPhoto } from '@/lib/contacts';
 import { fileResponse } from '@/lib/file-response';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ function parseId(value: string) {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.contacts);
   if (response || !auth) return response;
 
   const { id: raw } = await params;
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.contacts);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

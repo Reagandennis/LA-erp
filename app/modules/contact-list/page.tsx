@@ -9,7 +9,11 @@ import ContactsClient from './contacts-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ContactListPage() {
+export default async function ContactListPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
   if (!auth) {
     redirect('/auth/login');
@@ -20,7 +24,17 @@ export default async function ContactListPage() {
     redirect('/dashboard');
   }
 
+  // Global search deep-links straight onto a contact (`?open=<contactId>`).
+  const { open } = await searchParams;
+  const openId = Number(Array.isArray(open) ? open[0] : open);
+
   const [contacts, customers] = await Promise.all([listContacts(), listCustomerOptions()]);
 
-  return <ContactsClient initialContacts={contacts} initialCustomers={customers} />;
+  return (
+    <ContactsClient
+      initialContacts={contacts}
+      initialCustomers={customers}
+      initialOpenId={Number.isInteger(openId) && openId > 0 ? openId : null}
+    />
+  );
 }

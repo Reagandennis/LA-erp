@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
     limit,
     before && !Number.isNaN(before.getTime()) ? before : undefined,
   );
-  // Opening a thread clears its unread badge.
-  if (!before) await markRead(ctx.account.id, id);
+  // Opening a thread clears its unread badge — unless the tab is refreshing in
+  // the background (`read=0`), where nobody has seen the message yet.
+  if (!before && searchParams.get('read') !== '0') await markRead(ctx.account.id, id, ctx.userId);
   return NextResponse.json({ messages });
 }

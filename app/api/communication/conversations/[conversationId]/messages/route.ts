@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { listMessages, markConversationRead, sendMessage } from '@/lib/communication';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ conversationId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.communication);
   if (response || !auth) return response;
 
   const { conversationId: raw } = await params;
@@ -37,7 +38,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ conversationId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.communication);
   if (response || !auth) return response;
 
   const { conversationId: raw } = await params;

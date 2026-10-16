@@ -3,7 +3,7 @@ import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 
 import type { MessagingProvider } from './messaging-accounts';
-import { readCache, writeCache } from './messaging-media-cache';
+import { readCache, withDownloadSlot, writeCache } from './messaging-media-cache';
 import { type MessagingContext, resolveMessagingRequest } from './messaging-routes';
 import { enforceRateLimit } from './rate-limit';
 import { getUploadLimitMb, mbToBytes } from './upload-limits';
@@ -56,7 +56,13 @@ interface MediaRouteConfig<S> {
    * Called after a successful send, for providers that don't echo our own
    * messages back and so need the mirror updated by hand.
    */
-  onSent?: (ctx: MessagingContext, chatId: string, result: SendOutcome, file: SentFile, caption: string) => Promise<void>;
+  onSent?: (
+    ctx: MessagingContext,
+    chatId: string,
+    result: SendOutcome,
+    file: SentFile & { bytes: Buffer },
+    caption: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -76,40 +82,6 @@ const INLINE_SAFE = new Set([
   'audio/mp4',
   'application/pdf',
 ]);
-
-/**
- * At most this many provider downloads in flight per server process.
- *
- * A thread with 200 photos fires 200 media requests on first open. Each one
- * holds a whole attachment in memory (and, for wacli, a `docker exec`
- * process), so without a ceiling the peak is 200 × attachment size. Requests
- * beyond the ceiling wait their turn; the browser shows them a moment later.
- */
-const MAX_CONCURRENT_DOWNLOADS = 4;
-
-declare global {
-  var messagingMediaDownloadQueueGlobal: { active: number; waiting: Array<() => void> } | undefined;
-}
-
-function downloadQueue() {
-  globalThis.messagingMediaDownloadQueueGlobal ??= { active: 0, waiting: [] };
-  return globalThis.messagingMediaDownloadQueueGlobal;
-}
-
-/** Run `task` once a download slot is free. */
-async function withDownloadSlot<T>(task: () => Promise<T>): Promise<T> {
-  const queue = downloadQueue();
-  if (queue.active >= MAX_CONCURRENT_DOWNLOADS) {
-    await new Promise<void>((resolve) => queue.waiting.push(resolve));
-  }
-  queue.active++;
-  try {
-    return await task();
-  } finally {
-    queue.active--;
-    queue.waiting.shift()?.();
-  }
-}
 
 /** Strip anything that could break out of a quoted header value. */
 function safeFileName(name: string | null): string {
@@ -243,7 +215,7 @@ export function createSendMediaPOST<S>(config: MediaRouteConfig<S>) {
     if (!result.ok) {
       return NextResponse.json({ error: result.error ?? 'Send failed.' }, { status: 502 });
     }
-    if (config.onSent) await config.onSent(ctx, chatId, result, sent, caption);
+    if (config.onSent) await config.onSent(ctx, chatId, result, { ...sent, bytes }, caption);
     return NextResponse.json({ ok: true });
   };
 }

@@ -155,6 +155,11 @@ function entityStyle(entity: string) {
   return ENTITY_STYLES[entity] ?? ENTITY_STYLES.LADYASKARI;
 }
 
+/** The deep-linked customer id, or null when it isn't one the user can see. */
+function knownCustomerId(id: number | null | undefined, customers: CrmCustomer[]) {
+  return id != null && customers.some((c) => c.id === id) ? id : null;
+}
+
 // --- Props ---
 
 interface CustomersClientProps {
@@ -165,6 +170,8 @@ interface CustomersClientProps {
   initialActivities: CrmActivitySummary[];
   quoteOptions: QuoteOption[];
   contractOptions: ContractOption[];
+  /** Customer to open on arrival (`?open=<id>`, e.g. from global search). */
+  initialOpenId?: number | null;
 }
 
 type Tab = 'pipeline' | 'accounts' | 'receivables';
@@ -177,8 +184,12 @@ export default function CustomersClient({
   initialActivities,
   quoteOptions,
   contractOptions,
+  initialOpenId,
 }: CustomersClientProps) {
-  const [tab, setTab] = useState<Tab>('pipeline');
+  // A deep-linked customer starts on the Accounts tab with its profile open.
+  const [tab, setTab] = useState<Tab>(() =>
+    knownCustomerId(initialOpenId, initialCustomers) === null ? 'pipeline' : 'accounts',
+  );
   const [entityFilter, setEntityFilter] = useState<'All' | Entity>('All');
 
   const [accounts, setAccounts] = useState<CustomerAccount[]>(initialAccounts);
@@ -187,11 +198,28 @@ export default function CustomersClient({
   const [activities, setActivities] = useState<CrmActivitySummary[]>(initialActivities);
 
   const [selectedDealId, setSelectedDealId] = useState<number | null>(null);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(() =>
+    knownCustomerId(initialOpenId, initialCustomers),
+  );
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [showNewDeal, setShowNewDeal] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+
+  // A deep link that changes while we're mounted opens that customer's profile
+  // the way clicking it on the Accounts tab does (adjusted during render).
+  // Unknown ids (no access, deleted) are ignored.
+  const [openId, setOpenId] = useState(initialOpenId ?? null);
+  if (openId !== (initialOpenId ?? null)) {
+    setOpenId(initialOpenId ?? null);
+    const target = knownCustomerId(initialOpenId, customers);
+    if (target !== null) {
+      setSelectedDealId(null);
+      setSelectedAccountId(null);
+      setSelectedCustomerId(target);
+      setTab('accounts');
+    }
+  }
 
   const entityByCustomerId = useMemo(
     () => new Map(customers.map((c) => [c.id, c.entity])),
@@ -789,8 +817,8 @@ function DealDrawer({
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-xl">
+      <div className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-[230] flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-xl">
         <div className="bg-primary px-6 py-6 text-white">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -1149,8 +1177,8 @@ function CustomerDrawer({
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-2xl">
+      <div className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-[230] flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-2xl">
         <div className="bg-primary px-6 py-6 text-white sm:px-8">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -1630,8 +1658,8 @@ function ReceivablesView({
 function ReceivablesDrawer({ account, onClose }: { account: CustomerAccount; onClose: () => void }) {
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-2xl">
+      <div className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-[230] flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-2xl">
         <div className="relative overflow-hidden bg-primary px-6 py-6 text-white sm:px-8 sm:py-8">
           <div className="relative z-10 mb-5 flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -2026,8 +2054,8 @@ function NewCustomerModal({
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[220] bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
         <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
             <h2 className="text-lg font-bold text-gray-900">{title}</h2>

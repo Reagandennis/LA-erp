@@ -7,7 +7,8 @@ import {
   updateBrandProfile,
 } from '@/lib/brand-profiles';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 import { brandProfileUpdateSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { response } = await requireRequestAuth(request);
+  const { response } = await requireModuleRequest(request, ...API_ACCESS.quoteBranding);
   if (response) return response;
 
   const { id: raw } = await params;

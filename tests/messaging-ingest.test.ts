@@ -5,12 +5,22 @@ vi.mock('server-only', () => ({}));
 const { execFile } = vi.hoisted(() => ({ execFile: vi.fn() }));
 vi.mock('child_process', () => ({ execFile }));
 
-const { ingestMessages, latestMessageAt, upsertChats } = vi.hoisted(() => ({
-  ingestMessages: vi.fn(),
-  latestMessageAt: vi.fn(),
-  upsertChats: vi.fn(),
+const { ingestMessages, existingMessageIds, messageCountsByChat, upsertChats, applyProviderUnread } = vi.hoisted(
+  () => ({
+    ingestMessages: vi.fn(),
+    existingMessageIds: vi.fn(),
+    messageCountsByChat: vi.fn(),
+    upsertChats: vi.fn(),
+    applyProviderUnread: vi.fn(),
+  }),
+);
+vi.mock('../lib/messaging-repo', () => ({
+  ingestMessages,
+  existingMessageIds,
+  messageCountsByChat,
+  upsertChats,
+  applyProviderUnread,
 }));
-vi.mock('../lib/messaging-repo', () => ({ ingestMessages, latestMessageAt, upsertChats }));
 
 const { listAccountsForProvider } = vi.hoisted(() => ({ listAccountsForProvider: vi.fn() }));
 vi.mock('../lib/messaging-accounts', () => ({ listAccountsForProvider }));
@@ -31,23 +41,27 @@ function envelope(body: Record<string, unknown>) {
   return JSON.stringify({ envelope: body });
 }
 
+/**
+ * Schedules live on globalThis so they survive a module reset — clear them or
+ * the next run is skipped as "already scheduled".
+ */
+function clearSchedules() {
+  const g = globalThis as { messagingIngestTimersGlobal?: Map<string, NodeJS.Timeout>; messagingIngestBusyGlobal?: Set<string> };
+  for (const timer of g.messagingIngestTimersGlobal?.values() ?? []) clearInterval(timer);
+  g.messagingIngestTimersGlobal = undefined;
+  g.messagingIngestBusyGlobal = undefined;
+}
+
 describe('signal ingest', () => {
   beforeEach(() => {
     execFile.mockReset();
     ingestMessages.mockReset();
-    latestMessageAt.mockReset();
     upsertChats.mockReset();
     listAccountsForProvider.mockReset();
     ingestMessages.mockResolvedValue([]);
-    latestMessageAt.mockResolvedValue(null);
     listAccountsForProvider.mockResolvedValue([]);
     vi.resetModules();
-    // Schedules live on globalThis so they survive a module reset — clear them
-    // or the second test's drain is skipped as "already scheduled".
-    const g = globalThis as { messagingIngestTimersGlobal?: Map<string, NodeJS.Timeout>; messagingIngestBusyGlobal?: Set<string> };
-    for (const timer of g.messagingIngestTimersGlobal?.values() ?? []) clearInterval(timer);
-    g.messagingIngestTimersGlobal = undefined;
-    g.messagingIngestBusyGlobal = undefined;
+    clearSchedules();
   });
 
   it('writes received messages straight to the mirror', async () => {
@@ -285,5 +299,185 @@ describe('wacliToIngest', () => {
     const { wacliToIngest } = await import('../lib/messaging-ingest');
     expect(wacliToIngest({ ChatJID: '1@s.whatsapp.net', MsgID: 'X', DeletedForMe: true })).toBeNull();
     expect(wacliToIngest({ ChatJID: '1@s.whatsapp.net', Text: 'no id' })).toBeNull();
+  });
+});
+
+describe('whatsapp catch-up', () => {
+  const WA = { id: 3, userId: 1, provider: 'whatsapp' as const, handle: 'laerp-user-1', label: null, session: null };
+  const CHAT = '254700000001@s.whatsapp.net';
+
+  beforeEach(() => {
+    execFile.mockReset();
+    ingestMessages.mockReset();
+    existingMessageIds.mockReset();
+    messageCountsByChat.mockReset();
+    upsertChats.mockReset();
+    applyProviderUnread.mockReset();
+    listAccountsForProvider.mockReset();
+    ingestMessages.mockResolvedValue([]);
+    existingMessageIds.mockResolvedValue(new Set());
+    messageCountsByChat.mockResolvedValue(new Map());
+    listAccountsForProvider.mockImplementation(async (p: string) => (p === 'whatsapp' ? [WA] : []));
+    vi.resetModules();
+    clearSchedules();
+    const g = globalThis as { whatsappUnmirroredGlobal?: unknown; whatsappReadInAppGlobal?: unknown };
+    g.whatsappUnmirroredGlobal = undefined;
+    g.whatsappReadInAppGlobal = undefined;
+  });
+
+  /** Answer each wacli query with a success envelope around `handler`'s data. */
+  function wacli(handler: (args: string[]) => unknown) {
+    respond((args) => JSON.stringify({ success: true, data: handler(args), error: null }));
+  }
+
+  const listCalls = () =>
+    execFile.mock.calls.map((c) => c[1] as string[]).filter((args) => args.includes('messages'));
+
+  async function pass() {
+    clearSchedules();
+    const { reconcileIngest } = await import('../lib/messaging-ingest');
+    await reconcileIngest();
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
+  it('mirrors history that lands behind a message already mirrored', async () => {
+    // The newest message reached Postgres live; history sync then delivered
+    // two older ones. A time cursor would skip them forever.
+    wacli((args) => {
+      if (args.includes('coverage')) return { coverage: [{ chat_jid: CHAT, kind: 'dm', message_count: 3 }] };
+      if (args.includes('chats')) return [];
+      return {
+        messages: [
+          { ChatJID: CHAT, MsgID: 'NEW', Timestamp: '2026-10-06T10:00:00Z', Text: 'newest' },
+          { ChatJID: CHAT, MsgID: 'OLD2', Timestamp: '2026-08-21T10:00:01Z', Text: 'older' },
+          {
+            ChatJID: CHAT,
+            MsgID: 'OLD1',
+            Timestamp: '2026-08-21T10:00:00Z',
+            MediaType: 'document',
+            MimeType: 'application/pdf',
+            Filename: 'quote.pdf',
+          },
+        ],
+      };
+    });
+    messageCountsByChat.mockResolvedValue(new Map([[CHAT, 1]]));
+    existingMessageIds.mockResolvedValue(new Set(['NEW']));
+
+    await pass();
+
+    const [accountId, userId, batch, options] = ingestMessages.mock.calls[0]!;
+    expect([accountId, userId, options]).toEqual([3, 1, { history: true }]);
+    expect(batch.map((m: { messageId: string }) => m.messageId)).toEqual(['OLD2', 'OLD1']);
+    expect(batch[1].media).toMatchObject({ kind: 'document', mimeType: 'application/pdf', fileName: 'quote.pdf' });
+    // Reads never contend with the lock held by `sync --follow`.
+    expect(listCalls()[0]).toContain('--read-only');
+  });
+
+  it('leaves a chat alone when its counts already balance', async () => {
+    wacli((args) => {
+      if (args.includes('coverage')) return { coverage: [{ chat_jid: CHAT, kind: 'dm', message_count: 40 }] };
+      return [];
+    });
+    messageCountsByChat.mockResolvedValue(new Map([[CHAT, 40]]));
+
+    await pass();
+
+    expect(listCalls()).toHaveLength(0);
+    expect(ingestMessages).not.toHaveBeenCalled();
+  });
+
+  it('remembers rows that are not messages, so a later pass skips the chat', async () => {
+    wacli((args) => {
+      if (args.includes('coverage')) return { coverage: [{ chat_jid: CHAT, kind: 'dm', message_count: 2 }] };
+      if (args.includes('chats')) return [];
+      return {
+        messages: [
+          { ChatJID: CHAT, MsgID: 'REAL', Timestamp: '2026-10-06T10:00:00Z', Text: 'hi' },
+          // A protocol entry: no text, no media. Never mirrored.
+          { ChatJID: CHAT, MsgID: 'PROTO', Timestamp: '2026-10-06T09:00:00Z' },
+        ],
+      };
+    });
+    messageCountsByChat.mockResolvedValue(new Map([[CHAT, 1]]));
+    existingMessageIds.mockResolvedValue(new Set(['REAL']));
+
+    await pass();
+    expect(listCalls()).toHaveLength(1);
+
+    await pass();
+    expect(listCalls()).toHaveLength(1);
+  });
+
+  it('pages back with a one-second overlap so a boundary second is never split', async () => {
+    // 500 messages fill the first page; its oldest second is shared with one
+    // more message that only the next page returns.
+    const base = Date.parse('2026-10-01T00:00:00Z');
+    const page1 = Array.from({ length: 500 }, (_, i) => ({
+      ChatJID: CHAT,
+      MsgID: `P1-${i}`,
+      Timestamp: new Date(base + (500 - i) * 1000).toISOString(),
+      Text: 'x',
+    }));
+    const boundary = page1[499]!.Timestamp;
+    const page2 = [
+      page1[499]!,
+      { ChatJID: CHAT, MsgID: 'TWIN', Timestamp: boundary, Text: 'same second' },
+      { ChatJID: CHAT, MsgID: 'OLDER', Timestamp: new Date(base).toISOString(), Text: 'older' },
+    ];
+    wacli((args) => {
+      if (args.includes('coverage')) return { coverage: [{ chat_jid: CHAT, kind: 'group', message_count: 502 }] };
+      if (args.includes('chats')) return [];
+      return { messages: args.includes('--before') ? page2 : page1 };
+    });
+
+    await pass();
+
+    const second = listCalls()[1]!;
+    expect(second[second.indexOf('--before') + 1]).toBe(new Date(Date.parse(boundary) + 1000).toISOString());
+    const ingested = ingestMessages.mock.calls.flatMap((c) => c[2] as Array<{ messageId: string }>);
+    expect(ingested.map((m) => m.messageId)).toEqual(expect.arrayContaining(['TWIN', 'OLDER']));
+    expect(ingested).toHaveLength(502);
+  });
+
+  it("adopts the phone's unread state, counting a hand-marked chat as one", async () => {
+    wacli((args) => {
+      if (args.includes('coverage')) return { coverage: [] };
+      return [
+        { jid: CHAT, kind: 'dm', name: 'Ada', unread: true, unread_count: 3 },
+        { jid: '2@s.whatsapp.net', kind: 'dm', name: 'Bo', unread: true, unread_count: 0 },
+        { jid: '3@g.us', kind: 'group', name: 'Ops', unread: false, unread_count: 0 },
+        { jid: 'status@broadcast', kind: 'broadcast', unread: true, unread_count: 9 },
+      ];
+    });
+
+    await pass();
+
+    const [accountId, userId, counts, observedAt, options] = applyProviderUnread.mock.calls[0]!;
+    expect([accountId, userId]).toEqual([3, 1]);
+    expect(Object.fromEntries(counts)).toEqual({ [CHAT]: 3, '2@s.whatsapp.net': 1, '3@g.us': 0 });
+    expect(observedAt).toBeInstanceOf(Date);
+    expect([...options.skip]).toEqual([]);
+    // Archived chats are refreshed too: their messages are mirrored.
+    const list = execFile.mock.calls.map((c) => c[1] as string[]).find((a) => a.includes('chats'))!;
+    expect(list).not.toContain('--no-archived');
+  });
+
+  it('keeps a chat just read in the app from being re-marked unread by a stale count', async () => {
+    wacli((args) => {
+      if (args.includes('coverage')) return { coverage: [] };
+      if (args.includes('mark-read')) return null;
+      return [{ jid: CHAT, kind: 'dm', name: 'Ada', unread: true, unread_count: 2 }];
+    });
+    const { syncReadToPhone } = await import('../lib/messaging-ingest');
+    syncReadToPhone(WA, CHAT);
+
+    await pass();
+
+    // The phone is told, as an app-state patch only: no read receipts.
+    const markRead = execFile.mock.calls.map((c) => c[1] as string[]).find((a) => a.includes('mark-read'))!;
+    expect(markRead).toEqual(expect.arrayContaining(['chats', 'mark-read', '--chat', CHAT]));
+    expect(markRead).not.toContain('--receipts');
+    expect([...applyProviderUnread.mock.calls[0]![4].skip]).toEqual([CHAT]);
   });
 });

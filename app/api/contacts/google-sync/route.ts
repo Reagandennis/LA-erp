@@ -5,7 +5,8 @@ import { recordAuditEvent } from '@/lib/audit';
 import { listContacts } from '@/lib/contacts';
 import { syncGoogleContacts } from '@/lib/google-contacts';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +17,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.contacts);
   if (response || !auth) return response;
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));

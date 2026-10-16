@@ -389,7 +389,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
 
       {/* Add / Edit modal */}
       {formOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[230] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
               <h2 className="text-lg font-semibold text-gray-900">{editing ? 'Edit vehicle' : 'Add vehicle'}</h2>
@@ -523,10 +523,10 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
       {selected && (
         <>
           <div
-            className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40"
+            className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]"
             onClick={() => setSelectedId(null)}
           />
-          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
               <h2 className="text-lg font-semibold text-gray-900">Vehicle details</h2>
               <button

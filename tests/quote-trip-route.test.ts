@@ -15,7 +15,11 @@ const {
   enforceRateLimit: vi.fn(),
 }));
 
-vi.mock('../lib/request-auth', () => ({ requireRequestAuth }));
+vi.mock('../lib/request-auth', () => ({
+  requireRequestAuth,
+  // Module access has its own tests (request-auth-module); these cover the route itself.
+  requireModuleRequest: (request: unknown) => requireRequestAuth(request),
+}));
 vi.mock('../lib/quotes', () => ({ getQuoteForUser }));
 vi.mock('../lib/trips', () => ({ createTripFromQuote }));
 vi.mock('../lib/audit', () => ({ recordAuditEvent }));

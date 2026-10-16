@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
 import { deleteProduct, getProductById, updateProduct } from '@/lib/products';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { productUpdateSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quoteProducts);
   if (response || !auth) return response;
 
   const { productId: raw } = await params;
@@ -33,7 +34,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quoteProducts);
   if (response || !auth) return response;
 
   const { productId: raw } = await params;
@@ -78,7 +79,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quoteProducts);
   if (response || !auth) return response;
 
   const { productId: raw } = await params;

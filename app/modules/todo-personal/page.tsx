@@ -1,7 +1,7 @@
 'use client';
 
 import { APP_LOCALE } from '@/lib/locale';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { use, useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 
 import CalendarClient, { type CalendarExtraEvent } from '@/app/modules/calendar/calendar-client';
 import { useBanner } from '@/app/ui/banner';
@@ -302,7 +302,16 @@ function BarList({ rows }: { rows: { label: string; count: number; color: string
   );
 }
 
-export default function TodoPersonalPage() {
+export default function TodoPersonalPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  // Global search deep-links straight onto a task (?open=<todo id>).
+  const { open } = use(searchParams);
+  const openParam = Number(Array.isArray(open) ? open[0] : open);
+  const initialOpenId = Number.isInteger(openParam) && openParam > 0 ? openParam : null;
+
   const [activeView, setActiveView] = useState<ViewType>('kanban');
   const [scope, setScope] = useState<TaskScope>('Active');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -1175,6 +1184,34 @@ export default function TodoPersonalPage() {
     return () => clearInterval(interval);
   }, [mergeFetchedTasks]);
 
+  // Deep link (?open=<id>): open that task's drawer the way a click does. Each
+  // new ?open= value is a fresh request (adjusted during render), so changing
+  // it while on the page opens that task too. The request reads the task list
+  // from the server and opens the task from that reply, which also covers a
+  // task the 10s poll hasn't brought in yet. Ids not in the list are ignored.
+  const [openRequest, setOpenRequest] = useState<{ id: number } | null>(() =>
+    initialOpenId === null ? null : { id: initialOpenId },
+  );
+  if ((openRequest?.id ?? null) !== initialOpenId) {
+    setOpenRequest(initialOpenId === null ? null : { id: initialOpenId });
+  }
+  const openLinkedTask = useEffectEvent((id: number, list: Task[]) => {
+    const task = list.find((item) => item.dbId === id);
+    if (task) openTaskDrawer(task);
+  });
+  useEffect(() => {
+    if (!openRequest) return;
+    let active = true;
+    const controller = new AbortController();
+    void fetchTasks(controller.signal).then((list) => {
+      if (active) openLinkedTask(openRequest.id, list);
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [openRequest]);
+
   useEffect(() => {
     let isActive = true;
 
@@ -1433,7 +1470,7 @@ export default function TodoPersonalPage() {
           {/* Overlay - Blur background */}
           <button
             type="button"
-            className="fixed inset-0 backdrop-blur-sm z-40 transition-opacity duration-300 cursor-default"
+            className="fixed inset-0 backdrop-blur-sm z-[220] transition-opacity duration-300 cursor-default"
             onClick={() => {
               setSelectedTask(null);
               setEditedTask(null);
@@ -1456,7 +1493,7 @@ export default function TodoPersonalPage() {
           />
           
           {/* Drawer */}
-          <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
+          <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-[230] overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
             {/* Top Action Bar */}
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
               <p className="text-xs text-gray-500 font-mono">{selectedTask.id}</p>
@@ -2083,7 +2120,7 @@ export default function TodoPersonalPage() {
           <>
             <button
               type="button"
-              className="fixed inset-0 backdrop-blur-sm z-40 transition-opacity duration-300 cursor-default"
+              className="fixed inset-0 backdrop-blur-sm z-[220] transition-opacity duration-300 cursor-default"
               onClick={() => {
                 setSelectedTask(null);
                 setEditedTask(null);
@@ -2094,7 +2131,7 @@ export default function TodoPersonalPage() {
               }}
               aria-label="Close task drawer"
             />
-            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
+            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-[230] overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
               {/* Header */}
               <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
                 <p className="text-xs font-mono text-gray-500">{selectedTask.id}</p>
@@ -2366,7 +2403,7 @@ export default function TodoPersonalPage() {
           <>
             <button
               type="button"
-              className="fixed inset-0 backdrop-blur-sm z-40 transition-opacity duration-300 cursor-default"
+              className="fixed inset-0 backdrop-blur-sm z-[220] transition-opacity duration-300 cursor-default"
               onClick={() => {
                 setShowCreateDrawer(false);
                 resetCreateDrawer();
@@ -2374,7 +2411,7 @@ export default function TodoPersonalPage() {
               aria-label="Close create task drawer"
             />
 
-            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
+            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-[230] overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
               <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
                 <p className="text-xs text-gray-500">Create new task</p>
                 <button

@@ -17,7 +17,11 @@ import CustomersClient from './customers-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function CustomersPage() {
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
   if (!auth) redirect('/auth/login');
 
@@ -25,6 +29,10 @@ export default async function CustomersPage() {
   if (!isAdmin && !userHasModule(auth.user, 'customers')) {
     redirect('/dashboard');
   }
+
+  // Global search deep-links straight onto a customer (`?open=<customerId>`).
+  const { open } = await searchParams;
+  const openId = Number(Array.isArray(open) ? open[0] : open);
 
   const organization = await getOrganizationSettings();
   const [accounts, deals, customers, activities, quoteOptions, contractOptions] = await Promise.all([
@@ -45,6 +53,7 @@ export default async function CustomersPage() {
       initialActivities={activities}
       quoteOptions={quoteOptions}
       contractOptions={contractOptions}
+      initialOpenId={Number.isInteger(openId) && openId > 0 ? openId : null}
     />
   );
 }

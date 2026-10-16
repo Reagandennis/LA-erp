@@ -109,10 +109,10 @@ export default function TripBuilder({
   return (
     <>
       <div
-        className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm z-40"
+        className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm z-[220]"
         onClick={() => (pending ? null : onClose())}
       />
-      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 pointer-events-none">
+      <div className="fixed inset-0 z-[230] flex items-stretch sm:items-center justify-center sm:p-4 pointer-events-none">
         <div className="bg-white w-full max-w-2xl h-full sm:h-auto sm:max-h-[92vh] overflow-y-auto rounded-none sm:rounded-[2rem] shadow-2xl pointer-events-auto">
           <div className="p-6 sm:p-8 border-b border-gray-100 flex items-start justify-between gap-4 sticky top-0 bg-white z-10">
             <div>

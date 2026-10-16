@@ -533,7 +533,7 @@ export default function PlanningClient() {
 
 function Dialog({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
+    <div className="fixed left-1/2 top-1/2 z-[230] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
       <h2 className="text-base font-bold text-gray-900">{title}</h2>
       {children}
     </div>
@@ -561,7 +561,7 @@ function LeaveDialog({
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
       <Dialog title="Add leave">
         <div className="mt-4 space-y-3">
           {canManage && (
@@ -700,7 +700,7 @@ function ShiftDialog({
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
       <Dialog title={shift ? 'Edit shift' : 'Add shift'}>
         <p className="mt-1 text-xs text-gray-500">{date}</p>
         <div className="mt-4 space-y-3">

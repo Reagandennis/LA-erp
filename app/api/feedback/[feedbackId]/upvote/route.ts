@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { toggleUpvote } from '@/lib/feedback';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ feedbackId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.feedback);
   if (response || !auth) return response;
 
   const { feedbackId: raw } = await params;

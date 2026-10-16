@@ -397,7 +397,8 @@ async function reserveSequenceReference(
   return `QT-${year}-${String(next.lastNumber).padStart(4, '0')}`;
 }
 
-function buildAccessFilter(userId: number, isAdmin: boolean) {
+/** Who may see a record: admins everything, others only their own. Shared with global search. */
+export function buildAccessFilter(userId: number, isAdmin: boolean) {
   if (isAdmin) return {};
   return { OR: [{ createdById: userId }, { approverId: userId }] };
 }

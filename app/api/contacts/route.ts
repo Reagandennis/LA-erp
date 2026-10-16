@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createContact, listContacts, listCustomerOptions } from '@/lib/contacts';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.contacts);
   if (response || !auth) return response;
 
   const [contacts, customers] = await Promise.all([listContacts(), listCustomerOptions()]);
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.contacts);
   if (response || !auth) return response;
 
   const body = await request.json().catch(() => null);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CustomerOption } from '@/lib/contacts';
 import { RISK_LEVELS, TRAVELER_STATUSES } from '@/lib/traveler-options';
@@ -54,6 +54,8 @@ type Props = {
   isAdmin: boolean;
   initialItems: TravelerSummary[];
   initialCustomers: CustomerOption[];
+  /** Traveller to open on arrival, from a `?open=<id>` link. */
+  initialOpenId?: number | null;
 };
 
 type Form = {
@@ -80,13 +82,15 @@ const EMPTY_FORM: Form = {
   dietaryNotes: '', medicalNotes: '', emergencyContactName: '', emergencyContactPhone: '', notes: '',
 };
 
-export default function TravelersClient({ isAdmin, initialItems, initialCustomers }: Props) {
+export default function TravelersClient({ isAdmin, initialItems, initialCustomers, initialOpenId = null }: Props) {
   const [items, setItems] = useState<TravelerSummary[]>(initialItems);
   const [customers] = useState<CustomerOption[]>(initialCustomers);
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(() =>
+    initialOpenId !== null && initialItems.some((i) => i.id === initialOpenId) ? initialOpenId : null,
+  );
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -96,6 +100,51 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photoVersion, setPhotoVersion] = useState<Record<number, number>>({});
+
+  // A new `?open=` link while we're already here re-renders with a new prop but
+  // doesn't remount, so open that traveller now (adjusted during render). Any
+  // open form is dismissed first, as Cancel would, so an edit can never be saved
+  // onto the newly selected record. An id we don't have yet (added since this
+  // list loaded) waits for one reload below; if it still isn't there, it's ignored.
+  const [openId, setOpenId] = useState(initialOpenId);
+  const [pendingOpenId, setPendingOpenId] = useState<number | null>(null);
+  if (openId !== initialOpenId) {
+    setOpenId(initialOpenId);
+    if (initialOpenId !== null && items.some((i) => i.id === initialOpenId)) {
+      setFormOpen(false);
+      setSelectedId(initialOpenId);
+      setPendingOpenId(null);
+    } else {
+      setPendingOpenId(initialOpenId);
+    }
+  }
+
+  useEffect(() => {
+    if (pendingOpenId === null) return;
+    let cancelled = false;
+    void (async () => {
+      let fresh: TravelerSummary[] | null = null;
+      try {
+        const res = await fetch('/api/travelers', { credentials: 'include' });
+        const data = res.ok ? await res.json() : null;
+        if (Array.isArray(data?.items)) fresh = data.items as TravelerSummary[];
+      } catch {
+        /* keep current data on transient failure */
+      }
+      if (cancelled) return;
+      if (fresh) {
+        setItems(fresh);
+        if (fresh.some((i) => i.id === pendingOpenId)) {
+          setFormOpen(false);
+          setSelectedId(pendingOpenId);
+        }
+      }
+      setPendingOpenId(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingOpenId]);
 
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
 
@@ -365,8 +414,8 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
       {/* Detail drawer */}
       {selected && (
         <>
-          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40" onClick={() => setSelectedId(null)} />
-          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={() => setSelectedId(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-semibold text-gray-900">Traveller details</h2>
               <button onClick={() => setSelectedId(null)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
@@ -441,7 +490,7 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
 
       {/* Create / Edit modal */}
       {formOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[240] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
               <h2 className="text-lg font-semibold text-gray-900">{editing ? 'Edit traveller' : 'Add traveller'}</h2>

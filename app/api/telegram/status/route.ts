@@ -14,5 +14,6 @@ export async function GET(request: NextRequest) {
   const status = await getStatus(ctx.userId);
   // Counts come from the mirror so the header matches what the console shows.
   if (ctx.account) status.counts = await counts(ctx.account.id);
-  return NextResponse.json(status);
+  // The account id lets the page tell alerts which chat is already on screen.
+  return NextResponse.json({ ...status, accountId: ctx.account?.id ?? null });
 }

@@ -61,6 +61,8 @@ type Props = {
   isAdmin: boolean;
   initialItems: ContractSummary[];
   initialStats: ContractStats;
+  /** Contract to open on arrival (`?open=<id>`); ignored if it isn't in the list. */
+  initialOpenId?: number | null;
 };
 
 type ContractForm = {
@@ -91,10 +93,12 @@ const EMPTY_FORM: ContractForm = {
   notes: '',
 };
 
-export default function ContractsClient({ isAdmin, initialItems, initialStats }: Props) {
+export default function ContractsClient({ isAdmin, initialItems, initialStats, initialOpenId = null }: Props) {
   const [items, setItems] = useState<ContractSummary[]>(initialItems);
   const [stats, setStats] = useState<ContractStats>(initialStats);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(() =>
+    initialOpenId !== null && initialItems.some((i) => i.id === initialOpenId) ? initialOpenId : null,
+  );
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
@@ -111,6 +115,28 @@ export default function ContractsClient({ isAdmin, initialItems, initialStats }:
   const [isRenewOpen, setIsRenewOpen] = useState(false);
   const [renewDate, setRenewDate] = useState('');
   const drawerFileRef = useRef<HTMLInputElement>(null);
+
+  // A new `?open=` link while this page is already mounted (it isn't remounted):
+  // open that contract's drawer, as a card click would. Adjusted during render.
+  // The drawer reads from the full list, so the status filter / search never
+  // hides it. A contract added since we loaded is only in the fresh server list
+  // that came with the link, so adopt that snapshot; unknown ids are ignored.
+  // The create/edit modal sits above the drawer and "Save" targets the selected
+  // contract, so it's closed rather than left pointing at the new selection.
+  const [openIdSource, setOpenIdSource] = useState(initialOpenId);
+  if (openIdSource !== initialOpenId) {
+    setOpenIdSource(initialOpenId);
+    const known = initialOpenId !== null && items.some((i) => i.id === initialOpenId);
+    const fresh = !known && initialOpenId !== null && initialItems.some((i) => i.id === initialOpenId);
+    if (fresh) {
+      setItems(initialItems);
+      setStats(initialStats);
+    }
+    if (known || fresh) {
+      setFormOpen(false);
+      setSelectedId(initialOpenId);
+    }
+  }
 
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
 
@@ -467,8 +493,8 @@ export default function ContractsClient({ isAdmin, initialItems, initialStats }:
       {/* Detail drawer */}
       {selected && (
         <>
-          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40" onClick={() => setSelectedId(null)} />
-          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={() => setSelectedId(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-semibold text-gray-900">Contract details</h2>
               <button onClick={() => setSelectedId(null)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
@@ -600,7 +626,7 @@ export default function ContractsClient({ isAdmin, initialItems, initialStats }:
 
       {/* Create / Edit modal */}
       {formOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[240] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
               <h2 className="text-lg font-semibold text-gray-900">{editing ? 'Edit contract' : 'New contract'}</h2>

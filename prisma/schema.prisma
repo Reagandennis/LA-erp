@@ -1784,6 +1784,83 @@ model UploadLimitSettings {
   updatedAt   DateTime @updatedAt
 }
 
+/// Google Drive backups (one row, id = 1), edited in Admin → Settings → Backups.
+model BackupSettings {
+  id      Int     @id @default(1)
+  enabled Boolean @default(false)
+
+  /// Service account key (JSON). A credential: never returned to the browser.
+  serviceAccountJson String?
+  /// Shared Drive the backups live in, and the folder inside it they go to.
+  driveId            String?
+  driveName          String?
+  folderId           String?
+
+  /// Daily run time, "HH:MM" in `timezone`.
+  scheduleTime String @default("02:00")
+  timezone     String @default("Africa/Nairobi")
+
+  /// Snapshots kept: the newest per day, the first per week, the first per month.
+  keepDaily   Int @default(14)
+  keepWeekly  Int @default(8)
+  keepMonthly Int @default(12)
+
+  includeDatabase      Boolean @default(true)
+  includeWhatsapp      Boolean @default(true)
+  /// Attachments wacli downloaded itself; large, and off by default.
+  includeWhatsappMedia Boolean @default(false)
+  includeSignal        Boolean @default(true)
+  includeMediaCache    Boolean @default(true)
+  includeConfig        Boolean @default(true)
+
+  /// Lock each month's snapshot read-only in Drive.
+  lockMonthly Boolean @default(true)
+
+  /// AES-256 key every backup is encrypted with (base64). Without it a backup
+  /// cannot be restored, so admins keep a copy outside the platform.
+  encryptionKey String?
+
+  /// Where failure alerts are emailed (comma-separated); empty disables them.
+  alertEmails String @default("")
+
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
+}
+
+/// One backup run and the snapshot it produced in Google Drive.
+model BackupRun {
+  id            Int       @id @default(autoincrement())
+  /// 'schedule' | 'manual'
+  trigger       String
+  /// 'running' | 'success' | 'partial' | 'failed'
+  status        String    @default("running")
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  triggeredById Int?
+
+  /// The snapshot's folder in Drive.
+  folderId       String?
+  folderName     String?
+  /// Bytes uploaded (encrypted), across every file.
+  sizeBytes      BigInt  @default(0)
+  /// Per-file results: component, name, size, md5, Drive id, error.
+  files          Json    @default("[]")
+  error          String?
+  /// Fingerprint of the key the snapshot was encrypted with.
+  keyFingerprint String?
+
+  /// Kept regardless of the retention schedule.
+  pinned      Boolean   @default(false)
+  locked      Boolean   @default(false)
+  verifiedAt  DateTime?
+  verifyError String?
+  /// Removed by retention (moved to the Drive trash).
+  prunedAt    DateTime?
+
+  @@index([startedAt])
+  @@index([status, prunedAt])
+}
+
 // ---------------------------------------------------------------------------
 // Map workspace. Geometry is GeoJSON in Json columns: PostGIS is not enabled and
 // Prisma has no geometry type, so an Unsupported() column would force every read

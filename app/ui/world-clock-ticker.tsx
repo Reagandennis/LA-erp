@@ -64,7 +64,19 @@ function fmtDay(date: Date, tz: string) {
 
 export default function WorldClockTicker({
   initialZones,
-}: Readonly<{ initialZones: WorldClockZone[] }>) {
+  search,
+  actions,
+}: Readonly<{
+  initialZones: WorldClockZone[];
+  /** The search box, first in the bar's right-hand group. */
+  search?: React.ReactNode;
+  /**
+   * Controls docked at the right end of the bar (the notifications bell). The
+   * bar already has room reserved for it at the top of every page, so nothing
+   * placed here can ever cover page content.
+   */
+  actions?: React.ReactNode;
+}>) {
   const nowMs = useNow(1000);
   const [zones, setZones] = useState(initialZones);
   const [draft, setDraft] = useState(() => initialZones.map((zone) => zone.tz));
@@ -151,7 +163,14 @@ export default function WorldClockTicker({
   }, [draft]);
 
   if (nowMs === null) {
-    return <div className="ticker-bar bg-primary" />;
+    return (
+      <div className="ticker-bar @container bg-primary text-white">
+        <div className="flex h-full items-center justify-end gap-2 pr-3 @min-[42rem]:pr-4">
+          {search}
+          {actions}
+        </div>
+      </div>
+    );
   }
   const now = new Date(nowMs);
 
@@ -188,7 +207,8 @@ export default function WorldClockTicker({
           {hiddenCounts}
         </div>
 
-        <div className="shrink-0 h-full flex items-center pl-3 pr-3 @min-[42rem]:pl-4 @min-[42rem]:pr-4">
+        <div className="shrink-0 h-full flex items-center gap-2 pl-3 pr-3 @min-[42rem]:pl-4 @min-[42rem]:pr-4">
+          {search}
           <button
             type="button"
             onClick={isPicking ? () => setIsPicking(false) : openPicker}
@@ -206,6 +226,7 @@ export default function WorldClockTicker({
             </svg>
             <span className="hidden @min-[42rem]:inline">CLOCKS</span>
           </button>
+          {actions}
         </div>
       </div>
 

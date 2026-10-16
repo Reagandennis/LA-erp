@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { fileResponse } from '@/lib/file-response';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { getResourcePhoto, setResourcePhoto, type ResourceKind } from '@/lib/task-assignment';
 import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
@@ -15,8 +16,11 @@ function parseId(value: string) {
  * Shared by the vehicle, driver, and officer photo routes.
  */
 export function makePhotoHandlers(kind: ResourceKind) {
+  // Vehicles are also run from their own module; drivers and officers only from task assignment.
+  const modules = kind === 'vehicle' ? API_ACCESS.vehicles : API_ACCESS.taskAssignment;
+
   async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const { auth, response } = await requireRequestAuth(request);
+    const { auth, response } = await requireModuleRequest(request, ...modules);
     if (response || !auth) return response;
 
     const { id: raw } = await params;
@@ -34,7 +38,7 @@ export function makePhotoHandlers(kind: ResourceKind) {
   }
 
   async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const { auth, response } = await requireRequestAuth(request);
+    const { auth, response } = await requireModuleRequest(request, ...modules);
     if (response || !auth) return response;
 
     const { id: raw } = await params;

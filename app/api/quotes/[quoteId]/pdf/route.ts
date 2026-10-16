@@ -4,7 +4,8 @@ import { recordAuditEvent } from '@/lib/audit';
 import { buildQuotePdf } from '@/lib/document-pdf';
 import { getQuoteForUser } from '@/lib/quotes';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { userHasRole } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ quoteId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const { quoteId: raw } = await params;

@@ -23,6 +23,11 @@ function avatarTint(name: string): string {
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return AVATAR_TINTS[h % AVATAR_TINTS.length];
 }
+/** The deep-linked contact id, or null when it isn't one the user can see. */
+function knownContactId(id: number | null | undefined, contacts: ContactSummary[]) {
+  return id != null && contacts.some((c) => c.id === id) ? id : null;
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -57,15 +62,20 @@ const EMPTY_FORM: ContactForm = {
 export default function ContactsClient({
   initialContacts,
   initialCustomers,
+  initialOpenId,
 }: {
   initialContacts: ContactSummary[];
   initialCustomers: CustomerOption[];
+  /** Contact to open on arrival (`?open=<id>`, e.g. from global search). */
+  initialOpenId?: number | null;
 }) {
   const [contacts, setContacts] = useState<ContactSummary[]>(initialContacts);
   const [customers] = useState<CustomerOption[]>(initialCustomers);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<Category | 'All'>('All');
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(() =>
+    knownContactId(initialOpenId, initialContacts),
+  );
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<ContactForm>(EMPTY_FORM);
@@ -74,6 +84,23 @@ export default function ContactsClient({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photoVersion, setPhotoVersion] = useState<Record<number, number>>({});
+
+  // A deep link that changes while we're mounted opens that contact's drawer
+  // the way clicking its card does (adjusted during render). Any open form is
+  // closed first, as it would be before a card could be clicked, so an edit
+  // can't be saved onto the newly selected contact. Unknown ids (no access,
+  // deleted) are ignored.
+  const [openId, setOpenId] = useState(initialOpenId ?? null);
+  if (openId !== (initialOpenId ?? null)) {
+    setOpenId(initialOpenId ?? null);
+    const target = knownContactId(initialOpenId, contacts);
+    if (target !== null) {
+      setFormOpen(false);
+      setPendingPhoto(null);
+      setPhotoPreview(null);
+      setSelectedId(target);
+    }
+  }
 
   const selected = useMemo(
     () => contacts.find((c) => c.id === selectedId) ?? null,
@@ -387,7 +414,7 @@ export default function ContactsClient({
 
       {/* Add / Edit modal */}
       {formOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[230] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
               <h2 className="text-lg font-semibold text-gray-900">{editing ? 'Edit contact' : 'Add contact'}</h2>
@@ -540,8 +567,8 @@ export default function ContactsClient({
       {/* Detail drawer */}
       {selected && (
         <>
-          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-40" onClick={() => setSelectedId(null)} />
-          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto flex flex-col">
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={() => setSelectedId(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
               <h2 className="text-lg font-semibold text-gray-900">Contact details</h2>
               <button

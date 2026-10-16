@@ -115,7 +115,7 @@ export async function listUpcomingDueDates(userId: number): Promise<DueDateItem[
       daysRemaining: daysUntil(q.expiryDate),
       amount: null,
       currency: null,
-      href: `/modules/quotes/${q.id}`,
+      href: `/modules/quotes/${q.id}/edit`,
     });
   }
 

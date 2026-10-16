@@ -512,7 +512,7 @@ function BrandProfileForm({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/40 z-[230] flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between">
           <h2 className="text-lg font-black text-gray-900">

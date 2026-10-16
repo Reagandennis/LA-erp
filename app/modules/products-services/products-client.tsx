@@ -297,8 +297,8 @@ export default function ProductsClient({ initialProducts, defaultCurrency }: Pro
 
       {draft && (
         <>
-          <div className="fixed inset-0 z-40 bg-gray-900/30 backdrop-blur-sm" onClick={() => (saving ? null : closeDrawer())} />
-          <div className="fixed right-0 top-0 z-50 flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white shadow-2xl">
+          <div className="fixed inset-0 z-[220] bg-gray-900/30 backdrop-blur-sm" onClick={() => (saving ? null : closeDrawer())} />
+          <div className="fixed right-0 top-0 z-[230] flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white shadow-2xl">
             <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-gray-100 bg-white px-6 py-4">
               <h2 className="text-lg font-bold text-gray-900">{isNew ? 'New item' : 'Edit item'}</h2>
               <button type="button" onClick={closeDrawer} className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700" aria-label="Close">

@@ -241,8 +241,8 @@ function EmptyState({ filtered }: { filtered: boolean }) {
 function TaskLogDrawer({ entry, isAdmin, onClose }: { entry: TaskLogEntry; isAdmin: boolean; onClose: () => void }) {
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-xl">
+      <div className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-[230] flex h-full w-full flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-xl">
         <div className="relative overflow-hidden bg-primary px-6 py-6 text-white sm:px-8 sm:py-8">
           <div className="relative z-10 mb-5 flex items-start justify-between gap-4">
             <h2 className="min-w-0 text-2xl font-bold tracking-tight">{entry.title}</h2>

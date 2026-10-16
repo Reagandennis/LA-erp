@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { prisma } from '@/lib/prisma';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 type TaskLookupClient = {
   findFirst: (args: {
@@ -39,7 +40,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ taskId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.tasks);
   if (response || !auth) return response;
 
   const { taskId: rawTaskId } = await params;
@@ -60,7 +61,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ taskId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.tasks);
   if (response || !auth) return response;
 
   const { taskId: rawTaskId } = await params;

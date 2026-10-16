@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { shareFile, unshareFile } from '@/lib/files';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +17,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ fileId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.files);
   if (response || !auth) return response;
 
   const { fileId: raw } = await params;
@@ -45,7 +46,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ fileId: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.files);
   if (response || !auth) return response;
 
   const { fileId: raw } = await params;

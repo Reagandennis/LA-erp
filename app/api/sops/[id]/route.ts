@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 import { deleteSop, getSop, updateSop } from '@/lib/sops';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +13,7 @@ function parseId(value: string) {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.sops);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

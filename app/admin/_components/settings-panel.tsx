@@ -38,6 +38,11 @@ const LINKS = [
     title: 'Email delivery',
     detail: 'Check the mail server settings and send a test email.',
   },
+  {
+    href: '/admin/backups',
+    title: 'Backups',
+    detail: 'Encrypted daily snapshots of the whole platform in a Google Shared Drive, with version history.',
+  },
 ];
 
 export default function SettingsPanel({ notify }: { notify: (message: { error?: string; success?: string }) => void }) {

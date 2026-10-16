@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit';
 import { createBrandProfile, listBrandProfiles } from '@/lib/brand-profiles';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 import { brandProfileCreateSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,7 @@ export const revalidate = 0;
 
 // Anyone authenticated can read the list (builder needs it for the picker)
 export async function GET(request: NextRequest) {
-  const { response } = await requireRequestAuth(request);
+  const { response } = await requireModuleRequest(request, ...API_ACCESS.quoteBranding);
   if (response) return response;
   const profiles = await listBrandProfiles({ includeArchived: false });
   return NextResponse.json({ profiles });

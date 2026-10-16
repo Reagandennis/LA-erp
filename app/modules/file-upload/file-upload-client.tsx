@@ -499,8 +499,8 @@ export default function FileUploadClient({ viewer, initialItems, initialStats, s
       {/* Detail / Preview Drawer */}
       {selected && (
         <>
-          <div className="fixed inset-0 bg-gray-900/10 backdrop-blur-sm z-40" onClick={() => setSelectedId(null)} />
-          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-500 ease-out flex flex-col">
+          <div className="fixed inset-0 bg-gray-900/10 backdrop-blur-sm z-[220]" onClick={() => setSelectedId(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto animate-in slide-in-from-right duration-500 ease-out flex flex-col">
             <div className="p-6 flex items-center justify-between border-b border-gray-50">
               <h2 className="text-lg font-black text-gray-900">File Details</h2>
               <button onClick={() => setSelectedId(null)} className="p-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-gray-400 hover:text-gray-600">

@@ -8,7 +8,8 @@
 # docker-compose adds `init: true` so exec'd processes are reaped.
 #
 # The official Linux release is linked against glibc, hence Debian rather than
-# Alpine. ffmpeg matches the upstream image (voice-note conversion).
+# Alpine. ffmpeg matches the upstream image (voice-note conversion). sqlite3
+# lets backups take consistent copies of the live stores (lib/backup/sources.ts).
 
 FROM debian:bookworm-slim
 
@@ -16,7 +17,7 @@ ARG WACLI_VERSION=0.21.0
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg procps tzdata \
+    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg procps sqlite3 tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { createTemplate, listTemplates } from '@/lib/templates';
 import { templateCreateSchema } from '@/lib/validation';
 
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const templates = await listTemplates();
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.quotes);
   if (response || !auth) return response;
 
   const rateLimit = await enforceRateLimit({

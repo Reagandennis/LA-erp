@@ -277,7 +277,7 @@ export default function NotesClient({ initialItems }: { initialItems: NoteSummar
 
       {/* Editor modal */}
       {editorOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[230] flex items-center justify-center p-4 bg-gray-900/30 backdrop-blur-sm">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
               <h2 className="text-lg font-semibold text-gray-900">{editingId ? 'Edit note' : 'New note'}</h2>

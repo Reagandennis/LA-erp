@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-const { runWacli } = vi.hoisted(() => ({ runWacli: vi.fn() }));
-vi.mock('../lib/wacli-runtime', () => ({
-  runWacli,
-  wacliScratch: () => {
-    throw new Error('not used here');
+const { runWacli, scratch } = vi.hoisted(() => ({
+  runWacli: vi.fn(),
+  scratch: {
+    mkdtemp: vi.fn(async () => '/tmp/laerp-wa-1'),
+    writeFile: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+    join: (dir: string, name: string) => `${dir}/${name}`,
   },
 }));
+vi.mock('../lib/wacli-runtime', () => ({ runWacli, wacliScratch: () => scratch }));
 
 const { syncStatus } = vi.hoisted(() => ({ syncStatus: vi.fn() }));
 vi.mock('../lib/whatsapp-sync', () => ({ syncStatus }));
@@ -37,6 +40,10 @@ describe('wacli sendText', () => {
       '--json',
       '--account',
       'laerp-user-1',
+      // wacli's own deadline sits inside ours (60s), so it answers "not sent"
+      // itself rather than being killed mid-send.
+      '--timeout',
+      '50s',
       'send',
       'text',
       '--to',
@@ -80,5 +87,62 @@ describe('wacli sendText', () => {
       error: 'recipient not on WhatsApp',
     });
     expect(runWacli).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('wacli sendMedia', () => {
+  const MB = 1024 * 1024;
+  /** sendMedia only measures the bytes before spooling them, and spooling is faked. */
+  const bytesOf = (size: number) => ({ length: size }) as unknown as Buffer;
+
+  beforeEach(() => {
+    runWacli.mockReset();
+    syncStatus.mockReset();
+    syncStatus.mockReturnValue({ account: 'a', running: true, restarts: 0, uptimeMs: 1 });
+  });
+
+  it('leaves type detection to wacli when the browser could not name the file', async () => {
+    const { sendMedia } = await import('../lib/wacli');
+    reply({ success: true, data: { id: 'F1', sent: true }, error: null });
+
+    await sendMedia('laerp-user-1', '1@s.whatsapp.net', {
+      bytes: bytesOf(10),
+      mimeType: 'application/octet-stream',
+      fileName: 'IMG_0001.HEIC',
+    });
+    expect(runWacli.mock.calls[0]![0]).not.toContain('--mime');
+  });
+
+  it('passes a real type through so photos and videos get their own bubble', async () => {
+    const { sendMedia } = await import('../lib/wacli');
+    reply({ success: true, data: { id: 'F2', sent: true }, error: null });
+
+    await sendMedia('laerp-user-1', '1@s.whatsapp.net', { bytes: bytesOf(10), mimeType: 'video/mp4', fileName: 'v.mp4' });
+    const args = runWacli.mock.calls[0]![0] as string[];
+    expect(args[args.indexOf('--mime') + 1]).toBe('video/mp4');
+  });
+
+  it('gives a large upload more time, with wacli deciding inside our deadline', async () => {
+    const { sendMedia } = await import('../lib/wacli');
+    reply({ success: true, data: { id: 'F3', sent: true }, error: null });
+
+    await sendMedia('laerp-user-1', '1@s.whatsapp.net', { bytes: bytesOf(50 * MB), mimeType: 'video/mp4', fileName: 'v.mp4' });
+    const [args, options] = runWacli.mock.calls[0]!;
+    expect(options.timeoutMs).toBe(270_000);
+    expect(args[args.indexOf('--timeout') + 1]).toBe('260s');
+  });
+
+  it('refuses a file WhatsApp would reject without spooling it', async () => {
+    const { sendMedia } = await import('../lib/wacli');
+    scratch.writeFile.mockClear();
+
+    const result = await sendMedia('laerp-user-1', '1@s.whatsapp.net', {
+      bytes: bytesOf(101 * MB),
+      mimeType: 'video/mp4',
+      fileName: 'v.mp4',
+    });
+    expect(result.ok).toBe(false);
+    expect(scratch.writeFile).not.toHaveBeenCalled();
+    expect(runWacli).not.toHaveBeenCalled();
   });
 });

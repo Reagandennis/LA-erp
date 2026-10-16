@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/app/ui/sidebar";
 import { BannerProvider } from "@/app/ui/banner";
+import GlobalSearch from "@/app/ui/global-search";
+import MessagingAlerts from "@/app/ui/messaging-alerts";
 import NotificationsBell from "@/app/ui/notifications-bell";
 import WorldClockTicker from "@/app/ui/world-clock-ticker";
 import { getServerAuth } from "@/lib/auth";
@@ -36,6 +38,9 @@ export default async function RootLayout({
     : { name: 'Guest', email: 'guest@la-erp.local' };
   const shouldShowSidebar = true;
 
+  // Modules for the search box: names and slugs only, never anything sensitive.
+  const searchModules = accessibleModules.map((m) => ({ slug: m.slug, name: m.name, category: m.category }));
+
   const worldClockZones = resolveWorldClockZones(
     auth?.preferences.worldClockZones ?? [],
   );
@@ -58,8 +63,14 @@ export default async function RootLayout({
             }))}
           />
         )}
-        {auth && <WorldClockTicker initialZones={worldClockZones} />}
-        {auth && <NotificationsBell />}
+        {auth && (
+          <WorldClockTicker
+            initialZones={worldClockZones}
+            search={<GlobalSearch userId={auth.user.id} modules={searchModules} />}
+            actions={<NotificationsBell />}
+          />
+        )}
+        {auth && <MessagingAlerts />}
         <div className={`flex-1 min-w-0 flex flex-col min-h-screen transition-all duration-300 ${shouldShowSidebar ? 'sidebar-margin' : ''}`}>
           {children}
         </div>

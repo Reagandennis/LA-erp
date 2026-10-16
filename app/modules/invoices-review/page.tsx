@@ -15,7 +15,11 @@ import InvoicesClient from './invoices-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function InvoicesReviewPage() {
+export default async function InvoicesReviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
   if (!auth) redirect('/auth/login');
 
@@ -23,6 +27,10 @@ export default async function InvoicesReviewPage() {
   if (!isAdmin && !userHasModule(auth.user, 'invoices-review')) {
     redirect('/dashboard');
   }
+
+  // `?open=<invoiceId>` deep-links straight onto an invoice (e.g. from search).
+  const { open } = await searchParams;
+  const openId = Number(Array.isArray(open) ? open[0] : open);
 
   const [invoices, customers, products, brandProfiles, organization, invoiceableQuotes, quickBooks, wave, approvers] =
     await Promise.all([
@@ -63,6 +71,7 @@ export default async function InvoicesReviewPage() {
       quickBooks={{ configured: quickBooks.configured, connected: quickBooks.connected }}
       wave={{ configured: wave.configured, connected: wave.connected }}
       approvers={approvers}
+      initialOpenId={Number.isInteger(openId) && openId > 0 ? openId : null}
     />
   );
 }

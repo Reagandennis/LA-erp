@@ -10,7 +10,11 @@ import TravelersClient from './travelers-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function TravelersPage() {
+export default async function TravelersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const auth = await getServerAuth();
   if (!auth) {
     redirect('/auth/login');
@@ -21,7 +25,18 @@ export default async function TravelersPage() {
     redirect('/dashboard');
   }
 
+  // Global search deep-links straight onto a traveller.
+  const { open } = await searchParams;
+  const openId = Number(Array.isArray(open) ? open[0] : open);
+
   const [items, customers] = await Promise.all([listTravelers(), listCustomerOptions()]);
 
-  return <TravelersClient isAdmin={isAdmin} initialItems={items} initialCustomers={customers} />;
+  return (
+    <TravelersClient
+      isAdmin={isAdmin}
+      initialItems={items}
+      initialCustomers={customers}
+      initialOpenId={Number.isInteger(openId) && openId > 0 ? openId : null}
+    />
+  );
 }

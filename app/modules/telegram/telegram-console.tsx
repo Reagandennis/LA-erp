@@ -8,9 +8,10 @@ import TelegramSignIn from './telegram-sign-in';
  * A Server Component cannot pass a function to a Client Component, so the page
  * renders this instead of wiring MessagingConsole directly.
  */
-export default function TelegramConsole() {
+export default function TelegramConsole({ initialChatId }: { initialChatId?: string | null }) {
   return (
     <MessagingConsole
+      initialChatId={initialChatId}
       config={{
         service: 'telegram',
         title: 'Telegram',

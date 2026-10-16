@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { computeStats, createAssessment, isConfigured, listAssessments } from '@/lib/intel';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -9,7 +10,7 @@ export const revalidate = 0;
 export const maxDuration = 120;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.intel);
   if (response || !auth) return response;
 
   const assessments = await listAssessments();
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.intel);
   if (response || !auth) return response;
 
   if (!isConfigured()) {

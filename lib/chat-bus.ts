@@ -18,8 +18,16 @@
 
 type Controller = ReadableStreamDefaultController<Uint8Array>;
 
-// userId → set of open SSE controllers for that user
-const subscribers = new Map<number, Set<Controller>>();
+declare global {
+  var chatBusSubscribersGlobal: Map<number, Set<Controller>> | undefined;
+}
+
+// userId → set of open SSE controllers for that user. Kept on globalThis like
+// the other process-wide state: the background ingest started from
+// instrumentation.ts can load its own copy of this module, and a bus that
+// isn't shared would silently drop every event it publishes.
+globalThis.chatBusSubscribersGlobal ??= new Map<number, Set<Controller>>();
+const subscribers = globalThis.chatBusSubscribersGlobal;
 
 export function subscribe(userId: number, ctrl: Controller): void {
   if (!subscribers.has(userId)) subscribers.set(userId, new Set());

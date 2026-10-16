@@ -154,10 +154,10 @@ export default function VacationsView({
       {selected && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-gray-900/20 backdrop-blur-sm"
+            className="fixed inset-0 z-[220] bg-gray-900/20 backdrop-blur-sm"
             onClick={() => setSelected(null)}
           />
-          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
+          <div className="fixed left-1/2 top-1/2 z-[230] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Avatar name={selected.userName} />

@@ -22,12 +22,14 @@ export default async function WhatsappPage({
   }
 
   // The console checks the id against the user's own accounts on every request.
-  const { account } = await searchParams;
+  const { account, chat } = await searchParams;
   const accountId = Number(Array.isArray(account) ? account[0] : account);
+  const chatId = (Array.isArray(chat) ? chat[0] : chat) ?? null;
 
   return (
     <MessagingConsole
       initialAccountId={Number.isSafeInteger(accountId) && accountId > 0 ? accountId : null}
+      initialChatId={chatId}
       config={{
         service: 'whatsapp',
         title: 'WhatsApp',

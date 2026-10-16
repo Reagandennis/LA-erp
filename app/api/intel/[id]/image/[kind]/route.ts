@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { fileResponse } from '@/lib/file-response';
 import { getAssessmentImage } from '@/lib/intel';
-import { requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -16,7 +17,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; kind: string }> },
 ) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.intel);
   if (response || !auth) return response;
 
   const { id: raw, kind } = await params;

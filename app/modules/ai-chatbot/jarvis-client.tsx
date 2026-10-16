@@ -1212,7 +1212,7 @@ export default function JarvisClient({
 
       {/* Mobile inspector — full-screen sheet */}
       {inspected?.mode === 'sheet' && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-white">
+        <div className="fixed inset-0 z-[230] flex flex-col bg-white">
           <InspectorHeader
             label={inspected.label}
             action={inspected.action}
@@ -1224,7 +1224,7 @@ export default function JarvisClient({
 
       {/* Chat history drawer */}
       {showHistory && (
-        <div className="fixed inset-0 z-50">
+        <div className="fixed inset-0 z-[230]">
           <button
             aria-label="Close history"
             className="absolute inset-0 bg-gray-900/30"

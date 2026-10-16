@@ -220,8 +220,8 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
 
       {draft && (
         <>
-          <div className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm z-40" onClick={closeDraft} />
-          <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 pointer-events-none">
+          <div className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm z-[220]" onClick={closeDraft} />
+          <div className="fixed inset-0 z-[230] flex items-stretch sm:items-center justify-center sm:p-4 pointer-events-none">
             <div className="bg-white w-full max-w-lg h-full sm:h-auto sm:max-h-[90vh] overflow-y-auto rounded-none sm:rounded-2xl shadow-2xl pointer-events-auto p-6 sm:p-8 space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-black text-gray-900">

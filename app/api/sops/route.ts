@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireAdminRequest, requireRequestAuth } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 import { createSop, getSopStats, listSops } from '@/lib/sops';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const { auth, response } = await requireRequestAuth(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.sops);
   if (response || !auth) return response;
 
   const [items, stats] = await Promise.all([listSops(auth.user.id), getSopStats()]);

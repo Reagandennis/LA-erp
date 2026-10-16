@@ -70,10 +70,14 @@ interface DoctorData {
 export async function getStatus(account: string): Promise<WacliStatus> {
   try {
     const d = await run<DoctorData>(['doctor'], 10_000, account);
+    const { syncStatus } = await import('./whatsapp-sync');
+    // While our `sync --follow` runs it holds the store, so doctor can only
+    // report the lock — and that holder is the live connection.
+    const following = d.connection_state === 'locked_by_other_process' && syncStatus(account).running;
     return {
       available: true,
       authenticated: Boolean(d.authenticated),
-      connected: Boolean(d.connected),
+      connected: Boolean(d.connected) || following,
       linkedJid: d.linked_jid || null,
       lastSyncAt: d.store?.last_sync_at || null,
       counts: {
@@ -246,11 +250,16 @@ interface SentData {
  * quick retry. `--post-send-wait` keeps a standalone session open for receipts
  * after the send; the long-lived sync handles those itself, so it is skipped
  * when our sync is up.
+ *
+ * wacli is given a deadline a little inside ours. Killing the client mid-send
+ * leaves the message in flight with no answer — it may well arrive, and the
+ * person sends it again — whereas wacli's own timeout says whether it was sent.
  */
 async function send(account: string, args: string[], timeoutMs: number): Promise<SendResult> {
   const { syncStatus } = await import('./whatsapp-sync');
   const fast = syncStatus(account).running ? ['--post-send-wait', '0'] : [];
-  const fullArgs = ['send', ...args, ...fast];
+  const deadline = `${Math.max(5, Math.floor(timeoutMs / 1000) - 10)}s`;
+  const fullArgs = ['--timeout', deadline, 'send', ...args, ...fast];
 
   for (let attempt = 0; ; attempt++) {
     try {
@@ -264,6 +273,22 @@ async function send(account: string, args: string[], timeoutMs: number): Promise
       }
       return { ok: false, error: message };
     }
+  }
+}
+
+/**
+ * Mark a chat read on the phone as well, the way reading it there would.
+ *
+ * This is the app-state patch only, deliberately without `--receipts`: it
+ * clears the unread badge on the user's own devices but sends no read receipt,
+ * so contacts never see blue ticks just because someone opened the chat here.
+ * Delegated to the running `sync --follow`, so it doesn't contend for the lock.
+ */
+export async function markChatRead(account: string, jid: string): Promise<void> {
+  try {
+    await run<unknown>(['chats', 'mark-read', '--chat', jid], 30_000, account);
+  } catch (e) {
+    console.warn(`[wacli] could not mark ${jid} read on the phone: ${e instanceof Error ? e.message : e}`);
   }
 }
 
@@ -281,6 +306,9 @@ export function jidToNumber(jid: string): string {
 
 // --- Media ----------------------------------------------------------------
 
+/** WhatsApp (and wacli) refuse uploads above this. */
+const MAX_SEND_BYTES = 100 * 1024 * 1024;
+
 /**
  * Send a file. wacli derives the WhatsApp bubble type (image/video/audio/
  * document) from the MIME, so `--as auto` is left implicit.
@@ -295,6 +323,9 @@ export async function sendMedia(
   file: { bytes: Buffer; mimeType: string; fileName: string },
   caption = '',
 ): Promise<SendResult> {
+  if (file.bytes.length > MAX_SEND_BYTES) {
+    return { ok: false, error: 'WhatsApp only accepts attachments up to 100 MB.' };
+  }
   const scratch = wacliScratch();
 
   let dir: string | null = null;
@@ -307,9 +338,14 @@ export async function sendMedia(
 
     const args = ['file', '--to', jid, '--file', path];
     if (caption) args.push('--caption', caption);
-    if (file.mimeType) args.push('--mime', file.mimeType);
+    // The browser reports octet-stream for anything it can't name; passing
+    // that on would force a photo or video into a document bubble, so leave
+    // detection to wacli instead.
+    if (file.mimeType && file.mimeType !== 'application/octet-stream') args.push('--mime', file.mimeType);
 
-    return await send(account, args, 120_000);
+    // Uploading is the slow part: allow for a large video on a slow uplink.
+    const megabytes = Math.ceil(file.bytes.length / (1024 * 1024));
+    return await send(account, args, Math.min(120_000 + megabytes * 3_000, 15 * 60_000));
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'send failed' };
   } finally {
@@ -336,7 +372,7 @@ export async function getMedia(account: string, jid: string, messageId: string):
   let dir: string | null = null;
   try {
     dir = await scratch.mkdtemp('laerp-wa-dl-');
-    await run<unknown>(
+    const data = await run<{ path?: string; mime_type?: string } | null>(
       ['--read-only', 'media', 'download', '--chat', jid, '--id', messageId, '--output', dir],
       120_000,
       account,
@@ -346,8 +382,11 @@ export async function getMedia(account: string, jid: string, messageId: string):
 
     const fileName = entries[0]!;
     const bytes = await scratch.readFile(scratch.join(dir, fileName));
-    return { bytes, mimeType: mimeFromName(fileName), fileName };
-  } catch {
+    // wacli reports the attachment's real type; the extension is a fallback
+    // for names it doesn't carry (or doesn't have at all).
+    return { bytes, mimeType: data?.mime_type || mimeFromName(fileName), fileName };
+  } catch (e) {
+    console.warn(`[wacli] media ${messageId} in ${jid} unavailable: ${e instanceof Error ? e.message : e}`);
     return null;
   } finally {
     if (dir) await scratch.remove(dir).catch(() => {});

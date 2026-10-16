@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { syncReadToPhone } from '@/lib/messaging-ingest';
 import { listThread, markRead } from '@/lib/messaging-repo';
 import { resolveMessagingRequest } from '@/lib/messaging-routes';
 
@@ -30,7 +31,11 @@ export async function GET(request: NextRequest) {
     limit,
     before && !Number.isNaN(before.getTime()) ? before : undefined,
   );
-  // Opening a thread clears its unread badge.
-  if (!before) await markRead(ctx.account.id, id);
+  // Opening a thread clears its unread badge — here and, as WhatsApp Web
+  // would, on the phone. A tab refreshing in the background passes `read=0`:
+  // nobody is looking, so the message must stay unread.
+  if (!before && searchParams.get('read') !== '0' && (await markRead(ctx.account.id, id, ctx.userId))) {
+    syncReadToPhone(ctx.account, id);
+  }
   return NextResponse.json({ messages });
 }

@@ -1,11 +1,58 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { openGlobalSearch } from './global-search';
 import LogoutButton from './logout-button';
+import { type MessagingService, useMessagingUnread } from './messaging-alerts-store';
 import { moduleIcon } from './module-icons';
 import { useIsClient } from './use-client';
+
+// --- Recently opened modules (per browser) ----------------------------------
+
+const RECENT_KEY = 'la-erp.recent-modules';
+const MAX_RECENT = 4;
+const NO_RECENT: string[] = [];
+const recentListeners = new Set<() => void>();
+let recentCache: { raw: string | null; slugs: string[] } = { raw: null, slugs: NO_RECENT };
+
+function recentSnapshot(): string[] {
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(RECENT_KEY);
+  } catch {
+    return NO_RECENT;
+  }
+  if (raw !== recentCache.raw) {
+    let slugs = NO_RECENT;
+    try {
+      slugs = raw ? (JSON.parse(raw) as string[]).filter((v) => typeof v === 'string') : NO_RECENT;
+    } catch {
+      // Unreadable: start again.
+    }
+    recentCache = { raw, slugs };
+  }
+  return recentCache.slugs;
+}
+
+function rememberModule(slug: string): void {
+  try {
+    const next = [slug, ...recentSnapshot().filter((s) => s !== slug)].slice(0, MAX_RECENT);
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    for (const listener of recentListeners) listener();
+  } catch {
+    // A convenience only.
+  }
+}
+
+function subscribeRecent(listener: () => void) {
+  recentListeners.add(listener);
+  return () => recentListeners.delete(listener);
+}
+
+/** Only worth a "Recent" group once the list is long enough to scroll. */
+const RECENT_FROM_MODULES = 8;
 
 /** Below this width the sidebar starts collapsed and overlays the page when opened. */
 const SMALL_SCREEN = '(max-width: 1023px)';
@@ -47,9 +94,36 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
     if (isSmallScreen()) setIsCollapsed(true);
   }
 
+  const router = useRouter();
+  const [filter, setFilter] = useState('');
+  const needle = filter.trim().toLowerCase();
+  const shown = useMemo(
+    () =>
+      needle
+        ? modules.filter(
+            (m) =>
+              m.name.toLowerCase().includes(needle) ||
+              m.slug.includes(needle) ||
+              (m.category || '').toLowerCase().includes(needle),
+          )
+        : modules,
+    [modules, needle],
+  );
+
+  // Remember which modules are opened, for the Recent group.
+  useEffect(() => {
+    const slug = pathname.match(/^\/modules\/([^/?#]+)/)?.[1];
+    if (slug && modules.some((m) => m.slug === slug)) rememberModule(slug);
+  }, [pathname, modules]);
+  const recentSlugs = useSyncExternalStore(subscribeRecent, recentSnapshot, () => NO_RECENT);
+  const recentModules =
+    !needle && modules.length >= RECENT_FROM_MODULES
+      ? recentSlugs.map((slug) => modules.find((m) => m.slug === slug)).filter((m): m is Module => Boolean(m))
+      : [];
+
   // Group modules by category
   const groupedModules: Record<string, Module[]> = {};
-  for (const m of modules) {
+  for (const m of shown) {
     const cat = m.category || 'Other';
     if (!groupedModules[cat]) {
       groupedModules[cat] = [];
@@ -58,6 +132,46 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
   }
 
   const isActive = (path: string) => pathname === path;
+
+  const renderModule = (module: Module, keyPrefix = '') => {
+    const active = isActive(`/modules/${module.slug}`);
+    const badge = unreadFor(module.slug);
+    const badgeText = badge > 99 ? '99+' : String(badge);
+    return (
+      <Link
+        key={`${keyPrefix}${module.id}`}
+        href={`/modules/${module.slug}`}
+        title={isCollapsed ? (badge > 0 ? `${module.name} (${badge} unread)` : module.name) : ""}
+        className={`flex items-center gap-3 rounded-lg transition-all text-sm font-bold group ${
+          isCollapsed ? 'justify-center p-2.5' : 'px-3 py-2.5'
+        } ${
+          active
+            ? 'bg-primary text-secondary'
+            : 'text-primary/70 hover:bg-primary/5 hover:text-primary'
+        }`}
+      >
+        <div className="relative w-6 h-6 flex items-center justify-center shrink-0">
+          {moduleIcon(module.slug)}
+          {isCollapsed && badge > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-black leading-4 text-center ring-2 ring-secondary">
+              {badgeText}
+            </span>
+          )}
+        </div>
+        {!isCollapsed && <span className="whitespace-nowrap truncate">{module.name}</span>}
+        {!isCollapsed && badge > 0 && (
+          <span className="ml-auto shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-emerald-500 text-white text-[10px] font-black leading-5 text-center">
+            {badgeText}
+            <span className="sr-only"> unread chats</span>
+          </span>
+        )}
+      </Link>
+    );
+};
+
+  // Chats with unread messages, for the messaging modules' badges.
+  const unread = useMessagingUnread();
+  const unreadFor = (slug: string) => (slug in unread ? unread[slug as MessagingService] : 0);
 
   return (
     <>
@@ -100,8 +214,74 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
         </button>
       </div>
 
+      {/* Find a module */}
+      <div className="px-3 pt-3">
+        {isCollapsed ? (
+          <button
+            type="button"
+            onClick={() => openGlobalSearch()}
+            title="Search everything (Ctrl K)"
+            aria-label="Search everything"
+            className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg text-primary/70 transition-all hover:bg-primary/5 hover:text-primary"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </button>
+        ) : (
+          <label className="relative block">
+            <span className="sr-only">Find a module</span>
+            <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary/40" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setFilter('');
+                if (e.key === 'Enter' && shown[0]) {
+                  setFilter('');
+                  router.push(`/modules/${shown[0].slug}`);
+                }
+              }}
+              placeholder="Find a module…"
+              className="w-full rounded-lg border border-primary/10 bg-primary/5 py-2 pl-9 pr-3 text-sm font-medium text-primary placeholder:text-primary/40 focus:border-primary/30 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/15"
+            />
+          </label>
+        )}
+      </div>
+
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto p-3 space-y-6 custom-scrollbar scrollbar-hide">
+        {!isCollapsed && needle && shown.length === 0 && (
+          <div className="px-3 py-2 text-xs text-primary/60">
+            <p>No module matches “{filter.trim()}”.</p>
+            <button
+              type="button"
+              onClick={() => {
+                openGlobalSearch(filter.trim());
+                setFilter('');
+              }}
+              className="mt-2 font-bold text-primary underline-offset-2 hover:underline"
+            >
+              Search everything for “{filter.trim()}” →
+            </button>
+          </div>
+        )}
+
+        {recentModules.length > 0 && (
+          <div className="space-y-1">
+            {!isCollapsed ? (
+              <h3 className="px-3 text-[10px] font-black text-primary/30 uppercase tracking-[0.2em] mb-2">Recent</h3>
+            ) : (
+              <div className="border-t border-primary/10 mx-1 my-3" />
+            )}
+            {recentModules.map((m) => renderModule(m, 'recent-'))}
+          </div>
+        )}
+
+        {(!needle || 'dashboard'.includes(needle)) && (
         <div className="space-y-1">
            <Link
             href="/dashboard"
@@ -122,6 +302,7 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
             {!isCollapsed && <span className="whitespace-nowrap truncate text-sm">Dashboard</span>}
           </Link>
         </div>
+        )}
 
         {Object.entries(groupedModules).map(([category, categoryModules]) => (
           <div key={category} className="space-y-1">
@@ -132,28 +313,7 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
             ) : (
               <div className="border-t border-primary/10 mx-1 my-3" />
             )}
-            {categoryModules.map((module) => {
-              const active = isActive(`/modules/${module.slug}`);
-              return (
-                <Link
-                  key={module.id}
-                  href={`/modules/${module.slug}`}
-                  title={isCollapsed ? module.name : ""}
-                  className={`flex items-center gap-3 rounded-lg transition-all text-sm font-bold group ${
-                    isCollapsed ? 'justify-center p-2.5' : 'px-3 py-2.5'
-                  } ${
-                    active
-                      ? 'bg-primary text-secondary'
-                      : 'text-primary/70 hover:bg-primary/5 hover:text-primary'
-                  }`}
-                >
-                  <div className="w-6 h-6 flex items-center justify-center shrink-0">
-                    {moduleIcon(module.slug)}
-                  </div>
-                  {!isCollapsed && <span className="whitespace-nowrap truncate">{module.name}</span>}
-                </Link>
-              );
-            })}
+            {categoryModules.map((m) => renderModule(m))}
           </div>
         ))}
       </div>

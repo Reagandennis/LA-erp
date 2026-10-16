@@ -3,10 +3,12 @@
 import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { startVisibleInterval } from '@/lib/visible-interval';
 
-import { Toast, ToastStack } from './toast';
+import { dismissPushedToast, Toast, ToastStack, usePushedToasts } from './toast';
+import { useIsClient } from './use-client';
 
 type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar';
 
@@ -334,7 +336,13 @@ export default function NotificationsBell() {
     return () => clearTimeout(timeout);
   }, [visibleToastKeys]);
 
+  // Alerts raised elsewhere (new chat messages) share this stack.
+  const pushedToasts = usePushedToasts();
   const unreadCount = notifications.filter((item) => !item.readAt).length;
+  // The button lives inside the top bar, which is a CSS container: anything
+  // position:fixed inside it would be laid out within the bar's 3rem. The
+  // drawer and toasts are rendered at the page level instead.
+  const isClient = useIsClient();
   const visibleToasts = notifications.filter((item) =>
     visibleToastKeys.includes(compositeKey(item)),
   );
@@ -367,10 +375,15 @@ export default function NotificationsBell() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed top-14 right-6 z-120 flex items-center justify-center w-11 h-11 rounded-full bg-white shadow-lg border border-gray-200 text-gray-700 hover:text-emerald-600"
-        aria-label="Open notifications"
+        // Quiet when there is nothing new; lit up (with the count) when there is.
+        className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors ${
+          unreadCount > 0
+            ? 'border-white bg-white text-primary shadow-sm hover:bg-white/90'
+            : 'border-white/20 bg-white/10 text-white/80 hover:bg-white/25 hover:text-white'
+        }`}
+        aria-label={unreadCount > 0 ? `Open notifications (${unreadCount} unread)` : 'Open notifications'}
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -379,14 +392,27 @@ export default function NotificationsBell() {
           />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-            {unreadCount}
+          <span className="absolute -top-1.5 -right-1.5 min-w-4 rounded-full bg-rose-500 px-1 text-center font-sans text-[10px] font-bold leading-4 text-white ring-2 ring-primary">
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
-      {visibleToasts.length > 0 && (
+      {isClient && (visibleToasts.length > 0 || pushedToasts.length > 0) && createPortal(
         <ToastStack>
+          {pushedToasts.map((toast) => (
+            <Toast
+              key={toast.key}
+              source={toast.source}
+              title={toast.title}
+              message={toast.message}
+              timestamp={toast.timestamp}
+              href={toast.href}
+              actionLabel={toast.actionLabel}
+              onAction={() => dismissPushedToast(toast.key)}
+              onDismiss={() => dismissPushedToast(toast.key)}
+            />
+          ))}
           {visibleToasts.map((notification) => (
             <Toast
               key={compositeKey(notification)}
@@ -402,18 +428,20 @@ export default function NotificationsBell() {
               onDismiss={() => dismissToast(compositeKey(notification))}
             />
           ))}
-        </ToastStack>
+        </ToastStack>,
+        document.body,
       )}
 
-      {isOpen && (
-        <>
+      {isClient && isOpen && createPortal(
+        // Above the top bar (z-200), so its header and close button are never covered.
+        <div className="font-sans">
           <button
             type="button"
-            className="fixed inset-0 z-110 bg-black/20"
+            className="fixed inset-0 z-[205] bg-black/20"
             onClick={() => setIsOpen(false)}
             aria-label="Close notifications"
           />
-          <aside className="fixed left-0 top-0 h-full w-full max-w-sm bg-white shadow-2xl z-120 animate-in slide-in-from-left duration-300 ease-out">
+          <aside className="fixed left-0 top-0 h-full w-full max-w-sm bg-white shadow-2xl z-[210] animate-in slide-in-from-left duration-300 ease-out">
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-gray-900">Notifications</p>
@@ -470,7 +498,8 @@ export default function NotificationsBell() {
               )}
             </div>
           </aside>
-        </>
+        </div>,
+        document.body,
       )}
     </>
   );

@@ -130,8 +130,8 @@ export default function HandoverDetailDrawer({
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-white shadow-2xl">
+      <div className="fixed inset-0 z-[220] bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 z-[230] flex w-full max-w-md flex-col bg-white shadow-2xl">
         {loading ? (
           <div className="flex flex-1 items-center justify-center text-sm text-gray-400">Loading…</div>
         ) : !handover ? (

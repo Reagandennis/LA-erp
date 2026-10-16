@@ -72,8 +72,8 @@ export default function HandoverForm({ mode, handover, onClose, onSaved }: Hando
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm" onClick={() => !busy && onClose()} />
-      <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="fixed inset-0 z-[220] bg-gray-900/40 backdrop-blur-sm" onClick={() => !busy && onClose()} />
+      <div className="fixed inset-0 z-[230] flex items-end justify-center p-0 sm:items-center sm:p-4">
         <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-2xl">
           <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
             <div>

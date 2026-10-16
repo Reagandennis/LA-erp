@@ -6,7 +6,11 @@ const { requireRequestAuth } = vi.hoisted(() => ({
 }));
 
 vi.mock('server-only', () => ({}));
-vi.mock('../lib/request-auth', () => ({ requireRequestAuth }));
+vi.mock('../lib/request-auth', () => ({
+  requireRequestAuth,
+  // Module access has its own tests (request-auth-module); these cover the route itself.
+  requireModuleRequest: (request: unknown) => requireRequestAuth(request),
+}));
 
 import { GET } from '../app/api/flight-tracker/route';
 
