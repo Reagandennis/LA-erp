@@ -2,6 +2,7 @@ import 'server-only';
 
 import { Prisma } from '@prisma/client';
 
+import { isPreviewableImage } from './attachment-types';
 import { addDays, dateKey, parseDateKey } from './date-grid';
 import { prisma } from './prisma';
 
@@ -34,6 +35,9 @@ export interface TripItineraryItemDraft {
   reminderMinutesBefore?: number | null;
   imageUrl?: string | null;
   confirmationCode?: string | null;
+  driverId?: number | null;
+  officerId?: number | null;
+  vehicleId?: number | null;
 }
 
 export interface TripDaySummary {
@@ -73,6 +77,24 @@ export interface TripItineraryItemSummary {
   reminderAt: string | null;
   imageUrl: string | null;
   confirmationCode: string | null;
+  /** Photos and documents, oldest first. */
+  attachments: TripItemAttachmentSummary[];
+  /** The crew on this movement, from Task Assignment's registers. */
+  driver: { id: number; name: string; phone: string | null } | null;
+  officer: { id: number; name: string; callSign: string | null; grade: string; phone: string | null } | null;
+  vehicle: { id: number; registration: string; make: string | null; model: string | null; type: string } | null;
+}
+
+export interface TripItemAttachmentSummary {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  /** Opens the file: inline for images, PDFs and text, otherwise a download. */
+  url: string;
+  /** A small preview for images; null for documents. */
+  thumbnailUrl: string | null;
 }
 
 export interface TripSummary {
@@ -89,12 +111,27 @@ export interface TripSummary {
   createdAt: string;
   updatedAt: string;
   customer: { id: number; name: string; company: string | null; email: string | null };
+  /** The client's travellers on this trip, lead first. */
+  travelers: TripTravelerSummary[];
   createdBy: { id: number; name: string; email: string };
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
   itemCount: number;
   assignmentCount: number;
   logCount: number;
+}
+
+export interface TripTravelerSummary {
+  id: number;
+  name: string;
+  isPrimary: boolean;
+}
+
+/** What the trip planner may know about a client's travellers: no PII beyond the name. */
+export interface TravelerOption {
+  id: number;
+  name: string;
+  customerId: number;
 }
 
 export interface TripDetail extends TripSummary {
@@ -122,6 +159,7 @@ interface TripRecord {
   createdAt: Date;
   updatedAt: Date;
   customer: { id: number; name: string; company: string | null; email: string | null };
+  travelers?: Array<{ isPrimary: boolean; traveler: { id: number; name: string } }>;
   createdBy: { id: number; name: string; email: string };
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
@@ -144,6 +182,7 @@ interface TripDayRecord {
 
 interface TripItineraryItemRecord {
   id: number;
+  tripId: number;
   dayId: number | null;
   position: number;
   itemType: string;
@@ -170,10 +209,21 @@ interface TripItineraryItemRecord {
   reminderSentAt: Date | null;
   imageUrl: string | null;
   confirmationCode: string | null;
+  attachments?: Array<{ id: number; filename: string; mimeType: string; size: number; createdAt: Date }>;
+  driverId: number | null;
+  officerId: number | null;
+  vehicleId: number | null;
+  driver?: TripItineraryItemSummary['driver'];
+  officer?: TripItineraryItemSummary['officer'];
+  vehicle?: TripItineraryItemSummary['vehicle'];
 }
 
 const tripInclude = {
   customer: { select: { id: true, name: true, company: true, email: true } },
+  travelers: {
+    select: { isPrimary: true, traveler: { select: { id: true, name: true } } },
+    orderBy: [{ isPrimary: 'desc' as const }, { id: 'asc' as const }],
+  },
   createdBy: { select: { id: true, name: true, email: true } },
   owner: { select: { id: true, name: true, email: true } },
   sourceQuote: { select: { id: true, reference: true } },
@@ -182,6 +232,16 @@ const tripInclude = {
       { scheduledAt: 'asc' as const },
       { position: 'asc' as const },
     ],
+    include: {
+      // Never the bytes: those are served one file at a time.
+      attachments: {
+        select: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
+        orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
+      },
+      driver: { select: { id: true, name: true, phone: true } },
+      officer: { select: { id: true, name: true, callSign: true, grade: true, phone: true } },
+      vehicle: { select: { id: true, registration: true, make: true, model: true, type: true } },
+    },
   },
   days: {
     orderBy: [{ dayNumber: 'asc' as const }],
@@ -192,6 +252,7 @@ const tripInclude = {
 /** The list needs counts only; a FileMaker-sized history has thousands of stops. */
 const tripListInclude = {
   customer: tripInclude.customer,
+  travelers: tripInclude.travelers,
   createdBy: tripInclude.createdBy,
   owner: tripInclude.owner,
   sourceQuote: tripInclude.sourceQuote,
@@ -238,6 +299,9 @@ type TripItineraryItemCollectionClient = {
       reminderAt?: Date | null;
       imageUrl?: string | null;
       confirmationCode?: string | null;
+      driverId?: number | null;
+      officerId?: number | null;
+      vehicleId?: number | null;
     }>;
   }) => Promise<{ count: number }>;
   findUnique: (args: { where: { id: number } }) => Promise<TripItineraryItemRecord | null>;
@@ -362,7 +426,45 @@ function serializeItem(item: TripItineraryItemRecord): TripItineraryItemSummary 
     reminderAt: item.reminderAt?.toISOString() ?? null,
     imageUrl: item.imageUrl,
     confirmationCode: item.confirmationCode,
+    attachments: (item.attachments ?? []).map((attachment) => {
+      const url = `/api/trips/${item.tripId}/items/${item.id}/attachments/${attachment.id}`;
+      return {
+        id: attachment.id,
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        createdAt: attachment.createdAt.toISOString(),
+        url,
+        thumbnailUrl: isPreviewableImage(attachment.mimeType) ? `${url}?thumb=1` : null,
+      };
+    }),
+    driver: item.driver ?? null,
+    officer: item.officer ?? null,
+    vehicle: item.vehicle ?? null,
   };
+}
+
+/**
+ * Crew must come from Task Assignment's registers, and no one retired — except
+ * someone already on the event, who can stay on it.
+ */
+async function crewProblem(
+  picks: Array<{ driverId?: number | null; officerId?: number | null; vehicleId?: number | null }>,
+  current: { driverId: number | null; officerId: number | null; vehicleId: number | null } | null = null,
+): Promise<string | null> {
+  const fresh = (key: 'driverId' | 'officerId' | 'vehicleId') => [
+    ...new Set(picks.flatMap((pick) => (pick[key] && pick[key] !== current?.[key] ? [pick[key]!] : []))),
+  ];
+  const [driverIds, officerIds, vehicleIds] = [fresh('driverId'), fresh('officerId'), fresh('vehicleId')];
+  const [drivers, officers, vehicles] = await Promise.all([
+    driverIds.length ? prisma.driver.count({ where: { id: { in: driverIds }, retiredAt: null } }) : 0,
+    officerIds.length ? prisma.officer.count({ where: { id: { in: officerIds }, retiredAt: null } }) : 0,
+    vehicleIds.length ? prisma.vehicle.count({ where: { id: { in: vehicleIds } } }) : 0,
+  ]);
+  if (drivers !== driverIds.length) return 'That driver is no longer on the Task Assignment register';
+  if (officers !== officerIds.length) return 'That CPO is no longer on the Task Assignment register';
+  if (vehicles !== vehicleIds.length) return 'That vehicle is no longer on the Task Assignment register';
+  return null;
 }
 
 function computeReminderAt(
@@ -394,6 +496,11 @@ function serializeSummary(record: TripRecord | TripListRecord): TripSummary {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     customer: record.customer,
+    travelers: (record.travelers ?? []).map((link) => ({
+      id: link.traveler.id,
+      name: link.traveler.name,
+      isPrimary: link.isPrimary,
+    })),
     createdBy: record.createdBy,
     owner: record.owner,
     sourceQuote: record.sourceQuote,
@@ -468,7 +575,12 @@ export async function getTripForUser(params: {
   return serializeDetail(record);
 }
 
-function canEditTrip(record: TripRecord, userId: number, isAdmin: boolean): boolean {
+/** Who may change a trip and its itinerary. Shared with the attachment routes. */
+export function canEditTrip(
+  record: Pick<TripRecord, 'status' | 'ownerId' | 'createdById'>,
+  userId: number,
+  isAdmin: boolean,
+): boolean {
   if (isAdmin) return true;
   if (record.status === 'Completed') {
     // mirror approver-revise-after-Approved: only owner can revise after completion
@@ -478,8 +590,62 @@ function canEditTrip(record: TripRecord, userId: number, isAdmin: boolean): bool
   return record.createdById === userId || record.ownerId === userId;
 }
 
+/** An existing traveller of the trip's client, or the name of a new one to add to that client. */
+export type TripTravelerInput = { travelerId: number } | { name: string };
+
+/** A picked traveller isn't one of the trip's client's travellers. */
+export class TripTravelerError extends Error {}
+
+export async function listTravelerOptions(): Promise<TravelerOption[]> {
+  const rows = await prisma.traveler.findMany({
+    where: { customerId: { not: null }, status: 'Active' },
+    select: { id: true, name: true, customerId: true },
+    orderBy: [{ name: 'asc' }],
+  });
+  return rows.map((row) => ({ id: row.id, name: row.name, customerId: row.customerId! }));
+}
+
+/**
+ * Turns the picked travellers into Traveler ids, in order (the first is the
+ * lead). Existing travellers must belong to the trip's client; new names
+ * become travellers of that client.
+ */
+async function resolveTripTravelers(
+  tx: Prisma.TransactionClient,
+  inputs: TripTravelerInput[],
+  customerId: number,
+  createdById: number,
+): Promise<number[]> {
+  const existingIds = [...new Set(inputs.flatMap((t) => ('travelerId' in t ? [t.travelerId] : [])))];
+  if (existingIds.length > 0) {
+    const owned = await tx.traveler.count({ where: { id: { in: existingIds }, customerId } });
+    if (owned !== existingIds.length) {
+      throw new TripTravelerError("Every traveller must belong to the trip's client");
+    }
+  }
+
+  const ids: number[] = [];
+  const createdByName = new Map<string, number>();
+  for (const input of inputs) {
+    let id: number;
+    if ('travelerId' in input) {
+      id = input.travelerId;
+    } else {
+      const key = input.name.toLowerCase();
+      id =
+        createdByName.get(key) ??
+        (await tx.traveler.create({ data: { name: input.name, customerId, createdById }, select: { id: true } })).id;
+      createdByName.set(key, id);
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 export interface TripCreateInput {
   customerId: number;
+  /** Lead first. */
+  travelers?: TripTravelerInput[];
   ownerId: number | null;
   title: string;
   description: string | null;
@@ -499,6 +665,14 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
 
   return prisma.$transaction(async (tx) => {
     const { trip, tripItineraryItem, tripSequence, trackingSequence } = txClients(tx);
+
+    // Before the sequences, so a rejected traveller doesn't burn a reference.
+    const travelerIds = await resolveTripTravelers(
+      tx,
+      input.travelers ?? [],
+      input.customerId,
+      input.createdById,
+    );
 
     const tripSeq = await reserveSequence(tripSequence, year);
     const trackingSeq = await reserveSequence(trackingSequence, year);
@@ -522,6 +696,16 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
       },
       include: tripInclude,
     });
+
+    if (travelerIds.length > 0) {
+      await tx.tripTraveler.createMany({
+        data: travelerIds.map((travelerId, index) => ({
+          tripId: created.id,
+          travelerId,
+          isPrimary: index === 0,
+        })),
+      });
+    }
 
     if (input.items.length > 0) {
       await tripItineraryItem.createMany({
@@ -641,6 +825,8 @@ export async function addTripItems(params: {
   if (params.items.some((item) => item.dayId != null && !dayIds.has(item.dayId))) {
     return { error: 'Day not found on this trip', status: 400 };
   }
+  const crewError = await crewProblem(params.items);
+  if (crewError) return { error: crewError, status: 400 };
 
   return prisma.$transaction(async (tx) => {
     const { trip, tripItineraryItem } = txClients(tx);
@@ -682,6 +868,9 @@ export async function addTripItems(params: {
           reminderAt: computeReminderAt(scheduledAt, reminderMinutesBefore),
           imageUrl: item.imageUrl ?? null,
           confirmationCode: item.confirmationCode ?? null,
+          driverId: item.driverId ?? null,
+          officerId: item.officerId ?? null,
+          vehicleId: item.vehicleId ?? null,
         };
       }),
     });
@@ -713,6 +902,9 @@ export interface TripItineraryItemUpdateInput {
   reminderMinutesBefore?: number | null;
   imageUrl?: string | null;
   confirmationCode?: string | null;
+  driverId?: number | null;
+  officerId?: number | null;
+  vehicleId?: number | null;
 }
 
 export async function updateTripItem(params: {
@@ -734,6 +926,8 @@ export async function updateTripItem(params: {
   if (nextDayId != null && !(existing.days ?? []).some((day) => day.id === nextDayId)) {
     return { error: 'Day not found on this trip', status: 400 };
   }
+  const crewError = await crewProblem([params.input], item);
+  if (crewError) return { error: crewError, status: 400 };
 
   return prisma.$transaction(async (tx) => {
     const { trip, tripItineraryItem } = txClients(tx);
@@ -762,6 +956,9 @@ export async function updateTripItem(params: {
     if (params.input.confirmationCode !== undefined) {
       data.confirmationCode = params.input.confirmationCode;
     }
+    if (params.input.driverId !== undefined) data.driverId = params.input.driverId;
+    if (params.input.officerId !== undefined) data.officerId = params.input.officerId;
+    if (params.input.vehicleId !== undefined) data.vehicleId = params.input.vehicleId;
     if (params.input.endsAt !== undefined) {
       data.endsAt = parseScheduledAt(params.input.endsAt);
     }
@@ -1168,6 +1365,10 @@ export async function duplicateTripDay(params: {
           reminderAt: null,
           imageUrl: item.imageUrl,
           confirmationCode: item.confirmationCode,
+          // The same crew usually works the repeated day; easy to change per event.
+          driverId: item.driverId,
+          officerId: item.officerId,
+          vehicleId: item.vehicleId,
         })),
       });
     }

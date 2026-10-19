@@ -89,13 +89,13 @@ const CATEGORY_SUGGESTIONS: Record<
 > = {
   sales: [
     {
-      heading: 'Create a customer',
+      heading: 'Create a client',
       body: 'Add a new account with contact details',
-      prompt: 'Create a customer called ',
+      prompt: 'Create a client called ',
     },
     {
       heading: 'Draft a quote',
-      body: 'Build a quote for a customer with line items',
+      body: 'Build a quote for a client with line items',
       prompt: 'Draft a quote for ',
     },
     {
@@ -127,7 +127,7 @@ const CATEGORY_SUGGESTIONS: Record<
     },
     {
       heading: 'Plan a trip',
-      body: 'Create a trip with dates and a customer',
+      body: 'Create a trip with dates and a client',
       prompt: 'Plan a trip for ',
     },
   ],

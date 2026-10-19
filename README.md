@@ -478,7 +478,8 @@ click **Connect Wave** in the Invoices module.
 ## Scripts
 
 ```bash
-npm run dev          # start the dev server
+npm run dev          # start the dev server (webpack, see below)
+npm run dev:turbo    # start the dev server with Turbopack
 npm run build        # production build
 npm run start        # run the production build
 npm run lint         # ESLint
@@ -487,6 +488,12 @@ npm run db:generate  # prisma generate
 npm run db:migrate   # prisma migrate dev
 npm run db:seed      # seed RBAC, modules, and bootstrap admin
 ```
+
+`npm run dev` uses webpack because the Turbopack dev server in Next.js 16.4
+can trap a browser tab in a reload loop ("HMR hash mismatch": the page reloads
+many times a second, logging `✓ Compiled in Xms` each time). The race is
+reworked in the 16.5 canaries; once 16.5 is stable, try `npm run dev:turbo`
+and switch back if it stays quiet. Production builds are unaffected.
 
 ---
 

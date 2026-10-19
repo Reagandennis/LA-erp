@@ -27,7 +27,7 @@ function formatDate(value: string | null): string {
 export async function emailInvoiceToCustomer(invoice: InvoiceDetail): Promise<{ to: string }> {
   const to = invoice.customer.email?.trim();
   if (!to) {
-    throw new EmailError('This customer has no email address on file.');
+    throw new EmailError('This client has no email address on file.');
   }
 
   const organization = await getOrganizationSettings();
@@ -69,7 +69,7 @@ export async function emailInvoiceToCustomer(invoice: InvoiceDetail): Promise<{ 
 export async function emailQuoteToCustomer(quote: QuoteDetail): Promise<{ to: string }> {
   const to = quote.customer.email?.trim();
   if (!to) {
-    throw new EmailError('This customer has no email address on file.');
+    throw new EmailError('This client has no email address on file.');
   }
 
   const organization = await getOrganizationSettings();
@@ -123,11 +123,11 @@ export async function emailInvoiceApprovalRequest(params: {
     <p>Hi ${escapeEmailHtml(params.approver.name)},</p>
     <p><strong>${escapeEmailHtml(params.submitterName)}</strong> submitted invoice <strong>${escapeEmailHtml(invoice.number)}</strong> for your approval.</p>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:14px 0;font-size:14px;color:#374151;">
-      <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Customer</td><td>${escapeEmailHtml(invoice.customer.name)}</td></tr>
+      <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Client</td><td>${escapeEmailHtml(invoice.customer.name)}</td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Total</td><td style="font-weight:700;">${escapeEmailHtml(formatMoney(invoice.total, invoice.currency))}</td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Due date</td><td>${escapeEmailHtml(formatDate(invoice.dueDate))}</td></tr>
     </table>
-    <p>The invoice is attached as a PDF. It cannot be sent to the customer, and no payments can be recorded against it, until you approve it.</p>`;
+    <p>The invoice is attached as a PDF. It cannot be sent to the client, and no payments can be recorded against it, until you approve it.</p>`;
 
   const html = renderEmailLayout({
     title: `Approval needed: invoice ${invoice.number}`,
@@ -165,7 +165,7 @@ export async function emailInvoiceDecisionToCreator(params: {
     <p>Hi ${escapeEmailHtml(invoice.createdBy.name)},</p>
     <p>Invoice <strong>${escapeEmailHtml(invoice.number)}</strong> (${escapeEmailHtml(invoice.customer.name)}, ${escapeEmailHtml(formatMoney(invoice.total, invoice.currency))}) was <strong>${approved ? 'approved' : 'declined'}</strong>${invoice.approver ? ` by ${escapeEmailHtml(invoice.approver.name)}` : ''}.</p>
     ${params.note ? `<p style="color:#6b7280;">Note: “${escapeEmailHtml(params.note)}”</p>` : ''}
-    <p>${approved ? 'You can now send it to the customer.' : 'Revise the invoice and resubmit it for approval.'}</p>`;
+    <p>${approved ? 'You can now send it to the client.' : 'Revise the invoice and resubmit it for approval.'}</p>`;
 
   const html = renderEmailLayout({
     title: `Invoice ${invoice.number} ${approved ? 'approved' : 'declined'}`,

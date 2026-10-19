@@ -3,29 +3,32 @@
 import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
+import { SILENT_BANNER_HEADER } from '@/app/ui/banner';
 import {
-  flightCountdown,
-  flightPunctuality,
+  flightDirection,
+  flightProgress,
+  formatDuration,
   normalizeFlightNumber,
+  scheduleCountdown,
+  scheduledFlightTimes,
+  type FlightSchedule,
+  type FlightTrack,
   type Punctuality,
 } from '@/lib/flight-status';
+import { isValidTimeZone } from '@/lib/zoned-time';
 
 import type { TripItineraryItemSummary } from '../../types';
+import { AttachmentStrip } from './attachment-strip';
+import { CrewRow } from './crew-row';
 
-interface LiveFlight {
-  flight: string | null;
-  callsign: string | null;
-  altFt: number | null;
-  gspeedKt: number | null;
-  origIata: string | null;
-  destIata: string | null;
-  eta: string | null;
-}
-
-/** How often the card refreshes live position while it is on screen. */
-const POLL_MS = 90_000;
 /** How often the countdown re-reads the clock. */
 const TICK_MS = 30_000;
+/** Lookups are paid, and FR24 has nothing to say much before a flight. */
+const TRACK_LEAD_MS = 6 * 60 * 60_000;
+/** An arrival with no duration: assume it may have left this long before. */
+const ARRIVAL_ONLY_LEAD_MS = 20 * 60 * 60_000;
+const POLL_AIRBORNE_MS = 3 * 60_000;
+const POLL_WAITING_MS = 5 * 60_000;
 
 let tickNow = Date.now();
 const tickListeners = new Set<() => void>();
@@ -68,62 +71,88 @@ const PUNCTUALITY_STYLE: Record<Punctuality, { chip: string; dot: string }> = {
   unknown: { chip: 'bg-slate-50 text-slate-500 ring-slate-200', dot: 'bg-slate-400' },
 };
 
-function clockTime(value: string | null): string {
-  if (!value) return '--:--';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '--:--';
-  return date.toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false });
+const TAKEOFF_ICON =
+  'M2.5 19h19v2h-19v-2zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 2.59 4.49L21 11.49c.81-.23 1.28-1.05 1.07-1.85z';
+const LANDING_ICON =
+  'M2.5 19h19v2h-19v-2zm7.18-5.73l4.35 1.16 5.31 1.42c.8.21 1.62-.26 1.84-1.06.21-.8-.26-1.62-1.06-1.84l-5.31-1.42-2.76-9.02L10.12 2v8.28L5.15 8.95l-.93-2.32-1.45-.39v5.17l1.6.43 5.31 1.43z';
+const PLANE_ICON =
+  'M21 16v-2l-8-5V3.5a1.5 1.5 0 00-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1L15 22v-1.5L13 19v-5.5L21 16z';
+
+/** "14:30" and "GMT+3" in the flight's zone; the viewer's own when it has none. */
+function zonedClock(iso: string | null, timeZone: string | undefined): { time: string; zone: string } {
+  if (!iso) return { time: '--:--', zone: '' };
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return { time: '--:--', zone: '' };
+  const time = date.toLocaleTimeString(APP_LOCALE, { timeZone, hour: '2-digit', minute: '2-digit', hour12: false });
+  const zone =
+    new Intl.DateTimeFormat(APP_LOCALE, { timeZone, timeZoneName: 'short' })
+      .formatToParts(date)
+      .find((part) => part.type === 'timeZoneName')?.value ?? '';
+  return { time, zone };
+}
+
+function zonedDate(iso: string | null, timeZone: string | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString(APP_LOCALE, { timeZone, weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 /**
- * Live status for one flight, from the same FlightRadar24 proxy the
- * flight-tracker module uses. Only polls while there is a flight number to
- * search on and the flight is near enough in time to be worth the call — the
- * upstream API is paid and rate-limited to 60/min per user.
+ * What FlightRadar24 has seen of this flight (take-off, landing, live ETA),
+ * via `/api/flight-radar/status`. Polls while there's still something to
+ * learn and stops once it has landed.
  */
-function useLiveFlight(flightNumber: string | null, active: boolean) {
-  // One object, tagged with the flight it belongs to, so a stale result from a
-  // previous flight number can never be shown against a new one. `null` means
-  // "not answered yet"; `live: null` means "answered, no match".
-  const [result, setResult] = useState<{ forFlight: string; live: LiveFlight | null } | null>(null);
+function useFlightTrack(flightNumber: string | null, schedule: FlightSchedule, enabled: boolean) {
+  // Tagged with what it answers, so a stale result never shows against new times.
+  const key = `${flightNumber}|${schedule.departure}|${schedule.arrival}`;
+  const [result, setResult] = useState<{ key: string; track: FlightTrack | null; failed: boolean } | null>(null);
 
   useEffect(() => {
-    if (!flightNumber || !active) return;
+    if (!enabled || !flightNumber) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const controller = new AbortController();
 
     const load = async () => {
+      const params = new URLSearchParams({ flight: flightNumber });
+      if (schedule.departure) params.set('departure', schedule.departure);
+      if (schedule.arrival) params.set('arrival', schedule.arrival);
+      let track: FlightTrack | null = null;
+      let failed = false;
       try {
-        const r = await fetch(`/api/flight-radar?flights=${encodeURIComponent(flightNumber)}`, {
+        const r = await fetch(`/api/flight-radar/status?${params}`, {
           credentials: 'include',
           signal: controller.signal,
+          // A background poll shouldn't toast every hiccup.
+          headers: { [SILENT_BANNER_HEADER]: '1' },
         });
         if (!r.ok) throw new Error('lookup failed');
-        const data = (await r.json()) as { flights?: LiveFlight[] };
-        if (cancelled) return;
-        setResult({ forFlight: flightNumber, live: data.flights?.[0] ?? null });
+        track = ((await r.json()) as { track?: FlightTrack }).track ?? null;
       } catch {
-        if (!cancelled) setResult({ forFlight: flightNumber, live: null });
+        if (controller.signal.aborted) return;
+        failed = true;
       }
+      if (cancelled) return;
+      setResult({ key, track, failed });
+      if (track?.landedAt || track?.ended) return;
+      timer = setTimeout(() => void load(), track?.takeoffAt ? POLL_AIRBORNE_MS : POLL_WAITING_MS);
     };
 
     void load();
-    const timer = setInterval(() => void load(), POLL_MS);
     return () => {
       cancelled = true;
       controller.abort();
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
-  }, [flightNumber, active]);
+  }, [enabled, flightNumber, key, schedule.departure, schedule.arrival]);
 
-  const answered = result !== null && result.forFlight === flightNumber;
-  const live = answered ? result.live : null;
-
-  // Derived rather than stored, so nothing has to be set synchronously.
-  const state: 'idle' | 'loading' | 'ok' | 'unavailable' =
-    !flightNumber || !active ? 'idle' : !answered ? 'loading' : live ? 'ok' : 'unavailable';
-
-  return { live, state };
+  const answered = result !== null && result.key === key;
+  return {
+    track: answered ? result.track : null,
+    state: !enabled || !flightNumber ? 'idle' : !answered ? 'loading' : result.failed ? 'failed' : 'ok',
+  } as const;
 }
 
 export default function FlightCard({
@@ -143,19 +172,43 @@ export default function FlightCard({
 }) {
   const details = item.details ?? {};
   const flightNumber = normalizeFlightNumber(details.flightNumber);
+  const direction = flightDirection(item.timeLabel);
+  const arrival = direction === 'arrival';
+  const timeZone = details.timezone && isValidTimeZone(details.timezone) ? details.timezone : undefined;
+  const schedule = scheduledFlightTimes({
+    direction,
+    scheduledAt: item.scheduledAt,
+    endsAt: item.endsAt,
+    durationMinutes: item.durationMinutes,
+  });
 
   const now = useNow();
-  const countdown = now !== null ? flightCountdown(now, item.scheduledAt, item.endsAt) : null;
-  // Don't spend a paid lookup on a flight that has already landed.
-  const worthTracking = countdown !== null && countdown.phase !== 'landed' && countdown.phase !== 'unknown';
-  const { live, state } = useLiveFlight(flightNumber, worthTracking);
+  const anchor = schedule.departure ?? schedule.arrival;
+  const lead = schedule.departure ? TRACK_LEAD_MS : ARRIVAL_ONLY_LEAD_MS;
+  const trackable = now !== null && anchor !== null && now >= new Date(anchor).getTime() - lead;
+  const { track, state } = useFlightTrack(flightNumber, schedule, trackable);
 
-  const punctuality = flightPunctuality(item.endsAt, live?.eta ?? null);
-  const style = PUNCTUALITY_STYLE[punctuality.status];
+  const progress = now !== null ? flightProgress(now, schedule, track) : null;
+  const countdown = now !== null ? scheduleCountdown(now, schedule) : null;
+  const status = progress?.status ?? 'unknown';
+  const style = PUNCTUALITY_STYLE[status];
   const done = item.completedAt !== null;
 
-  const from = details.departAirport || live?.origIata || '';
-  const to = details.arriveAirport || live?.destIata || '';
+  const from = details.departAirport || track?.origin || '';
+  const to = details.arriveAirport || track?.destination || '';
+  const departs = zonedClock(schedule.departure, timeZone);
+  const lands = zonedClock(schedule.arrival, timeZone);
+  const eventDate = zonedDate(item.scheduledAt, timeZone);
+
+  const chipText =
+    state === 'loading' && !track
+      ? 'Checking…'
+      : !flightNumber || !trackable
+        ? 'Scheduled'
+        : (progress?.label ?? 'Scheduled');
+
+  // The side of the route the event happens at reads strongest.
+  const side = (active: boolean) => (active ? 'text-slate-900' : 'text-slate-400');
 
   return (
     <div
@@ -163,17 +216,20 @@ export default function FlightCard({
         done ? 'opacity-60' : ''
       }`}
     >
-      {/* Airline strip */}
+      {/* Direction, airline and the live verdict */}
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500 text-white">
             <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 00-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1L15 22v-1.5L13 19v-5.5L21 16z" />
+              <path d={arrival ? LANDING_ICON : TAKEOFF_ICON} />
             </svg>
           </span>
-          <p className="truncate text-xs font-bold uppercase tracking-wider text-sky-900">
-            {item.providerName || 'Flight'}
-          </p>
+          <span className="shrink-0 text-[11px] font-black uppercase tracking-widest text-sky-700">
+            {arrival ? 'Arrival' : 'Departure'}
+          </span>
+          {item.providerName && (
+            <p className="truncate text-xs font-semibold text-sky-900/70">· {item.providerName}</p>
+          )}
           {details.flightNumber && (
             <span className="shrink-0 rounded-md bg-white px-2 py-0.5 font-mono text-xs font-bold text-sky-700 ring-1 ring-sky-200">
               {details.flightNumber}
@@ -184,51 +240,72 @@ export default function FlightCard({
           className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${style.chip}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-          {punctuality.status === 'unknown' && state === 'loading' ? 'Checking…' : punctuality.label}
+          {chipText}
         </span>
       </div>
 
-      {/* Route */}
       <div className="px-4 py-4">
+        {/* Route, times local to the flight's zone */}
         <div className="flex items-end gap-3">
           <div className="text-left">
-            <p className="font-mono text-2xl font-bold leading-none tracking-tight text-slate-900">
-              {from || '—'}
+            <p className={`font-mono text-2xl font-bold leading-none tracking-tight ${side(!arrival)}`}>{from || '—'}</p>
+            <p className={`mt-1 text-sm font-semibold ${side(!arrival)}`}>
+              {departs.time}
+              {schedule.departure && departs.zone && (
+                <span className="ml-1 text-[10px] font-medium text-slate-400">{departs.zone}</span>
+              )}
             </p>
-            <p className="mt-1 text-sm font-semibold text-slate-700">{clockTime(item.scheduledAt)}</p>
+            {track?.takeoffAt && (
+              <p className="text-[11px] text-slate-500">Took off {zonedClock(track.takeoffAt, timeZone).time}</p>
+            )}
           </div>
 
-          <div className="relative mb-1.5 flex-1">
+          <div className="relative mb-6 flex-1">
             <div className="h-px w-full bg-gradient-to-r from-slate-200 via-sky-300 to-slate-200" />
             <svg
-              className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 text-sky-500"
+              className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-90 text-sky-500"
               fill="currentColor"
               viewBox="0 0 24 24"
             >
-              <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 00-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1L15 22v-1.5L13 19v-5.5L21 16z" />
+              <path d={PLANE_ICON} />
             </svg>
+            {item.durationMinutes ? (
+              <p className="absolute left-1/2 top-2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-slate-400">
+                {formatDuration(item.durationMinutes * 60_000)}
+              </p>
+            ) : null}
           </div>
 
           <div className="text-right">
-            <p className="font-mono text-2xl font-bold leading-none tracking-tight text-slate-900">
-              {to || '—'}
+            <p className={`font-mono text-2xl font-bold leading-none tracking-tight ${side(arrival)}`}>{to || '—'}</p>
+            <p className={`mt-1 text-sm font-semibold ${side(arrival)}`}>
+              {lands.time}
+              {schedule.arrival && lands.zone && (
+                <span className="ml-1 text-[10px] font-medium text-slate-400">{lands.zone}</span>
+              )}
             </p>
-            <p className="mt-1 text-sm font-semibold text-slate-700">{clockTime(item.endsAt)}</p>
+            {track?.landedAt ? (
+              <p className="text-[11px] text-slate-500">Landed {zonedClock(track.landedAt, timeZone).time}</p>
+            ) : track?.eta ? (
+              <p className="text-[11px] text-slate-500">ETA {zonedClock(track.eta, timeZone).time}</p>
+            ) : null}
           </div>
         </div>
 
-        <p className={`mt-3 text-sm font-semibold ${countdown?.imminent ? 'text-sky-700' : 'text-slate-500'}`}>
-          {countdown?.label ?? '—'}
+        <p className={`mt-3 text-sm font-semibold ${countdown?.imminent || progress?.status === 'late' ? 'text-sky-700' : 'text-slate-500'}`}>
+          {eventDate && <span className="text-slate-400">{eventDate} · </span>}
+          {progress?.detail ?? countdown?.label ?? '—'}
         </p>
 
         {item.description && (
-          <p className={`mt-1 text-sm ${done ? 'text-slate-400 line-through' : 'text-slate-600'}`}>
+          <p className={`mt-1 text-base font-semibold ${done ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
             {item.description}
           </p>
         )}
+        {item.body && <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{item.body}</p>}
 
         {/* Boarding-pass style detail strip */}
-        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 border-t border-dashed border-slate-200 pt-3">
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 border-t border-dashed border-slate-200 pt-3 empty:hidden">
           {[
             ['Terminal', details.terminal],
             ['Gate', details.gate],
@@ -246,25 +323,28 @@ export default function FlightCard({
             ))}
         </div>
 
-        {live && (
+        {track?.takeoffAt && !track.landedAt && (track.altFt != null || track.gspeedKt != null) && (
           <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
             <span className="flex items-center gap-1 font-medium text-emerald-600">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
               Live
             </span>
-            {live.altFt != null && <span>{live.altFt.toLocaleString(APP_LOCALE)} ft</span>}
-            {live.gspeedKt != null && <span>{live.gspeedKt} kt</span>}
-            {live.eta && <span>ETA {clockTime(live.eta)}</span>}
-          </p>
-        )}
-        {!live && state === 'unavailable' && flightNumber && (
-          <p className="mt-3 text-[11px] text-slate-400">
-            {item.endsAt ? 'No live track for this flight right now.' : 'Add an arrival time to track punctuality.'}
+            {track.altFt != null && <span>{track.altFt.toLocaleString(APP_LOCALE)} ft</span>}
+            {track.gspeedKt != null && <span>{track.gspeedKt} kt</span>}
           </p>
         )}
         {!flightNumber && (
-          <p className="mt-3 text-[11px] text-slate-400">Add a flight number to track this live.</p>
+          <p className="mt-3 text-[11px] text-slate-400">Add a flight number to track it on FlightRadar24.</p>
         )}
+        {flightNumber && !anchor && (
+          <p className="mt-3 text-[11px] text-slate-400">Add a date and time to track this flight.</p>
+        )}
+        {state === 'failed' && (
+          <p className="mt-3 text-[11px] text-slate-400">Couldn&apos;t reach FlightRadar24. Trying again shortly.</p>
+        )}
+
+        <CrewRow item={item} />
+        <AttachmentStrip attachments={item.attachments} />
       </div>
 
       {canEdit && (

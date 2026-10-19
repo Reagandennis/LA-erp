@@ -317,7 +317,7 @@ export default function GlobalSearch({ userId, modules }: { userId: number; modu
 
                 {!q && sections.length === 0 && (
                   <p className="px-3 py-8 text-center text-sm text-gray-500">
-                    Type to search modules, trips, tasks, quotes, invoices, customers, people, travelers, chats and more.
+                    Type to search modules, trips, tasks, quotes, invoices, clients, people, travelers, chats and more.
                   </p>
                 )}
                 {q.length > 0 && q.length < MIN_QUERY && items.length === 0 && (

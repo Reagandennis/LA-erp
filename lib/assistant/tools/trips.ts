@@ -35,7 +35,7 @@ const createTripTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'create_trip',
-    description: 'Create a trip for a customer. Find the customer ID with list_customers. Dates are YYYY-MM-DD (optional).',
+    description: 'Create a trip for a client. Find the client ID with list_customers. Dates are YYYY-MM-DD (optional).',
     parameters: {
       type: 'object',
       properties: {

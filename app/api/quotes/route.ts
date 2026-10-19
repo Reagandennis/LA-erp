@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     }
   ).customer.findUnique({ where: { id: validation.data.customerId } });
   if (!customer) {
-    return NextResponse.json({ error: 'Customer not found' }, { status: 400 });
+    return NextResponse.json({ error: 'Client not found' }, { status: 400 });
   }
 
   if (validation.data.approverId) {

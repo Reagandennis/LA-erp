@@ -17,7 +17,7 @@ export async function PATCH(
   const { customerId: raw } = await params;
   const id = Number(raw);
   if (!Number.isInteger(id) || id <= 0) {
-    return NextResponse.json({ error: 'Invalid customer id' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid client id' }, { status: 400 });
   }
 
   const body = await request.json().catch(() => null);
@@ -38,7 +38,7 @@ export async function PATCH(
     entity: typeof body.entity === 'string' ? body.entity : undefined,
   });
 
-  if (result === null) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+  if (result === null) return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   if ('error' in result) return NextResponse.json({ error: result.error }, { status: 400 });
   return NextResponse.json({ customer: result });
 }

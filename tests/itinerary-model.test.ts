@@ -50,6 +50,10 @@ function item(
     reminderAt: null,
     imageUrl: null,
     confirmationCode: null,
+    attachments: [],
+    driver: null,
+    officer: null,
+    vehicle: null,
     ...extra,
   };
 }

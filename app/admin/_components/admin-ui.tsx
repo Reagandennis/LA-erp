@@ -116,6 +116,15 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const ACRONYMS: Record<string, string> = { ai: 'AI', pdf: 'PDF', csv: 'CSV', sop: 'SOP', kpi: 'KPI', crm: 'CRM' };
+/** Audit codes keep the `customer` identifier; the business calls them clients. */
+const TERMS: Record<string, string> = { customer: 'client', customers: 'clients' };
+
+/** Stored entity types keep `customer` too; "Customer" → "Client", anything else as is. */
+export function describeEntityType(entityType: string): string {
+  const term = TERMS[entityType.toLowerCase()];
+  if (!term) return entityType;
+  return entityType[0] === entityType[0].toUpperCase() ? term[0].toUpperCase() + term.slice(1) : term;
+}
 
 /** "invoice.pdf.downloaded" → "Invoice PDF downloaded" for actions without a hand-written label. */
 export function describeAction(action: string): string {
@@ -124,7 +133,7 @@ export function describeAction(action: string): string {
   const words = action
     .split(/[._-]+/)
     .filter(Boolean)
-    .map((word) => ACRONYMS[word.toLowerCase()] ?? word.toLowerCase());
+    .map((word) => ACRONYMS[word.toLowerCase()] ?? TERMS[word.toLowerCase()] ?? word.toLowerCase());
   if (words.length === 0) return action;
   const sentence = words.join(' ');
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);

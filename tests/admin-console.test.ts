@@ -54,7 +54,7 @@ import { bucketSignIns } from '../lib/admin-console';
 import { isDormant, isNeverUsed } from '../lib/admin-rules';
 import { buildAccessUser } from '../lib/user';
 import { niceTop } from '../app/modules/reports/charts';
-import { describeAction, formatIp, generatePassword, isValidPassword } from '../app/admin/_components/admin-ui';
+import { describeAction, describeEntityType, formatIp, generatePassword, isValidPassword } from '../app/admin/_components/admin-ui';
 
 const json = (body: unknown) => ({ method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
 const params = (roleId: string) => ({ params: Promise.resolve({ roleId }) });
@@ -207,6 +207,13 @@ describe('console helpers', () => {
     expect(describeAction('auth.login.failed')).toBe('Failed sign-in');
     expect(describeAction('invoice.pdf.downloaded')).toBe('Invoice PDF downloaded');
     expect(describeAction('ai.deal.create')).toBe('AI deal create');
+    expect(describeAction('customer.created')).toBe('Client created');
+  });
+
+  it('shows stored customer entity types as clients', () => {
+    expect(describeEntityType('Customer')).toBe('Client');
+    expect(describeEntityType('customer')).toBe('client');
+    expect(describeEntityType('trip')).toBe('trip');
   });
 
   it('shows plain addresses', () => {

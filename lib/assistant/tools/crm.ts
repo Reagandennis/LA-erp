@@ -60,7 +60,7 @@ const createDealTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'create_deal',
-    description: 'Create a CRM deal for a customer (find the customer ID with list_crm_customers or list_customers).',
+    description: 'Create a CRM deal for a client (find the client ID with list_crm_customers or list_customers).',
     parameters: {
       type: 'object',
       properties: {
@@ -201,7 +201,7 @@ const logActivityTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'log_crm_activity',
-    description: 'Log a call, email, meeting, or note against a customer (and optionally a specific deal).',
+    description: 'Log a call, email, meeting, or note against a client (and optionally a specific deal).',
     parameters: {
       type: 'object',
       properties: {
@@ -235,7 +235,7 @@ const listCrmCustomersTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'list_crm_customers',
-    description: 'List customer accounts with their business entity (LADYASKARI, LIONESS, STARLLWART), contacts, and deal counts.',
+    description: 'List client accounts with their business entity (LADYASKARI, LIONESS, STARLLWART), contacts, and deal counts.',
     parameters: {
       type: 'object',
       properties: {
@@ -266,7 +266,7 @@ const setEntityTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'set_customer_entity',
-    description: 'Assign a customer to a business entity (LADYASKARI, LIONESS, or STARLLWART).',
+    description: 'Assign a client to a business entity (LADYASKARI, LIONESS, or STARLLWART).',
     parameters: {
       type: 'object',
       properties: {
@@ -282,7 +282,7 @@ const setEntityTool: ToolDefinition = {
     if (!customerId) return { error: 'A valid customerId is required.' };
     if (!entity) return { error: 'An entity is required.' };
     const result = await updateCrmCustomer(customerId, { entity });
-    if (result === null) return { error: 'Customer not found' };
+    if (result === null) return { error: 'Client not found' };
     if ('error' in result) return result;
     await recordAuditEvent({
       action: 'ai.customer.entity', entityType: 'Customer', entityId: String(customerId),

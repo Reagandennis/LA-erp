@@ -55,7 +55,7 @@ const createInvoiceTool: ToolDefinition = {
   functionDeclaration: {
     name: 'create_invoice',
     description:
-      'Create a draft invoice for a customer. Find the customer ID with list_customers. Dates YYYY-MM-DD; defaults: issue=today, due=+14 days.',
+      'Create a draft invoice for a client. Find the client ID with list_customers. Dates YYYY-MM-DD; defaults: issue=today, due=+14 days.',
     parameters: {
       type: 'object',
       properties: {
@@ -253,7 +253,7 @@ const sendInvoiceTool: ToolDefinition = {
   functionDeclaration: {
     name: 'send_invoice',
     description:
-      'Email an APPROVED invoice to the customer and mark it Sent. Fails unless the invoice has passed approval.',
+      'Email an APPROVED invoice to the client and mark it Sent. Fails unless the invoice has passed approval.',
     parameters: {
       type: 'object',
       properties: { invoiceId: { type: 'integer' } },
@@ -277,7 +277,7 @@ const sendInvoiceTool: ToolDefinition = {
         const delivered = await emailInvoiceToCustomer(invoice);
         emailedTo = delivered.to;
       } catch (error) {
-        return { error: error instanceof Error ? error.message : 'Could not email the invoice to the customer.' };
+        return { error: error instanceof Error ? error.message : 'Could not email the invoice to the client.' };
       }
     }
 
@@ -291,7 +291,7 @@ const sendInvoiceTool: ToolDefinition = {
       id: result.id,
       status: result.status,
       emailedTo,
-      note: emailedTo ? undefined : 'Marked as sent, but no email went out (SMTP not configured or customer has no email).',
+      note: emailedTo ? undefined : 'Marked as sent, but no email went out (SMTP not configured or client has no email).',
     };
   },
 };

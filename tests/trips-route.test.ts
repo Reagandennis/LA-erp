@@ -7,12 +7,14 @@ const {
   createTrip,
   recordAuditEvent,
   enforceRateLimit,
+  TripTravelerError,
 } = vi.hoisted(() => ({
   requireRequestAuth: vi.fn(),
   listTripsForUser: vi.fn(),
   createTrip: vi.fn(),
   recordAuditEvent: vi.fn(),
   enforceRateLimit: vi.fn(),
+  TripTravelerError: class TripTravelerError extends Error {},
 }));
 
 vi.mock('../lib/request-auth', () => ({
@@ -23,6 +25,7 @@ vi.mock('../lib/request-auth', () => ({
 vi.mock('../lib/trips', () => ({
   listTripsForUser,
   createTrip,
+  TripTravelerError,
 }));
 vi.mock('../lib/trip-costs', () => ({
   canSeeTripCosts: () => true,
@@ -85,6 +88,7 @@ describe('trips collection route', () => {
 
     const body = {
       customerId: 1,
+      travelers: [{ travelerId: 4 }, { name: 'Guest' }],
       title: 'Site visit',
       startDate: '2026-06-01',
       endDate: '2026-06-05',
@@ -99,7 +103,12 @@ describe('trips collection route', () => {
 
     expect(r.status).toBe(201);
     expect(createTrip).toHaveBeenCalledWith(
-      expect.objectContaining({ customerId: 1, createdById: 12, title: 'Site visit' }),
+      expect.objectContaining({
+        customerId: 1,
+        createdById: 12,
+        title: 'Site visit',
+        travelers: [{ travelerId: 4 }, { name: 'Guest' }],
+      }),
     );
     expect(recordAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -125,6 +134,39 @@ describe('trips collection route', () => {
     expect(createTrip).not.toHaveBeenCalled();
   });
 
+  it('requires at least one traveller', async () => {
+    requireRequestAuth.mockResolvedValue({
+      auth: { user: { id: 1, roles: [] } },
+      response: null,
+    });
+
+    const req = new NextRequest('http://localhost/api/trips', {
+      method: 'POST',
+      body: JSON.stringify({ customerId: 1, travelers: [], title: 'X', items: [] }),
+    });
+    const r = await POST(req);
+    expect(r.status).toBe(400);
+    expect((await r.json()).error).toBe('Add at least one traveller');
+    expect(createTrip).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when a traveller isn't the client's", async () => {
+    requireRequestAuth.mockResolvedValue({
+      auth: { user: { id: 1, roles: [] } },
+      response: null,
+    });
+    createTrip.mockRejectedValue(new TripTravelerError("Every traveller must belong to the trip's client"));
+
+    const req = new NextRequest('http://localhost/api/trips', {
+      method: 'POST',
+      body: JSON.stringify({ customerId: 1, travelers: [{ travelerId: 99 }], title: 'X', items: [] }),
+    });
+    const r = await POST(req);
+    expect(r.status).toBe(400);
+    expect((await r.json()).error).toBe("Every traveller must belong to the trip's client");
+    expect(recordAuditEvent).not.toHaveBeenCalled();
+  });
+
   it('returns 429 when rate-limited', async () => {
     requireRequestAuth.mockResolvedValue({
       auth: { user: { id: 1, roles: [] } },
@@ -136,6 +178,7 @@ describe('trips collection route', () => {
       method: 'POST',
       body: JSON.stringify({
         customerId: 1,
+        travelers: [{ travelerId: 4 }],
         title: 'X',
         items: [{ description: 'a', quantity: 1, unitPrice: 0 }],
       }),

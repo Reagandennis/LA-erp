@@ -6,12 +6,16 @@ import { useMemo, useState } from 'react';
 
 import {
   REMINDER_OPTIONS,
+  type CrewOptions,
+  type TripDaySummary,
   type TripDetail,
   type TripItemType,
   type TripItineraryItemSummary,
   type TripStatus,
 } from '../types';
 import { SILENT_BANNER_HEADER } from '@/app/ui/banner';
+import { formatDuration } from '@/lib/flight-status';
+import { isValidTimeZone, localTimeZone, utcToZoned, zonedToUtcIso } from '@/lib/zoned-time';
 
 import {
   applyReorder,
@@ -21,7 +25,14 @@ import {
   groupItemsByDay,
   reorderPayload,
 } from './itinerary-model';
+import { AttachmentPicker } from './_components/attachment-picker';
+import { AttachmentStrip } from './_components/attachment-strip';
+import { CrewRow } from './_components/crew-row';
 import FlightCard from './_components/flight-card';
+import FlightFields from './_components/flight-fields';
+import TransportFields from './_components/transport-fields';
+import type { EditorState } from './editor-state';
+import { EMPTY_RUN, emptyRunFor, emptyRunTitle, isEmptyRun } from './empty-run';
 import TripLogPanel from './trip-log-panel';
 import { useItineraryDrag, type DragTarget } from './_components/use-itinerary-drag';
 import {
@@ -36,6 +47,8 @@ import {
 
 interface ItineraryPageClientProps {
   trip: TripDetail;
+  /** Task Assignment's drivers, CPOs and vehicles, for event crews. */
+  crewOptions: CrewOptions;
   currentUser: { id: number; name: string; email: string };
   isAdmin: boolean;
 }
@@ -60,6 +73,11 @@ interface ItemPayload {
   imageUrl: string | null;
   confirmationCode: string | null;
   quantity: number;
+  /** The trip day it sits on; null is the unscheduled tray. */
+  dayId: number | null;
+  driverId: number | null;
+  officerId: number | null;
+  vehicleId: number | null;
   /** Left out entirely for people who can't see costs, so a save never clears one. */
   unitPrice?: number | null;
 }
@@ -81,7 +99,6 @@ const ROW_STYLE_CATEGORIES = new Set<string>([
   'flight',
   'transportation',
   'lodging',
-  'cruise',
   'booking',
 ]);
 
@@ -142,34 +159,11 @@ function bookedLabel(item: TripItineraryItemSummary): string {
   return time ? `${time} ${item.timeLabel}` : item.timeLabel;
 }
 
-interface EditorState {
-  category: TripItemCategory;
-  description: string;
-  subtitle: string;
-  body: string;
-  timeLabel: string;
-  providerName: string;
-  phone: string;
-  bookingUrl: string;
-  placeName: string;
-  address: string;
-  date: string;
-  time: string;
-  endTime: string;
-  reminderMinutesBefore: string;
-  imageUrl: string;
-  confirmationCode: string;
-  unitPrice: string;
-  /** Category-specific values, keyed by the field spec in categories.ts. */
-  details: Record<string, string>;
-}
-
 /** The legacy column still has to be written; derive it from the category. */
 const LEGACY_TYPE: Record<TripItemCategory, TripItemType> = {
   flight: 'flight',
   transportation: 'car',
   lodging: 'hotel',
-  cruise: 'activity',
   tour: 'activity',
   booking: 'activity',
   activity: 'activity',
@@ -179,6 +173,7 @@ const LEGACY_TYPE: Record<TripItemCategory, TripItemType> = {
 function blankEditor(
   prefillDate: string | null,
   category: TripItemCategory = 'activity',
+  dayId: number | null = null,
 ): EditorState {
   return {
     category,
@@ -199,24 +194,47 @@ function blankEditor(
     confirmationCode: '',
     unitPrice: '',
     details: {},
+    dayId,
+    timezone: localTimeZone(),
+    durationHours: '',
+    durationMinutes: '',
+    attachments: [],
+    removedAttachmentIds: [],
+    newFiles: [],
+    driverId: null,
+    officerId: null,
+    vehicleId: null,
   };
 }
 
 function editorFromItem(item: TripItineraryItemSummary): EditorState {
   const category = (item.category as TripItemCategory) ?? mapLegacyItemType(item.itemType);
+  const isFlight = category === 'flight';
+  // A flight's time reads in its airport's zone; everything else in the viewer's.
+  const savedZone = item.details?.timezone;
+  const timezone = isFlight && savedZone && isValidTimeZone(savedZone) ? savedZone : localTimeZone();
+  const zoned = isFlight ? utcToZoned(item.scheduledAt, timezone) : null;
   return {
     category,
     description: item.description,
     subtitle: item.subtitle ?? '',
     body: item.body ?? '',
-    timeLabel: item.timeLabel ?? '',
+    timeLabel: isFlight
+      ? item.timeLabel === 'ARRIVAL'
+        ? 'ARRIVAL'
+        : 'DEPARTURE'
+      : category === 'transportation'
+        ? item.timeLabel === 'DROP-OFF' || item.timeLabel === EMPTY_RUN
+          ? item.timeLabel
+          : 'PICK-UP'
+        : (item.timeLabel ?? ''),
     providerName: item.providerName ?? '',
     phone: item.phone ?? '',
     bookingUrl: item.bookingUrl ?? '',
     placeName: item.placeName ?? '',
     address: item.address ?? '',
-    date: dateInputValue(item.scheduledAt),
-    time: timeInputValue(item.scheduledAt),
+    date: zoned ? zoned.date : dateInputValue(item.scheduledAt),
+    time: zoned ? zoned.time : timeInputValue(item.scheduledAt),
     endTime: timeInputValue(item.endsAt),
     reminderMinutesBefore:
       item.reminderMinutesBefore != null ? String(item.reminderMinutesBefore) : '',
@@ -224,14 +242,126 @@ function editorFromItem(item: TripItineraryItemSummary): EditorState {
     confirmationCode: item.confirmationCode ?? '',
     unitPrice: item.unitPrice != null ? String(item.unitPrice) : '',
     details: item.details ?? {},
+    dayId: item.dayId,
+    timezone,
+    durationHours: item.durationMinutes ? String(Math.floor(item.durationMinutes / 60)) : '',
+    durationMinutes: item.durationMinutes ? String(item.durationMinutes % 60) : '',
+    attachments: item.attachments,
+    removedAttachmentIds: [],
+    newFiles: [],
+    driverId: item.driver?.id ?? null,
+    officerId: item.officer?.id ?? null,
+    vehicleId: item.vehicle?.id ?? null,
+  };
+}
+
+/**
+ * Flights and transport carry a crew: a driver and a vehicle are required, a
+ * CPO isn't. An imported event that names them only as text may stay as it is.
+ */
+function crewPayload(
+  editor: EditorState,
+): { driverId: number | null; officerId: number | null; vehicleId: number | null } | { error: string } {
+  if (editor.category !== 'flight' && editor.category !== 'transportation') {
+    return { driverId: null, officerId: null, vehicleId: null };
+  }
+  if (!editor.driverId && !editor.details.driverName) return { error: 'Pick a driver' };
+  if (!editor.vehicleId && !editor.details.vehicle) return { error: 'Pick a vehicle' };
+  return { driverId: editor.driverId, officerId: editor.officerId, vehicleId: editor.vehicleId };
+}
+
+/** Hours and minutes as typed → minutes; null for none. */
+function parseDuration(editor: EditorState): number | null | { error: string } {
+  const hours = editor.durationHours.trim() === '' ? 0 : Number(editor.durationHours);
+  const minutes = editor.durationMinutes.trim() === '' ? 0 : Number(editor.durationMinutes);
+  if (![hours, minutes].every(Number.isInteger) || hours < 0 || hours > 30 || minutes < 0 || minutes > 59) {
+    return { error: 'Duration is whole hours (up to 30) and minutes (0–59)' };
+  }
+  return hours * 60 + minutes || null;
+}
+
+/**
+ * A flight's date and time are local to the airport it's at, in the zone
+ * picked beside them. The time is the departure or the arrival, per the
+ * direction; the duration gives the other end.
+ */
+function flightToPayload(editor: EditorState, includeCost: boolean): ItemPayload | { error: string } {
+  const arrival = editor.timeLabel === 'ARRIVAL';
+  if (editor.date && !editor.time) return { error: arrival ? 'Add the arrival time' : 'Add the departure time' };
+  const scheduledAt = editor.date ? zonedToUtcIso(editor.date, editor.time, editor.timezone) : null;
+  if (editor.date && !scheduledAt) return { error: 'Pick a valid date, time and timezone' };
+
+  const durationMinutes = parseDuration(editor);
+  if (durationMinutes !== null && typeof durationMinutes === 'object') return durationMinutes;
+
+  const reminderMinutesBefore = editor.reminderMinutesBefore ? Number(editor.reminderMinutesBefore) : null;
+  if (scheduledAt == null && reminderMinutesBefore != null) return { error: 'Reminders need a scheduled time' };
+  const price = includeCost ? editor.unitPrice.trim() : '';
+  if (price && !Number.isFinite(Number(price))) return { error: 'Cost must be a number' };
+
+  const crew = crewPayload(editor);
+  if ('error' in crew) return crew;
+
+  const flightNumber = editor.details.flightNumber?.trim();
+  return {
+    ...crew,
+    itemType: 'flight',
+    category: 'flight',
+    description:
+      editor.description.trim() || `${arrival ? 'Arrival' : 'Departure'}${flightNumber ? ` · ${flightNumber}` : ''}`,
+    subtitle: editor.subtitle.trim() || null,
+    body: editor.body.trim() || null,
+    timeLabel: arrival ? 'ARRIVAL' : 'DEPARTURE',
+    providerName: editor.providerName.trim() || null,
+    bookingUrl: editor.bookingUrl.trim() || null,
+    phone: editor.phone.trim() || null,
+    placeName: editor.placeName.trim() || null,
+    address: editor.address.trim() || null,
+    details: pruneDetails('flight', { ...editor.details, timezone: editor.timezone }),
+    scheduledAt,
+    // A departure ends when it lands; an arrival's moment is the landing itself.
+    endsAt:
+      !arrival && scheduledAt && durationMinutes
+        ? new Date(new Date(scheduledAt).getTime() + durationMinutes * 60_000).toISOString()
+        : null,
+    durationMinutes,
+    reminderMinutesBefore,
+    imageUrl: editor.imageUrl.trim() || null,
+    confirmationCode: editor.confirmationCode.trim() || null,
+    quantity: 1,
+    dayId: editor.dayId,
+    ...(includeCost ? { unitPrice: price ? Number(price) : null } : {}),
   };
 }
 
 function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload | { error: string } {
-  const description = editor.description.trim();
+  if (editor.category === 'flight') return flightToPayload(editor, includeCost);
+  const transport = editor.category === 'transportation';
+  const emptyRun = transport && editor.timeLabel === EMPTY_RUN;
+  const dropOff = editor.timeLabel === 'DROP-OFF';
+  const place = (dropOff ? editor.details.dropoffLocation : editor.details.pickupLocation)?.trim();
+  const description =
+    editor.description.trim() ||
+    (emptyRun
+      ? emptyRunTitle(editor.details.pickupLocation ?? '', editor.details.dropoffLocation ?? '')
+      : transport
+        ? `${dropOff ? 'Drop-off' : 'Pick-up'}${place ? ` · ${place}` : ''}`
+        : '');
   if (!description) return { error: 'Give it a name' };
+  const crew = crewPayload(editor);
+  if ('error' in crew) return crew;
   const scheduledAt = editor.date ? combineDateTime(editor.date, editor.time || null) : null;
-  const endsAt = editor.date && editor.endTime ? combineDateTime(editor.date, editor.endTime) : null;
+
+  // An empty run is timed by when it leaves and how long the drive is.
+  const durationMinutes = emptyRun ? parseDuration(editor) : null;
+  if (durationMinutes !== null && typeof durationMinutes === 'object') return durationMinutes;
+  const endsAt = emptyRun
+    ? scheduledAt && durationMinutes
+      ? new Date(new Date(scheduledAt).getTime() + durationMinutes * 60_000).toISOString()
+      : null
+    : editor.date && editor.endTime
+      ? combineDateTime(editor.date, editor.endTime)
+      : null;
   if (endsAt && scheduledAt && new Date(endsAt) < new Date(scheduledAt)) {
     return { error: 'End time must be after start time' };
   }
@@ -261,17 +391,20 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
     details: pruneDetails(editor.category, editor.details),
     scheduledAt,
     endsAt,
-    durationMinutes: null,
+    durationMinutes,
     reminderMinutesBefore,
     imageUrl: editor.imageUrl.trim() || null,
     confirmationCode: editor.confirmationCode.trim() || null,
     quantity: 1,
+    dayId: editor.dayId,
+    ...crew,
     ...(includeCost ? { unitPrice: price ? Number(price) : null } : {}),
   };
 }
 
 export default function ItineraryPageClient({
   trip: initialTrip,
+  crewOptions,
   currentUser,
   isAdmin,
 }: ItineraryPageClientProps) {
@@ -321,8 +454,74 @@ export default function ItineraryPageClient({
   const startAdd = (category: TripItemCategory = 'activity') => {
     setError(null);
     setEditingItemId(null);
-    setEditor(blankEditor(activeGroup?.day.dateKey ?? null, category));
+    setEditor(blankEditor(activeGroup?.day.dateKey ?? null, category, currentDayId));
     setAddingHere(true);
+  };
+
+  /** The add form, filled in for the empty run that goes with this pick-up or drop-off. */
+  const startEmptyRun = (item: TripItineraryItemSummary) => {
+    const draft = emptyRunFor(item);
+    const date = dateInputValue(draft.startsAt);
+    // Leaving an hour before an early pick-up can fall on the day before.
+    const dayId = trip.days.find((day) => day.dateKey === date)?.id ?? item.dayId;
+    setError(null);
+    setEditingItemId(null);
+    setEditor({
+      ...blankEditor(null, 'transportation', dayId),
+      timeLabel: EMPTY_RUN,
+      date,
+      time: timeInputValue(draft.startsAt),
+      durationHours: String(Math.floor(draft.durationMinutes / 60)),
+      durationMinutes: String(draft.durationMinutes % 60),
+      details: { pickupLocation: draft.from, dropoffLocation: draft.to },
+      driverId: item.driver?.id ?? null,
+      vehicleId: item.vehicle?.id ?? null,
+    });
+    if (dayId !== currentDayId) setActiveDayId(dayId);
+    setShowLog(false);
+    setAddingHere(true);
+  };
+
+  /**
+   * After the event itself has saved: drop the files marked for removal, then
+   * upload the new ones. Returns the freshest trip, and what went wrong if anything.
+   */
+  const syncAttachments = async (
+    itemId: number,
+    state: EditorState,
+  ): Promise<{ trip: TripDetail | null; error: string | null }> => {
+    let latest: TripDetail | null = null;
+    for (const attachmentId of state.removedAttachmentIds) {
+      const r = await fetch(`/api/trips/${trip.id}/items/${itemId}/attachments/${attachmentId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
+      if (!r.ok || !data?.trip) return { trip: latest, error: data?.error ?? 'Could not remove a file' };
+      latest = data.trip;
+    }
+    if (state.newFiles.length > 0) {
+      const form = new FormData();
+      for (const file of state.newFiles) form.append('files', file);
+      const r = await fetch(`/api/trips/${trip.id}/items/${itemId}/attachments`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
+      if (!r.ok || !data?.trip) return { trip: latest, error: data?.error ?? 'Could not upload the files' };
+      latest = data.trip;
+    }
+    return { trip: latest, error: null };
+  };
+
+  /** The event saved but its files didn't: stay in its editor with the files still queued. */
+  const keepEditingAfterFileError = (saved: TripDetail, itemId: number, state: EditorState, message: string) => {
+    const item = saved.items.find((candidate) => candidate.id === itemId);
+    setAddingHere(false);
+    setEditingItemId(item ? itemId : null);
+    if (item) setEditor({ ...editorFromItem(item), newFiles: state.newFiles });
+    setError(`Saved, but the files weren't: ${message}`);
   };
 
   const cancelAddOrEdit = () => {
@@ -345,14 +544,26 @@ export default function ItineraryPageClient({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ ...payload, dayId: currentDayId }] }),
+        body: JSON.stringify({ items: [payload] }),
       });
       const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
       if (!r.ok || !data?.trip) {
         setError(data?.error ?? 'Could not add item');
         return;
       }
-      applyTrip(data.trip);
+      const before = new Set(trip.items.map((item) => item.id));
+      const created = data.trip.items.find((item) => !before.has(item.id));
+      if (created && editor.newFiles.length > 0) {
+        const synced = await syncAttachments(created.id, editor);
+        const latest = synced.trip ?? data.trip;
+        applyTrip(latest);
+        if (synced.error) {
+          keepEditingAfterFileError(latest, created.id, editor, synced.error);
+          return;
+        }
+      } else {
+        applyTrip(data.trip);
+      }
       cancelAddOrEdit();
     } finally {
       setPending(null);
@@ -380,7 +591,13 @@ export default function ItineraryPageClient({
         setError(data?.error ?? 'Could not update item');
         return;
       }
-      applyTrip(data.trip);
+      const synced = await syncAttachments(editingItemId, editor);
+      const latest = synced.trip ?? data.trip;
+      applyTrip(latest);
+      if (synced.error) {
+        keepEditingAfterFileError(latest, editingItemId, editor, synced.error);
+        return;
+      }
       cancelAddOrEdit();
     } finally {
       setPendingItemId(null);
@@ -608,6 +825,26 @@ export default function ItineraryPageClient({
             <h1 className="truncate text-base font-bold tracking-tight text-gray-900 sm:text-lg">
               {trip.title}
             </h1>
+            <p
+              className="truncate text-xs text-gray-500"
+              title={trip.travelers.map((t) => t.name).join(', ')}
+            >
+              {trip.customer.name}
+              {trip.travelers.length > 0 && (
+                <>
+                  {' · '}
+                  {trip.travelers.map((t, index) => (
+                    <span key={t.id}>
+                      {index > 0 && ', '}
+                      {t.name}
+                      {t.isPrimary && trip.travelers.length > 1 && (
+                        <span className="text-gray-400"> (lead)</span>
+                      )}
+                    </span>
+                  ))}
+                </>
+              )}
+            </p>
           </div>
           <span className="hidden text-xs text-gray-500 sm:block">
             {formatRangeBadge(trip.startDate, trip.endDate)}
@@ -896,6 +1133,8 @@ export default function ItineraryPageClient({
 
                 <ItemList
                   items={activeItems}
+                  days={trip.days}
+                  crewOptions={crewOptions}
                   showCost={!trip.costsHidden}
                   canEdit={canEdit}
                   registerEvent={registerEvent}
@@ -918,6 +1157,7 @@ export default function ItineraryPageClient({
                   onDelete={deleteItem}
                   onToggleComplete={toggleComplete}
                   onStartAdd={startAdd}
+                  onAddEmptyRun={startEmptyRun}
                   pending={pending}
                 />
               </>
@@ -987,6 +1227,9 @@ export default function ItineraryPageClient({
 
 interface ItemListProps {
   items: TripItineraryItemSummary[];
+  /** For the flight and transport forms' day pickers. */
+  days: TripDaySummary[];
+  crewOptions: CrewOptions;
   showCost: boolean;
   registerEvent: (id: number) => (el: HTMLElement | null) => (() => void) | undefined;
   onPointerDownItem: (event: React.PointerEvent<HTMLElement>, itemId: number) => void;
@@ -1006,11 +1249,15 @@ interface ItemListProps {
   onDelete: (id: number) => void;
   onToggleComplete: (item: TripItineraryItemSummary) => void;
   onStartAdd: (category?: TripItemCategory) => void;
+  /** Open the add form on the empty run for a pick-up or drop-off. */
+  onAddEmptyRun: (item: TripItineraryItemSummary) => void;
   pending: string | null;
 }
 
 function ItemList({
   items,
+  days,
+  crewOptions,
   showCost,
   registerEvent,
   onPointerDownItem,
@@ -1029,6 +1276,7 @@ function ItemList({
   onDelete,
   onToggleComplete,
   onStartAdd,
+  onAddEmptyRun,
   pending,
 }: ItemListProps) {
   const nodes = items
@@ -1044,6 +1292,8 @@ function ItemList({
             submitting={pendingItemId === item.id}
             submitLabel="Save"
             showCost={showCost}
+            days={days}
+            crewOptions={crewOptions}
           />
         ) : (
           <div
@@ -1061,6 +1311,15 @@ function ItemList({
                 onDelete={() => onDelete(item.id)}
                 onToggleComplete={() => onToggleComplete(item)}
               />
+            ) : isEmptyRun(item) ? (
+              <EmptyRunCard
+                item={item}
+                canEdit={canEdit}
+                isPending={pendingItemId === item.id}
+                onEdit={() => onStartEdit(item)}
+                onDelete={() => onDelete(item.id)}
+                onToggleComplete={() => onToggleComplete(item)}
+              />
             ) : ROW_STYLE_CATEGORIES.has(item.category) ? (
               <BookedRow
                 item={item}
@@ -1070,6 +1329,12 @@ function ItemList({
                 onEdit={() => onStartEdit(item)}
                 onDelete={() => onDelete(item.id)}
                 onToggleComplete={() => onToggleComplete(item)}
+                onAddEmptyRun={
+                  item.category === 'transportation' &&
+                  (item.timeLabel === 'PICK-UP' || item.timeLabel === 'DROP-OFF')
+                    ? () => onAddEmptyRun(item)
+                    : undefined
+                }
               />
             ) : (
               <StopCard
@@ -1112,6 +1377,8 @@ function ItemList({
           submitting={pending === 'add'}
           submitLabel="Add"
           showCost={showCost}
+          days={days}
+          crewOptions={crewOptions}
         />
       )}
 
@@ -1134,7 +1401,13 @@ function ItemList({
 function DetailChips({ item }: { item: TripItineraryItemSummary }) {
   const meta = categoryMeta(item.category);
   const details = item.details ?? {};
+  // Imported records name the crew as text; once linked, CrewRow shows them instead.
+  const linked = new Set([
+    ...(item.driver ? ['driverName', 'driverPhone'] : []),
+    ...(item.vehicle ? ['vehicle'] : []),
+  ]);
   const chips = meta.fields
+    .filter((field) => !linked.has(field.key))
     .map((field) => ({ label: field.label, value: details[field.key] }))
     .filter((chip): chip is { label: string; value: string } => Boolean(chip.value))
     .slice(0, 6);
@@ -1189,12 +1462,15 @@ function CardActions({
   onEdit,
   onDelete,
   onToggleComplete,
+  extra,
 }: {
   done: boolean;
   isPending: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onToggleComplete: () => void;
+  /** Card-specific actions, before Remove. */
+  extra?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center gap-3 border-t border-slate-100 bg-slate-50/60 px-4 py-2">
@@ -1214,6 +1490,7 @@ function CardActions({
       >
         Edit
       </button>
+      {extra}
       <button
         type="button"
         onClick={onDelete}
@@ -1227,7 +1504,83 @@ function CardActions({
 }
 
 /**
- * Booked things — lodging, transport, cruises, reservations. A coloured
+ * The vehicle repositioning with no passenger. Drawn quieter than a client
+ * movement, so it can never be mistaken for one.
+ */
+function EmptyRunCard({
+  item,
+  canEdit,
+  isPending,
+  onEdit,
+  onDelete,
+  onToggleComplete,
+}: {
+  item: TripItineraryItemSummary;
+  canEdit: boolean;
+  isPending: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  onToggleComplete: () => void;
+}) {
+  const done = item.completedAt !== null;
+  const details = item.details ?? {};
+  const route = `${details.pickupLocation || 'Base'} → ${details.dropoffLocation || 'Base'}`;
+  const customTitle = item.description !== emptyRunTitle(details.pickupLocation ?? '', details.dropoffLocation ?? '');
+  const facts = [
+    item.durationMinutes ? `${formatDuration(item.durationMinutes * 60_000)} drive` : null,
+    details.distanceKm ? `${details.distanceKm} km` : null,
+  ].filter(Boolean);
+
+  return (
+    <div
+      className={`group overflow-hidden rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 transition-shadow hover:shadow-sm ${
+        done ? 'opacity-60' : ''
+      }`}
+    >
+      <div className="flex items-start gap-3 px-4 py-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-dashed border-slate-300 bg-white text-slate-400">
+          <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d={CATEGORY_PATHS.transportation} />
+          </svg>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {item.scheduledAt && (
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                {formatTimeRange(item.scheduledAt, item.endsAt)}
+              </span>
+            )}
+            <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+              Empty run · no passengers
+            </span>
+          </div>
+          <p className={`mt-0.5 text-base font-semibold ${done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+            {customTitle ? item.description : route}
+          </p>
+          {customTitle && <p className="text-sm text-slate-500">{route}</p>}
+          {facts.length > 0 && <p className="text-xs text-slate-500">{facts.join(' · ')}</p>}
+          {item.body && (
+            <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{item.body}</p>
+          )}
+          <CrewRow item={item} />
+          <AttachmentStrip attachments={item.attachments} />
+        </div>
+      </div>
+      {canEdit && (
+        <CardActions
+          done={done}
+          isPending={isPending}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onToggleComplete={onToggleComplete}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Booked things — lodging, transport, reservations. A coloured
  * category strip, the time and its label, then whatever fields that category
  * carries laid out like a ticket stub.
  */
@@ -1238,6 +1591,7 @@ function BookedRow({
   onEdit,
   onDelete,
   onToggleComplete,
+  onAddEmptyRun,
 }: {
   item: TripItineraryItemSummary;
   canEdit: boolean;
@@ -1246,6 +1600,8 @@ function BookedRow({
   onEdit: () => void;
   onDelete: () => void;
   onToggleComplete: () => void;
+  /** Pick-ups and drop-offs: add the empty run that goes with them. */
+  onAddEmptyRun?: () => void;
 }) {
   const done = item.completedAt !== null;
   const meta = categoryMeta(item.category);
@@ -1284,7 +1640,9 @@ function BookedRow({
             </p>
           )}
           <DetailChips item={item} />
+          <CrewRow item={item} />
           <ContactRow item={item} />
+          <AttachmentStrip attachments={item.attachments} />
         </div>
         {item.reminderMinutesBefore != null && (
           <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
@@ -1299,6 +1657,23 @@ function BookedRow({
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleComplete={onToggleComplete}
+          extra={
+            onAddEmptyRun && (
+              <button
+                type="button"
+                onClick={onAddEmptyRun}
+                disabled={isPending}
+                title={
+                  item.timeLabel === 'DROP-OFF'
+                    ? 'Add the empty run back after this drop-off'
+                    : 'Add the empty run out to this pick-up'
+                }
+                className="text-xs font-medium text-slate-500 transition-colors hover:text-primary disabled:opacity-50"
+              >
+                + Empty run
+              </button>
+            )
+          }
         />
       )}
     </div>
@@ -1361,7 +1736,9 @@ function StopCard({
             </p>
           )}
           <DetailChips item={item} />
+          <CrewRow item={item} />
           <ContactRow item={item} />
+          <AttachmentStrip attachments={item.attachments} />
           {item.reminderMinutesBefore != null && (
             <p className="mt-2 text-xs font-medium text-amber-700">Reminder set</p>
           )}
@@ -1395,8 +1772,6 @@ const CATEGORY_PATHS: Record<TripItemCategory, string> = {
     'M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8a1 1 0 001 1h1a1 1 0 001-1v-1h12v1a1 1 0 001 1h1a1 1 0 001-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z',
   lodging:
     'M7 13c1.66 0 3-1.34 3-3S8.66 7 7 7s-3 1.34-3 3 1.34 3 3 3zm12-6h-8v7H3V5H1v15h2v-3h18v3h2v-9c0-2.21-1.79-4-4-4z',
-  cruise:
-    'M20 21c-1.39 0-2.78-.47-4-1.32-2.44 1.71-5.56 1.71-8 0C6.78 20.53 5.39 21 4 21H2v2h2c1.38 0 2.74-.35 4-.99a8.76 8.76 0 008 0c1.26.65 2.62.99 4 .99h2v-2h-2zM3.95 19H4c1.6 0 3.02-.88 4-2 .98 1.12 2.4 2 4 2s3.02-.88 4-2c.98 1.12 2.4 2 4 2h.05l1.89-6.68c.08-.26.06-.54-.06-.78s-.34-.42-.6-.5L20 10.62V6c0-1.1-.9-2-2-2h-3V1H9v3H6c-1.1 0-2 .9-2 2v4.62l-1.29.42a1.007 1.007 0 00-.66 1.28L3.95 19zM6 6h12v3.97L12 8 6 9.97V6z',
   tour: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z',
   booking:
     'M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z',
@@ -1430,9 +1805,13 @@ function ItemEditor({
   submitting,
   submitLabel,
   showCost,
+  days,
+  crewOptions,
 }: {
   /** Costs are quote prices; hidden from people without access to quotes. */
   showCost: boolean;
+  days: TripDaySummary[];
+  crewOptions: CrewOptions;
   editor: EditorState;
   setEditor: (e: EditorState) => void;
   onSubmit: () => void;
@@ -1483,249 +1862,265 @@ function ItemEditor({
         ))}
       </div>
 
-      <label className="block">
-        <span className={labelClass}>{meta.titleLabel}</span>
-        <input
-          type="text"
-          placeholder={meta.titlePlaceholder}
-          value={editor.description}
-          onChange={(e) => patch({ description: e.target.value })}
-          className="mt-1 w-full rounded-lg bg-gray-50 px-4 py-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
-        />
-      </label>
-
-      {meta.providerLabel && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="col-span-2 block">
-            <span className={labelClass}>{meta.providerLabel}</span>
+      {editor.category === 'flight' ? (
+        <FlightFields editor={editor} patch={patch} days={days} crewOptions={crewOptions} showCost={showCost} />
+      ) : editor.category === 'transportation' ? (
+        <TransportFields editor={editor} patch={patch} days={days} crewOptions={crewOptions} showCost={showCost} />
+      ) : (
+        <>
+          <label className="block">
+            <span className={labelClass}>{meta.titleLabel}</span>
             <input
               type="text"
-              value={editor.providerName}
-              onChange={(e) => patch({ providerName: e.target.value })}
-              className={fieldClass}
+              placeholder={meta.titlePlaceholder}
+              value={editor.description}
+              onChange={(e) => patch({ description: e.target.value })}
+              className="mt-1 w-full rounded-lg bg-gray-50 px-4 py-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </label>
-          <label className="col-span-2 block">
-            <span className={labelClass}>Confirmation #</span>
-            <input
-              type="text"
-              value={editor.confirmationCode}
-              onChange={(e) => patch({ confirmationCode: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-        </div>
-      )}
 
-      {/* When + what kind of time it is */}
-      {editor.category !== 'information' && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="block">
-            <span className={labelClass}>Date</span>
-            <input
-              type="date"
-              value={editor.date}
-              onChange={(e) => patch({ date: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-          <label className="block">
-            <span className={labelClass}>Time</span>
-            <input
-              type="time"
-              value={editor.time}
-              onChange={(e) => patch({ time: e.target.value })}
-              disabled={!editor.date}
-              className={`${fieldClass} disabled:opacity-50`}
-            />
-          </label>
-          <label className="block">
-            <span className={labelClass}>Ends</span>
-            <input
-              type="time"
-              value={editor.endTime}
-              onChange={(e) => patch({ endTime: e.target.value })}
-              disabled={!editor.date}
-              className={`${fieldClass} disabled:opacity-50`}
-            />
-          </label>
-          {meta.timeLabels.length > 0 && (
-            <label className="block">
-              <span className={labelClass}>Label</span>
-              <select
-                value={editor.timeLabel}
-                onChange={(e) => patch({ timeLabel: e.target.value })}
-                className={fieldClass}
-              >
-                <option value="">None</option>
-                {meta.timeLabels.map((label) => (
-                  <option key={label} value={label}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {meta.providerLabel && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="col-span-2 block">
+                <span className={labelClass}>{meta.providerLabel}</span>
+                <input
+                  type="text"
+                  value={editor.providerName}
+                  onChange={(e) => patch({ providerName: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+              <label className="col-span-2 block">
+                <span className={labelClass}>Confirmation #</span>
+                <input
+                  type="text"
+                  value={editor.confirmationCode}
+                  onChange={(e) => patch({ confirmationCode: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+            </div>
           )}
-        </div>
-      )}
 
-      {/* ── The fields that make this category itself ──────────────── */}
-      {meta.fields.length > 0 && (
-        <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            {meta.label} details
-          </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {meta.fields.map((field) => (
-              <label key={field.key} className={`block ${spanClass[field.span ?? 2]}`}>
-                <span className={labelClass}>{field.label}</span>
-                {field.kind === 'select' ? (
+          {/* When + what kind of time it is */}
+          {editor.category !== 'information' && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="block">
+                <span className={labelClass}>Date</span>
+                <input
+                  type="date"
+                  value={editor.date}
+                  onChange={(e) => patch({ date: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+              <label className="block">
+                <span className={labelClass}>Time</span>
+                <input
+                  type="time"
+                  value={editor.time}
+                  onChange={(e) => patch({ time: e.target.value })}
+                  disabled={!editor.date}
+                  className={`${fieldClass} disabled:opacity-50`}
+                />
+              </label>
+              <label className="block">
+                <span className={labelClass}>Ends</span>
+                <input
+                  type="time"
+                  value={editor.endTime}
+                  onChange={(e) => patch({ endTime: e.target.value })}
+                  disabled={!editor.date}
+                  className={`${fieldClass} disabled:opacity-50`}
+                />
+              </label>
+              {meta.timeLabels.length > 0 && (
+                <label className="block">
+                  <span className={labelClass}>Label</span>
                   <select
-                    value={editor.details[field.key] ?? ''}
-                    onChange={(e) => setDetail(field.key, e.target.value)}
-                    className={`${fieldClass} bg-white`}
+                    value={editor.timeLabel}
+                    onChange={(e) => patch({ timeLabel: e.target.value })}
+                    className={fieldClass}
                   >
-                    <option value="">—</option>
-                    {(field.options ?? []).map((option) => (
-                      <option key={option} value={option}>
-                        {option}
+                    <option value="">None</option>
+                    {meta.timeLabels.map((label) => (
+                      <option key={label} value={label}>
+                        {label}
                       </option>
                     ))}
                   </select>
-                ) : (
-                  <input
-                    type={field.kind === 'number' ? 'number' : field.kind === 'time' ? 'time' : 'text'}
-                    placeholder={field.placeholder}
-                    value={editor.details[field.key] ?? ''}
-                    onChange={(e) => setDetail(field.key, e.target.value)}
-                    className={`${fieldClass} bg-white`}
-                  />
-                )}
+                </label>
+              )}
+            </div>
+          )}
+
+          {/* ── The fields that make this category itself ──────────────── */}
+          {meta.fields.length > 0 && (
+            <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                {meta.label} details
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {meta.fields.map((field) => (
+                  <label key={field.key} className={`block ${spanClass[field.span ?? 2]}`}>
+                    <span className={labelClass}>{field.label}</span>
+                    {field.kind === 'select' ? (
+                      <select
+                        value={editor.details[field.key] ?? ''}
+                        onChange={(e) => setDetail(field.key, e.target.value)}
+                        className={`${fieldClass} bg-white`}
+                      >
+                        <option value="">—</option>
+                        {(field.options ?? []).map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={field.kind === 'number' ? 'number' : field.kind === 'time' ? 'time' : 'text'}
+                        placeholder={field.placeholder}
+                        value={editor.details[field.key] ?? ''}
+                        onChange={(e) => setDetail(field.key, e.target.value)}
+                        className={`${fieldClass} bg-white`}
+                      />
+                    )}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Where */}
+          {editor.category !== 'information' && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="col-span-2 block">
+                <span className={labelClass}>Place</span>
+                <input
+                  type="text"
+                  placeholder="Villa Rosa Kempinski"
+                  value={editor.placeName}
+                  onChange={(e) => patch({ placeName: e.target.value })}
+                  className={fieldClass}
+                />
               </label>
-            ))}
-          </div>
-        </div>
+              <label className="col-span-2 block">
+                <span className={labelClass}>Address</span>
+                <input
+                  type="text"
+                  value={editor.address}
+                  onChange={(e) => patch({ address: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+            </div>
+          )}
+
+          <label className="block">
+            <span className={labelClass}>Description</span>
+            <textarea
+              placeholder="What the traveller should know about this."
+              value={editor.body}
+              onChange={(e) => patch({ body: e.target.value })}
+              rows={3}
+              className={fieldClass}
+            />
+          </label>
+
+          <details className="rounded-xl border border-gray-100 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-medium text-gray-500">
+              {showCost ? 'More — contact, link, cost, reminder' : 'More — contact, link, reminder'}
+            </summary>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="col-span-2 block">
+                <span className={labelClass}>Phone</span>
+                <input
+                  type="tel"
+                  value={editor.phone}
+                  onChange={(e) => patch({ phone: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+              <label className="col-span-2 block">
+                <span className={labelClass}>Booking link</span>
+                <input
+                  type="url"
+                  value={editor.bookingUrl}
+                  onChange={(e) => patch({ bookingUrl: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+              {!meta.providerLabel && (
+                <label className="col-span-2 block">
+                  <span className={labelClass}>Confirmation #</span>
+                  <input
+                    type="text"
+                    value={editor.confirmationCode}
+                    onChange={(e) => patch({ confirmationCode: e.target.value })}
+                    className={fieldClass}
+                  />
+                </label>
+              )}
+              {showCost && (
+                <label className="col-span-2 block sm:col-span-1">
+                  <span className={labelClass}>Cost</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editor.unitPrice}
+                    onChange={(e) => patch({ unitPrice: e.target.value })}
+                    className={fieldClass}
+                  />
+                </label>
+              )}
+              <label className="col-span-2 block sm:col-span-1">
+                <span className={labelClass}>Reminder</span>
+                <select
+                  value={editor.reminderMinutesBefore}
+                  onChange={(e) => patch({ reminderMinutesBefore: e.target.value })}
+                  disabled={!editor.date}
+                  className={`${fieldClass} disabled:opacity-50`}
+                >
+                  {REMINDER_OPTIONS.map((option) => (
+                    <option key={String(option.value)} value={option.value == null ? '' : String(option.value)}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="col-span-2 block">
+                <span className={labelClass}>Image URL</span>
+                <input
+                  type="url"
+                  value={editor.imageUrl}
+                  onChange={(e) => patch({ imageUrl: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+              <label className="col-span-2 block sm:col-span-4">
+                <span className={labelClass}>Short sub-label</span>
+                <input
+                  type="text"
+                  placeholder="One line under the title"
+                  value={editor.subtitle}
+                  onChange={(e) => patch({ subtitle: e.target.value })}
+                  className={fieldClass}
+                />
+              </label>
+            </div>
+          </details>
+
+        </>
       )}
 
-      {/* Where */}
-      {editor.category !== 'information' && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="col-span-2 block">
-            <span className={labelClass}>Place</span>
-            <input
-              type="text"
-              placeholder="Villa Rosa Kempinski"
-              value={editor.placeName}
-              onChange={(e) => patch({ placeName: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-          <label className="col-span-2 block">
-            <span className={labelClass}>Address</span>
-            <input
-              type="text"
-              value={editor.address}
-              onChange={(e) => patch({ address: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-        </div>
-      )}
-
-      <label className="block">
-        <span className={labelClass}>Description</span>
-        <textarea
-          placeholder="What the traveller should know about this."
-          value={editor.body}
-          onChange={(e) => patch({ body: e.target.value })}
-          rows={3}
-          className={fieldClass}
-        />
-      </label>
-
-      <details className="rounded-xl border border-gray-100 px-3 py-2">
-        <summary className="cursor-pointer text-xs font-medium text-gray-500">
-          {showCost ? 'More — contact, link, cost, reminder' : 'More — contact, link, reminder'}
-        </summary>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="col-span-2 block">
-            <span className={labelClass}>Phone</span>
-            <input
-              type="tel"
-              value={editor.phone}
-              onChange={(e) => patch({ phone: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-          <label className="col-span-2 block">
-            <span className={labelClass}>Booking link</span>
-            <input
-              type="url"
-              value={editor.bookingUrl}
-              onChange={(e) => patch({ bookingUrl: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-          {!meta.providerLabel && (
-            <label className="col-span-2 block">
-              <span className={labelClass}>Confirmation #</span>
-              <input
-                type="text"
-                value={editor.confirmationCode}
-                onChange={(e) => patch({ confirmationCode: e.target.value })}
-                className={fieldClass}
-              />
-            </label>
-          )}
-          {showCost && (
-            <label className="col-span-2 block sm:col-span-1">
-              <span className={labelClass}>Cost</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={editor.unitPrice}
-                onChange={(e) => patch({ unitPrice: e.target.value })}
-                className={fieldClass}
-              />
-            </label>
-          )}
-          <label className="col-span-2 block sm:col-span-1">
-            <span className={labelClass}>Reminder</span>
-            <select
-              value={editor.reminderMinutesBefore}
-              onChange={(e) => patch({ reminderMinutesBefore: e.target.value })}
-              disabled={!editor.date}
-              className={`${fieldClass} disabled:opacity-50`}
-            >
-              {REMINDER_OPTIONS.map((option) => (
-                <option key={String(option.value)} value={option.value == null ? '' : String(option.value)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="col-span-2 block">
-            <span className={labelClass}>Image URL</span>
-            <input
-              type="url"
-              value={editor.imageUrl}
-              onChange={(e) => patch({ imageUrl: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-          <label className="col-span-2 block sm:col-span-4">
-            <span className={labelClass}>Short sub-label</span>
-            <input
-              type="text"
-              placeholder="One line under the title"
-              value={editor.subtitle}
-              onChange={(e) => patch({ subtitle: e.target.value })}
-              className={fieldClass}
-            />
-          </label>
-        </div>
-      </details>
+      <AttachmentPicker
+        attachments={editor.attachments}
+        removedIds={editor.removedAttachmentIds}
+        newFiles={editor.newFiles}
+        onChange={(next) => patch(next)}
+      />
 
       <div className="flex justify-end gap-2 pt-1">
         <button

@@ -288,7 +288,7 @@ export default function InvoicesClient({
             </svg>
             <input
               type="text"
-              placeholder="Search by number or customer…"
+              placeholder="Search by number or client…"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -348,7 +348,7 @@ export default function InvoicesClient({
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Number</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Customer</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Client</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Issued</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Due</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</th>

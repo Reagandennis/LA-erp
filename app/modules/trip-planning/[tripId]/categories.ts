@@ -12,21 +12,20 @@
  */
 
 export type TripItemCategory =
-  | 'activity'
-  | 'lodging'
   | 'flight'
   | 'transportation'
-  | 'cruise'
+  | 'activity'
+  | 'lodging'
   | 'tour'
   | 'booking'
   | 'information';
 
+/** The order the editor offers them in: flights, then the transport that meets them. */
 export const TRIP_ITEM_CATEGORIES: TripItemCategory[] = [
-  'activity',
-  'lodging',
   'flight',
   'transportation',
-  'cruise',
+  'activity',
+  'lodging',
   'tour',
   'booking',
   'information',
@@ -77,6 +76,8 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
       { key: 'gate', label: 'Gate', kind: 'text', span: 1 },
       { key: 'seat', label: 'Seat', kind: 'text', placeholder: '14A', span: 1 },
       { key: 'baggage', label: 'Baggage', kind: 'text', placeholder: '2 × 23kg', span: 1 },
+      // The airport's zone the flight's time is written in; set by the flight form.
+      { key: 'timezone', label: 'Timezone', kind: 'text', span: 2 },
     ],
   },
   lodging: {
@@ -101,7 +102,8 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
     titleLabel: 'Journey',
     titlePlaceholder: 'Airport transfer to the hotel',
     providerLabel: 'Company',
-    timeLabels: ['PICK-UP', 'DROP-OFF', 'DEPARTURE', 'ARRIVAL'],
+    // EMPTY RUN: the vehicle moving with no passenger — out to a pick-up, back after a drop-off.
+    timeLabels: ['PICK-UP', 'DROP-OFF', 'EMPTY RUN', 'DEPARTURE', 'ARRIVAL'],
     chip: 'bg-primary/10 text-primary',
     dot: 'bg-primary',
     fields: [
@@ -111,23 +113,7 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
       { key: 'dropoffLocation', label: 'Drop-off', kind: 'text', span: 2 },
       { key: 'driverName', label: 'Driver', kind: 'text', span: 2 },
       { key: 'driverPhone', label: 'Driver phone', kind: 'text', span: 2 },
-    ],
-  },
-  cruise: {
-    label: 'Cruise',
-    titleLabel: 'Sailing',
-    titlePlaceholder: 'Seven-night Mediterranean',
-    providerLabel: 'Cruise line',
-    timeLabels: ['EMBARK', 'DISEMBARK', 'ARRIVAL', 'DEPARTURE'],
-    chip: 'bg-cyan-100 text-cyan-600',
-    dot: 'bg-cyan-500',
-    fields: [
-      { key: 'shipName', label: 'Ship', kind: 'text', span: 2 },
-      { key: 'portOfCall', label: 'Port of call', kind: 'text', span: 2 },
-      { key: 'cabin', label: 'Cabin', kind: 'text', span: 1 },
-      { key: 'deck', label: 'Deck', kind: 'text', span: 1 },
-      { key: 'embarkTime', label: 'Embark', kind: 'time', span: 1 },
-      { key: 'disembarkTime', label: 'Disembark', kind: 'time', span: 1 },
+      { key: 'distanceKm', label: 'Distance (km)', kind: 'number', span: 1 },
     ],
   },
   tour: {
@@ -241,7 +227,6 @@ export function detailSummary(
       if (!value) return null;
       switch (field.key) {
         case 'flightNumber':
-        case 'shipName':
         case 'roomType':
         case 'mode':
           return value;
@@ -258,7 +243,6 @@ export function detailSummary(
         case 'partySize':
           return `Party of ${value}`;
         case 'cabin':
-        case 'deck':
         case 'boardBasis':
         case 'durationText':
           return value;

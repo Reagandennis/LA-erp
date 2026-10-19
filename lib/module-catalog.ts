@@ -194,13 +194,13 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
   {
     slug: 'quotes',
     name: 'Quotes',
-    description: 'Prepare and manage customer quotations and pricing drafts.',
+    description: 'Prepare and manage client quotations and pricing drafts.',
     category: 'Sales',
     sortOrder: 21,
   },
   {
     slug: 'customers',
-    name: 'Customers',
+    name: 'Clients',
     description: 'CRM — deal pipeline, account profiles, contacts, and receivables by entity.',
     category: 'Finance',
     sortOrder: 22,

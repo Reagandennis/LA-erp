@@ -118,7 +118,7 @@ const ENTITY_LABELS: Record<string, string> = {
   templates: 'Template',
   'brand-profiles': 'Brand profile',
   products: 'Product',
-  customers: 'Customer',
+  customers: 'Client',
   invoices: 'Invoice',
   payments: 'Payment',
   trips: 'Trip',

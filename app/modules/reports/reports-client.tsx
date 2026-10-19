@@ -443,9 +443,9 @@ function FinanceTab({
         </ChartCard>
       </div>
 
-      <ChartCard title="Top customers by balance" action={{ href: '/modules/customers', label: 'Open customers →' }}>
+      <ChartCard title="Top clients by balance" action={{ href: '/modules/customers', label: 'Open clients →' }}>
         <SimpleTable
-          headers={['Customer', 'Open balance', 'Overdue']}
+          headers={['Client', 'Open balance', 'Overdue']}
           align={['left', 'right', 'right']}
           rows={fin.topCustomers.map((c) => [
             c.name,
@@ -529,9 +529,9 @@ function SalesTab({
         </ChartCard>
       </div>
 
-      <ChartCard title="Top customers by quoted value" action={{ href: '/modules/quotes', label: 'Open quotes →' }}>
+      <ChartCard title="Top clients by quoted value" action={{ href: '/modules/quotes', label: 'Open quotes →' }}>
         <SimpleTable
-          headers={['Customer', 'Quoted value', 'Quotes']}
+          headers={['Client', 'Quoted value', 'Quotes']}
           align={['left', 'right', 'right']}
           rows={sales.topCustomers.map((c) => [c.name, money(c.value, currency), c.count])}
           empty="No quotes yet."

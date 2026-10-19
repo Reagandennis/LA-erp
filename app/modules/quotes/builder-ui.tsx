@@ -265,7 +265,7 @@ export function CustomerSelect({
               onClick={() => setCreating(true)}
               className="text-xs font-semibold text-primary hover:text-primary/80"
             >
-              + New customer
+              + New client
             </button>
           )}
         </div>
@@ -275,7 +275,7 @@ export function CustomerSelect({
           onChange={(event) => onChange(event.target.value)}
           className={inputClass}
         >
-          <option value="">Select a customer…</option>
+          <option value="">Select a client…</option>
           {customers.map((customer) => (
             <option key={customer.id} value={customer.id}>
               {customer.name}
@@ -320,7 +320,7 @@ function NewCustomerForm({
   const handleSave = async () => {
     setError(null);
     if (!draft.name.trim()) {
-      setError('Customer name is required');
+      setError('Client name is required');
       return;
     }
     setSaving(true);
@@ -342,7 +342,7 @@ function NewCustomerForm({
         | { customer?: CustomerOption; error?: string }
         | null;
       if (!response.ok || !data?.customer) {
-        setError(data?.error ?? 'Could not create customer');
+        setError(data?.error ?? 'Could not create client');
         return;
       }
       onCreated(data.customer);
@@ -356,7 +356,7 @@ function NewCustomerForm({
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4 @2xl:col-span-2 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-gray-900">New customer</p>
+        <p className="text-sm font-semibold text-gray-900">New client</p>
         <button type="button" onClick={onCancel} className="text-xs font-medium text-gray-500 hover:text-gray-800">
           Cancel
         </button>
@@ -384,7 +384,7 @@ function NewCustomerForm({
       {error && <p className="mt-3 text-xs font-medium text-rose-600">{error}</p>}
       <div className="mt-4 flex justify-end">
         <button type="button" disabled={saving} onClick={handleSave} className={primaryButton}>
-          {saving ? 'Saving…' : 'Save customer'}
+          {saving ? 'Saving…' : 'Save client'}
         </button>
       </div>
     </div>

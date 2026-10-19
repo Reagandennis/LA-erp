@@ -552,7 +552,7 @@ export default function InvoiceDetailDrawer({
                   disabled={actionPending !== null}
                   className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {actionPending === 'send' ? 'Sending…' : 'Email to customer'}
+                  {actionPending === 'send' ? 'Sending…' : 'Email to client'}
                 </button>
               )}
               <div className="grid grid-cols-2 gap-2.5">

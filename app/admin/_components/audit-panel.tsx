@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AdminUser, AuditLogEntry, AuditQueryResult } from './admin-types';
-import { Drawer, EmptyState, SearchInput, describeAction, formatDateTime, formatIp, inputClass, secondaryButton } from './admin-ui';
+import { Drawer, EmptyState, SearchInput, describeAction, describeEntityType, formatDateTime, formatIp, inputClass, secondaryButton } from './admin-ui';
 
 export type AuditFilterState = {
   q: string;
@@ -147,7 +147,7 @@ export default function AuditPanel({
             <option value="">All entities</option>
             {audit.facets.entityTypes.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {describeEntityType(t)}
               </option>
             ))}
           </select>
@@ -201,7 +201,7 @@ export default function AuditPanel({
                     <span className="block truncate text-xs text-gray-500">
                       {log.actor?.name ?? 'System'}
                       {log.target && log.target.id !== log.actor?.id ? ` → ${log.target.name}` : ''}
-                      {!log.target && log.entityId ? ` · ${log.entityType} #${log.entityId}` : ''}
+                      {!log.target && log.entityId ? ` · ${describeEntityType(log.entityType)} #${log.entityId}` : ''}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-3 text-xs text-gray-400">
@@ -264,7 +264,7 @@ export default function AuditPanel({
               <DetailRow label="When" value={formatDateTime(selected.createdAt)} />
               <DetailRow label="Done by" value={selected.actor ? `${selected.actor.name} (${selected.actor.email})` : 'System'} />
               <DetailRow label="Affected person" value={selected.target ? `${selected.target.name} (${selected.target.email})` : '—'} />
-              <DetailRow label="Entity" value={`${selected.entityType}${selected.entityId ? ` #${selected.entityId}` : ''}`} />
+              <DetailRow label="Entity" value={`${describeEntityType(selected.entityType)}${selected.entityId ? ` #${selected.entityId}` : ''}`} />
               <DetailRow label="IP address" value={selected.ipAddress ? `${formatIp(selected.ipAddress)}${formatIp(selected.ipAddress) !== selected.ipAddress ? ` (${selected.ipAddress})` : ''}` : '—'} />
             </div>
             <div>

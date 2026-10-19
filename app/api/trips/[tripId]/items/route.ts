@@ -66,6 +66,9 @@ export async function POST(
       reminderMinutesBefore: item.reminderMinutesBefore ?? null,
       imageUrl: item.imageUrl ?? null,
       confirmationCode: item.confirmationCode ?? null,
+      driverId: item.driverId ?? null,
+      officerId: item.officerId ?? null,
+      vehicleId: item.vehicleId ?? null,
     })),
   });
 

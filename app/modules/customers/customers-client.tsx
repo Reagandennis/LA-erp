@@ -326,7 +326,7 @@ export default function CustomersClient({
         body: JSON.stringify(patch),
       });
       const data = (await res.json().catch(() => null)) as { customer?: CrmCustomer; error?: string } | null;
-      if (!res.ok || !data?.customer) return data?.error ?? 'Could not save customer';
+      if (!res.ok || !data?.customer) return data?.error ?? 'Could not save client';
       setCustomers((current) => current.map((c) => (c.id === customerId ? data.customer! : c)));
       // Keep names in sync on deals and receivables.
       setDeals((current) =>
@@ -390,7 +390,7 @@ export default function CustomersClient({
       <div className="mx-auto max-w-7xl space-y-6">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">Customers</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">Clients</h1>
             <p className="mt-1 text-sm text-gray-500">
               Pipeline, account profiles, and receivables across all entities.
             </p>
@@ -416,7 +416,7 @@ export default function CustomersClient({
               onClick={() => setShowNewCustomer(true)}
               className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
             >
-              New customer
+              New client
             </button>
             <button
               type="button"
@@ -1031,7 +1031,7 @@ function AccountsList({
       {filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
           <h3 className="text-lg font-semibold text-gray-900">No accounts found</h3>
-          <p className="mt-1 text-sm text-gray-500">Try a different search, entity, or add a new customer.</p>
+          <p className="mt-1 text-sm text-gray-500">Try a different search, entity, or add a new client.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1183,7 +1183,7 @@ function CustomerDrawer({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <h2 className="truncate text-2xl font-bold tracking-tight">{customer.name}</h2>
-              <p className="mt-1 truncate text-sm text-white/60">{customer.company || customer.email || 'Customer profile'}</p>
+              <p className="mt-1 truncate text-sm text-white/60">{customer.company || customer.email || 'Client profile'}</p>
             </div>
             <button type="button" onClick={onClose} className="rounded-lg bg-white/10 p-2 hover:bg-white/20" aria-label="Close">
               <CloseIcon />
@@ -1664,7 +1664,7 @@ function ReceivablesDrawer({ account, onClose }: { account: CustomerAccount; onC
           <div className="relative z-10 mb-5 flex items-start justify-between gap-4">
             <div className="min-w-0">
               <h2 className="truncate text-2xl font-bold tracking-tight">{account.name}</h2>
-              <p className="mt-1 truncate text-sm text-white/60">{account.company || account.email || 'Customer account'}</p>
+              <p className="mt-1 truncate text-sm text-white/60">{account.company || account.email || 'Client account'}</p>
             </div>
             <button type="button" onClick={onClose} className="rounded-lg bg-white/10 p-2 hover:bg-white/20" aria-label="Close">
               <CloseIcon />
@@ -1785,7 +1785,7 @@ function NewDealModal({
       return;
     }
     if (!draft.customerId) {
-      setError('Pick a customer');
+      setError('Pick a client');
       return;
     }
     setSaving(true);
@@ -1834,7 +1834,7 @@ function NewDealModal({
             onChange={(e) => setDraft((d) => ({ ...d, customerId: Number(e.target.value), quoteId: 0 }))}
             className={inputClass}
           >
-            <option value={0}>Customer *</option>
+            <option value={0}>Client *</option>
             {customers.map((customer) => (
               <option key={customer.id} value={customer.id}>
                 {customer.name} ({customer.entity})
@@ -1909,7 +1909,7 @@ function NewCustomerModal({
   const submit = async () => {
     setError(null);
     if (!draft.name.trim()) {
-      setError('Customer name is required');
+      setError('Client name is required');
       return;
     }
     setSaving(true);
@@ -1941,7 +1941,7 @@ function NewCustomerModal({
           }
         | null;
       if (!response.ok || !data?.customer) {
-        setError(data?.error ?? 'Could not create customer');
+        setError(data?.error ?? 'Could not create client');
         return;
       }
 
@@ -1996,12 +1996,12 @@ function NewCustomerModal({
   };
 
   return (
-    <Modal title="New customer" onClose={saving ? () => undefined : onClose}>
+    <Modal title="New client" onClose={saving ? () => undefined : onClose}>
       <div className="space-y-3 px-6 py-5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <input
             type="text"
-            placeholder="Customer name *"
+            placeholder="Client name *"
             value={draft.name}
             onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
             className={inputClass}
@@ -2042,7 +2042,7 @@ function NewCustomerModal({
         />
         {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
       </div>
-      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} submitLabel="Add customer" />
+      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} submitLabel="Add client" />
     </Modal>
   );
 }
@@ -2145,7 +2145,7 @@ function EmptyState({ filtered }: { filtered: boolean }) {
     <div className="px-6 py-16 text-center sm:py-20">
       <h3 className="text-lg font-semibold text-gray-900">{filtered ? 'No matching accounts' : 'No accounts yet'}</h3>
       <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">
-        {filtered ? 'Try a different search or filter.' : 'Add a customer or create an invoice to get started.'}
+        {filtered ? 'Try a different search or filter.' : 'Add a client or create an invoice to get started.'}
       </p>
     </div>
   );

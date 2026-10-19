@@ -50,6 +50,42 @@ export interface TripItineraryItemSummary {
   reminderAt: string | null;
   imageUrl: string | null;
   confirmationCode: string | null;
+  /** Photos and documents, oldest first. */
+  attachments: TripItemAttachmentSummary[];
+  /** The crew on this movement, from Task Assignment's registers. */
+  driver: { id: number; name: string; phone: string | null } | null;
+  officer: { id: number; name: string; callSign: string | null; grade: string; phone: string | null } | null;
+  vehicle: { id: number; registration: string; make: string | null; model: string | null; type: string } | null;
+}
+
+/** A driver, CPO or vehicle offered by the crew pickers (see lib/trip-crew). */
+export interface CrewOption {
+  id: number;
+  label: string;
+  hint: string | null;
+  status: string;
+  /** Allocated to this trip in Task Assignment. */
+  onTrip: boolean;
+  /** Another trip it's actively assigned to. */
+  busyOn: string | null;
+}
+
+export interface CrewOptions {
+  drivers: CrewOption[];
+  officers: CrewOption[];
+  vehicles: CrewOption[];
+}
+
+export interface TripItemAttachmentSummary {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  /** Opens the file: inline for images, PDFs and text, otherwise a download. */
+  url: string;
+  /** A small preview for images; null for documents. */
+  thumbnailUrl: string | null;
 }
 
 export const REMINDER_OPTIONS: { value: number | null; label: string }[] = [
@@ -75,6 +111,8 @@ export interface TripSummary {
   createdAt: string;
   updatedAt: string;
   customer: { id: number; name: string; company: string | null; email: string | null };
+  /** The client's travellers on this trip, lead first. */
+  travelers: { id: number; name: string; isPrimary: boolean }[];
   createdBy: { id: number; name: string; email: string };
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
@@ -95,4 +133,11 @@ export interface OwnerOption {
   id: number;
   name: string;
   email: string;
+}
+
+/** A client's traveller, as the trip builder offers them. */
+export interface TravelerOption {
+  id: number;
+  name: string;
+  customerId: number;
 }

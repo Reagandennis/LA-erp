@@ -66,6 +66,7 @@ model User {
   feedbackComments               FeedbackComment[]
   createdDriverLicenses          DriverLicense[]                 @relation("DriverLicenseCreatedBy")
   uploadedFiles                  StoredFile[]                    @relation("StoredFileUploadedBy")
+  tripItemAttachments            TripItemAttachment[]            @relation("TripItemAttachmentUploadedBy")
   receivedFileShares             StoredFileShare[]
   fileNotifications              FileNotification[]
   calendarEvents                 CalendarEvent[]
@@ -881,7 +882,7 @@ model TripItineraryItem {
   /// Legacy 5-value type. Retained for one release as a rollback path; new
   /// code reads `category`.
   itemType              String                          @default("activity")
-  /// activity | lodging | flight | transportation | cruise | tour | booking | information
+  /// flight | activity | lodging | transportation | tour | booking | information
   category              String                          @default("activity")
   description           String
   subtitle              String?
@@ -910,10 +911,19 @@ model TripItineraryItem {
   reminderSentAt        DateTime?
   imageUrl              String?
   confirmationCode      String?
+  /// Who and what runs this movement, picked from Task Assignment's registers.
+  /// SetNull: retiring a car or a person never rewrites the itinerary's history.
+  driverId              Int?
+  officerId             Int?
+  vehicleId             Int?
   trip                  Trip                            @relation(fields: [tripId], references: [id], onDelete: Cascade)
   day                   TripDay?                        @relation(fields: [dayId], references: [id], onDelete: SetNull)
+  driver                Driver?                         @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  officer               Officer?                        @relation(fields: [officerId], references: [id], onDelete: SetNull)
+  vehicle               Vehicle?                        @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
   sourceQuoteItem       QuoteItem?                      @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
   notifications         TripItineraryItemNotification[]
+  attachments           TripItemAttachment[]
 
   @@index([dayId, position])
   @@index([tripId, category])
@@ -921,6 +931,28 @@ model TripItineraryItem {
   @@index([tripId, scheduledAt])
   @@index([reminderAt, reminderSentAt])
   @@index([sourceQuoteItemId])
+  @@index([driverId])
+  @@index([officerId])
+  @@index([vehicleId])
+}
+
+/// Photos and documents on an itinerary event.
+model TripItemAttachment {
+  id           Int               @id @default(autoincrement())
+  itemId       Int
+  filename     String
+  mimeType     String
+  size         Int
+  content      Bytes
+  /// Small WebP preview for images, so cards never load the full upload.
+  thumbnail    Bytes?
+  uploadedById Int?
+  createdAt    DateTime          @default(now())
+  item         TripItineraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  uploadedBy   User?             @relation("TripItemAttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([itemId, createdAt])
+  @@index([uploadedById])
 }
 
 model TripDay {
@@ -992,78 +1024,81 @@ model TripLogEntry {
 // --- Task assignment: fleet & protection resources allocated to trips ---
 
 model Vehicle {
-  id           Int              @id @default(autoincrement())
-  registration String           @unique
-  make         String?
-  model        String?
-  type         String           @default("Sedan")
-  status       String           @default("Available")
-  capacity     Int?
-  notes        String?
-  photoName    String?
-  photoMime    String?
-  photoSize    Int?
-  photoContent Bytes?
-  createdById  Int
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  createdBy    User             @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  assignments  TripAssignment[]
+  id             Int                 @id @default(autoincrement())
+  registration   String              @unique
+  make           String?
+  model          String?
+  type           String              @default("Sedan")
+  status         String              @default("Available")
+  capacity       Int?
+  notes          String?
+  photoName      String?
+  photoMime      String?
+  photoSize      Int?
+  photoContent   Bytes?
+  createdById    Int
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  createdBy      User                @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments    TripAssignment[]
+  itineraryItems TripItineraryItem[]
 
   @@index([status])
   @@index([registration])
 }
 
 model Driver {
-  id            Int              @id @default(autoincrement())
-  name          String
+  id             Int                 @id @default(autoincrement())
+  name           String
   /// Master personnel record this resource mirrors. SetNull, never Cascade:
   /// TripAssignment history points here and must survive a personnel delete.
-  personnelId   Int?             @unique
+  personnelId    Int?                @unique
   /// Set when the person loses the Driver role. The row is KEPT so historical
   /// TripAssignment.driverId never dangles; retired rows are hidden from pickers.
-  retiredAt     DateTime?
-  phone         String?
-  licenseNumber String?
-  status        String           @default("Available")
-  notes         String?
-  photoName     String?
-  photoMime     String?
-  photoSize     Int?
-  photoContent  Bytes?
-  createdById   Int
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  createdBy     User             @relation("DriverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  personnel     Personnel?       @relation(fields: [personnelId], references: [id], onDelete: SetNull)
-  assignments   TripAssignment[]
+  retiredAt      DateTime?
+  phone          String?
+  licenseNumber  String?
+  status         String              @default("Available")
+  notes          String?
+  photoName      String?
+  photoMime      String?
+  photoSize      Int?
+  photoContent   Bytes?
+  createdById    Int
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  createdBy      User                @relation("DriverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  personnel      Personnel?          @relation(fields: [personnelId], references: [id], onDelete: SetNull)
+  assignments    TripAssignment[]
+  itineraryItems TripItineraryItem[]
 
   @@index([status])
   @@index([name])
 }
 
 model Officer {
-  id           Int              @id @default(autoincrement())
-  name         String
+  id             Int                 @id @default(autoincrement())
+  name           String
   /// Master personnel record this resource mirrors. See Driver.personnelId.
-  personnelId  Int?             @unique
+  personnelId    Int?                @unique
   /// See Driver.retiredAt.
-  retiredAt    DateTime?
-  callSign     String?
-  grade        String           @default("CPO")
-  phone        String?
-  status       String           @default("Available")
-  notes        String?
-  photoName    String?
-  photoMime    String?
-  photoSize    Int?
-  photoContent Bytes?
-  createdById  Int
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  createdBy    User             @relation("OfficerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  personnel    Personnel?       @relation(fields: [personnelId], references: [id], onDelete: SetNull)
-  assignments  TripAssignment[]
+  retiredAt      DateTime?
+  callSign       String?
+  grade          String              @default("CPO")
+  phone          String?
+  status         String              @default("Available")
+  notes          String?
+  photoName      String?
+  photoMime      String?
+  photoSize      Int?
+  photoContent   Bytes?
+  createdById    Int
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  createdBy      User                @relation("OfficerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  personnel      Personnel?          @relation(fields: [personnelId], references: [id], onDelete: SetNull)
+  assignments    TripAssignment[]
+  itineraryItems TripItineraryItem[]
 
   @@index([status])
   @@index([name])

@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     where: { id: validation.data.customerId },
     select: { id: true },
   });
-  if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 400 });
+  if (!customer) return NextResponse.json({ error: 'Client not found' }, { status: 400 });
 
   if (validation.data.brandProfileId) {
     const brand = await prisma.brandProfile.findUnique({

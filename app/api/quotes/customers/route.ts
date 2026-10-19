@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   if (!rateLimit.allowed) {
     return NextResponse.json(
       {
-        error: 'Too many customer changes. Slow down and try again.',
+        error: 'Too many client changes. Slow down and try again.',
         retryAfterSeconds: rateLimit.retryAfterSeconds,
       },
       { status: 429 },

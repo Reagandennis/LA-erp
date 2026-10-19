@@ -6,7 +6,7 @@ import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
 import { canSeeTripCosts, tripForViewer } from '@/lib/trip-costs';
-import { createTrip, listTripsForUser } from '@/lib/trips';
+import { TripTravelerError, createTrip, listTripsForUser } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripCreateSchema } from '@/lib/validation';
 
@@ -51,32 +51,41 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const trip = await createTrip({
-    customerId: validation.data.customerId,
-    ownerId: validation.data.ownerId ?? null,
-    title: validation.data.title,
-    description: validation.data.description ?? null,
-    status: validation.data.status,
-    startDate: validation.data.startDate ?? null,
-    endDate: validation.data.endDate ?? null,
-    currency: validation.data.currency,
-    notes: validation.data.notes ?? null,
-    items: validation.data.items.map((item) => ({
-      itemType: item.itemType,
-      description: item.description,
-      subtitle: item.subtitle ?? null,
-      quantity: item.quantity,
-      unitPrice: canSeeTripCosts(auth.user) ? (item.unitPrice ?? null) : null,
-      sourceQuoteItemId: item.sourceQuoteItemId ?? null,
-      scheduledAt: item.scheduledAt ?? null,
-      endsAt: item.endsAt ?? null,
-      durationMinutes: item.durationMinutes ?? null,
-      reminderMinutesBefore: item.reminderMinutesBefore ?? null,
-      imageUrl: item.imageUrl ?? null,
-      confirmationCode: item.confirmationCode ?? null,
-    })),
-    createdById: auth.user.id,
-  });
+  let trip;
+  try {
+    trip = await createTrip({
+      customerId: validation.data.customerId,
+      travelers: validation.data.travelers,
+      ownerId: validation.data.ownerId ?? null,
+      title: validation.data.title,
+      description: validation.data.description ?? null,
+      status: validation.data.status,
+      startDate: validation.data.startDate ?? null,
+      endDate: validation.data.endDate ?? null,
+      currency: validation.data.currency,
+      notes: validation.data.notes ?? null,
+      items: validation.data.items.map((item) => ({
+        itemType: item.itemType,
+        description: item.description,
+        subtitle: item.subtitle ?? null,
+        quantity: item.quantity,
+        unitPrice: canSeeTripCosts(auth.user) ? (item.unitPrice ?? null) : null,
+        sourceQuoteItemId: item.sourceQuoteItemId ?? null,
+        scheduledAt: item.scheduledAt ?? null,
+        endsAt: item.endsAt ?? null,
+        durationMinutes: item.durationMinutes ?? null,
+        reminderMinutesBefore: item.reminderMinutesBefore ?? null,
+        imageUrl: item.imageUrl ?? null,
+        confirmationCode: item.confirmationCode ?? null,
+      })),
+      createdById: auth.user.id,
+    });
+  } catch (error) {
+    if (error instanceof TripTravelerError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
 
   await recordAuditEvent({
     action: 'trip.created',

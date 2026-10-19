@@ -197,7 +197,7 @@ const searchers: Searcher[] = [
   },
   {
     id: 'customers',
-    label: 'Customers',
+    label: 'Clients',
     modules: ['customers'],
     async run({ term }) {
       const rows = await prisma.customer.findMany({

@@ -134,3 +134,197 @@ export function normalizeFlightNumber(value: string | null | undefined): string 
   const cleaned = value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   return /^[A-Z0-9]{3,8}$/.test(cleaned) ? cleaned : null;
 }
+
+// ── Arrival / departure events and tracked progress ─────────────────────────
+
+/** Whether the itinerary event is meeting an arrival or seeing off a departure. */
+export type FlightDirection = 'departure' | 'arrival';
+
+export function flightDirection(timeLabel: string | null | undefined): FlightDirection {
+  return timeLabel === 'ARRIVAL' ? 'arrival' : 'departure';
+}
+
+export interface FlightSchedule {
+  departure: string | null;
+  arrival: string | null;
+}
+
+/**
+ * The event's own time is the departure or the arrival, per its direction;
+ * the other end follows from the duration when there is one.
+ */
+export function scheduledFlightTimes(input: {
+  direction: FlightDirection;
+  scheduledAt: string | null;
+  endsAt: string | null;
+  durationMinutes: number | null;
+}): FlightSchedule {
+  const at = input.scheduledAt ? new Date(input.scheduledAt).getTime() : NaN;
+  if (Number.isNaN(at)) return { departure: null, arrival: null };
+  const span = input.durationMinutes ? input.durationMinutes * 60_000 : null;
+  if (input.direction === 'arrival') {
+    return {
+      departure: span !== null ? new Date(at - span).toISOString() : null,
+      arrival: new Date(at).toISOString(),
+    };
+  }
+  return {
+    departure: new Date(at).toISOString(),
+    arrival: input.endsAt ?? (span !== null ? new Date(at + span).toISOString() : null),
+  };
+}
+
+/** What FlightRadar24 has seen of one flight; shape of `/api/flight-radar/status`. */
+export interface FlightTrack {
+  /** False when FR24 has no record of the flight in the window. */
+  found: boolean;
+  takeoffAt: string | null;
+  landedAt: string | null;
+  ended: boolean;
+  /** Live estimate while airborne. */
+  eta: string | null;
+  altFt: number | null;
+  gspeedKt: number | null;
+  /** IATA codes FR24 recorded. */
+  origin: string | null;
+  destination: string | null;
+  checkedAt: string;
+}
+
+/**
+ * FR24 records wheels-up, while a schedule quotes leaving the gate. Allowing
+ * for the taxi keeps an ordinary take-off from reading as a delay.
+ */
+export const TAXI_OUT_MINUTES = 15;
+
+/** Past this, a flight FR24 still hasn't seen is more likely untracked than delayed. */
+const UNSEEN_GIVE_UP_MINUTES = 180;
+
+export interface FlightProgress {
+  phase: FlightPhase;
+  status: Punctuality;
+  deltaMinutes: number | null;
+  /** The status chip: "On time", "Delayed 25m", "12m early", "Scheduled". */
+  label: string;
+  /** What that's based on, when there's more to say. */
+  detail: string | null;
+}
+
+function judge(deltaMinutes: number): Punctuality {
+  if (deltaMinutes <= -ON_TIME_TOLERANCE_MINUTES) return 'early';
+  if (deltaMinutes > ON_TIME_TOLERANCE_MINUTES) return 'late';
+  return 'ontime';
+}
+
+function chipLabel(status: Punctuality, deltaMinutes: number): string {
+  const amount = formatDuration(deltaMinutes * 60_000);
+  if (status === 'early') return `${amount} early`;
+  if (status === 'late') return `Delayed ${amount}`;
+  return 'On time';
+}
+
+function judged(
+  phase: FlightPhase,
+  deltaMinutes: number,
+  detail: (status: Punctuality, amount: string) => string,
+): FlightProgress {
+  const status = judge(deltaMinutes);
+  return {
+    phase,
+    status,
+    deltaMinutes,
+    label: chipLabel(status, deltaMinutes),
+    detail: detail(status, formatDuration(deltaMinutes * 60_000)),
+  };
+}
+
+/**
+ * Early, on time or delayed, from the best evidence available: the actual
+ * landing, then the live ETA, then the take-off, then "should have left by now".
+ * `track` is null until a lookup has answered, and then nothing is claimed.
+ */
+export function flightProgress(
+  now: number,
+  schedule: FlightSchedule,
+  track: FlightTrack | null,
+): FlightProgress {
+  const dep = schedule.departure ? new Date(schedule.departure).getTime() : null;
+  const arr = schedule.arrival ? new Date(schedule.arrival).getTime() : null;
+  const minutes = (from: number, to: string) => Math.round((new Date(to).getTime() - from) / 60_000);
+
+  if (track?.landedAt) {
+    if (arr === null) {
+      return { phase: 'landed', status: 'unknown', deltaMinutes: null, label: 'Landed', detail: null };
+    }
+    return judged('landed', minutes(arr, track.landedAt), (status, amount) =>
+      status === 'early'
+        ? `Landed ${amount} ahead of schedule`
+        : status === 'late'
+          ? `Landed ${amount} behind schedule`
+          : 'Landed on schedule',
+    );
+  }
+
+  if (track?.takeoffAt) {
+    if (track.eta && arr !== null) {
+      return judged('airborne', minutes(arr, track.eta), (status, amount) =>
+        status === 'early'
+          ? `In the air · expected ${amount} early`
+          : status === 'late'
+            ? `In the air · expected ${amount} late`
+            : 'In the air · expected on time',
+      );
+    }
+    if (dep !== null) {
+      return judged('airborne', minutes(dep + TAXI_OUT_MINUTES * 60_000, track.takeoffAt), (status, amount) =>
+        status === 'early'
+          ? `Took off ${amount} early`
+          : status === 'late'
+            ? `Took off ${amount} late`
+            : 'Took off on time',
+      );
+    }
+    return { phase: 'airborne', status: 'unknown', deltaMinutes: null, label: 'In the air', detail: null };
+  }
+
+  // Not seen in the air. Only a lookup that answered can say it hasn't left.
+  if (track && dep !== null) {
+    const overdue = Math.round((now - dep) / 60_000) - TAXI_OUT_MINUTES;
+    if (overdue > ON_TIME_TOLERANCE_MINUTES) {
+      if (!track.found && overdue > UNSEEN_GIVE_UP_MINUTES) {
+        return {
+          phase: 'unknown',
+          status: 'unknown',
+          deltaMinutes: null,
+          label: 'No flight data',
+          detail: 'FlightRadar24 has no record of this flight. Check the flight number.',
+        };
+      }
+      return {
+        phase: 'departing',
+        status: 'late',
+        deltaMinutes: overdue,
+        label: `Delayed ${formatDuration(overdue * 60_000)}`,
+        detail: 'Not departed yet',
+      };
+    }
+  }
+
+  return {
+    phase: dep !== null ? flightPhase(now, schedule.departure, schedule.arrival) : 'unknown',
+    status: 'unknown',
+    deltaMinutes: null,
+    label: 'Scheduled',
+    detail: null,
+  };
+}
+
+/** The headline countdown, for events that only know their arrival as well. */
+export function scheduleCountdown(now: number, schedule: FlightSchedule): CountdownResult {
+  if (schedule.departure) return flightCountdown(now, schedule.departure, schedule.arrival);
+  if (!schedule.arrival) return { phase: 'unknown', label: 'No time set', imminent: false };
+  const arr = new Date(schedule.arrival).getTime();
+  if (Number.isNaN(arr)) return { phase: 'unknown', label: 'No time set', imminent: false };
+  if (now >= arr) return { phase: 'landed', label: `Due ${formatDuration(now - arr)} ago`, imminent: false };
+  return { phase: 'scheduled', label: `Lands in ${formatDuration(arr - now)}`, imminent: arr - now <= 60 * 60_000 };
+}

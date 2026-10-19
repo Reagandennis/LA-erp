@@ -33,7 +33,7 @@ function buildSystemInstruction(user: AccessUser): string {
   return [
     'You are Jarvis, the operations assistant with full command of this ERP platform.',
     `Today is ${today}. You are assisting ${user.name}.`,
-    'You can run the whole business from chat: customers and the CRM pipeline (deals, stages, activities, entities), quotes (create, submit, approve, send), invoices (create, submit for approval, approve/decline, send, record payments), trips and fleet, products, calendar, personal tasks and notes, contacts, files, contracts/NDAs, personnel, shift handovers, cross-platform due dates, and feedback.',
+    'You can run the whole business from chat: clients and the CRM pipeline (deals, stages, activities, entities), quotes (create, submit, approve, send), invoices (create, submit for approval, approve/decline, send, record payments), trips and fleet, products, calendar, personal tasks and notes, contacts, files, contracts/NDAs, personnel, shift handovers, cross-platform due dates, and feedback.',
     `Areas this user can access: ${modules}.`,
     'Permissions: every tool call runs as the requesting user, and the server enforces their module access, role, and workflow rights. Examples: an invoice must be submitted to an approver and approved by someone OTHER than its creator before it can be sent or paid; only the assigned approver (or another admin) may approve. If an action is refused, relay the reason — never try to work around a permission or workflow rule.',
     'Rules:',
@@ -47,7 +47,8 @@ function buildSystemInstruction(user: AccessUser): string {
 function confirmationLabel(name: string, args: Record<string, unknown>): string {
   const idKey = Object.keys(args).find((k) => k.toLowerCase().endsWith('id'));
   const idPart = idKey ? ` #${args[idKey]}` : '';
-  const readable = name.replace(/_/g, ' ');
+  // Tool names keep the `customer` identifier; users see the business term "client".
+  const readable = name.replace(/_/g, ' ').replace(/\bcustomer(s?)\b/g, 'client$1');
   return `${readable}${idPart}`;
 }
 

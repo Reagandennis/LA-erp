@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import type { OwnerOption, TripDetail, TripStatus } from './types';
+import type { OwnerOption, TravelerOption, TripDetail, TripStatus } from './types';
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'ZAR', 'KES', 'NGN'];
 
@@ -13,8 +13,16 @@ interface CustomerOption {
   email: string | null;
 }
 
+/** A traveller on the new trip: an existing one of the client's, or a name to create. */
+interface PickedTraveler {
+  travelerId?: number;
+  name: string;
+}
+
 interface TripBuilderProps {
   customers: CustomerOption[];
+  /** Every client's travellers; the picker shows the chosen client's. */
+  travelers: TravelerOption[];
   owners: OwnerOption[];
   currentUser: { id: number; name: string; email: string };
   onClose: () => void;
@@ -35,12 +43,14 @@ const STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active'];
 
 export default function TripBuilder({
   customers,
+  travelers,
   owners,
   currentUser,
   onClose,
   onSaved,
 }: TripBuilderProps) {
   const [customerId, setCustomerId] = useState('');
+  const [pickedTravelers, setPickedTravelers] = useState<PickedTraveler[]>([]);
   const [ownerId, setOwnerId] = useState(String(currentUser.id));
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -60,11 +70,17 @@ export default function TripBuilder({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
+  const selectedCustomer = customers.find((c) => String(c.id) === customerId) ?? null;
+
   const handleSave = async () => {
     setError(null);
     const cId = Number(customerId);
     if (!Number.isInteger(cId) || cId <= 0) {
-      setError('Pick a customer');
+      setError('Pick a client');
+      return;
+    }
+    if (pickedTravelers.length === 0) {
+      setError('Add at least one traveller');
       return;
     }
     if (!title.trim()) {
@@ -80,6 +96,10 @@ export default function TripBuilder({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: cId,
+          // Lead first.
+          travelers: pickedTravelers.map((t) =>
+            t.travelerId ? { travelerId: t.travelerId } : { name: t.name },
+          ),
           ownerId: ownerId ? Number(ownerId) : null,
           title: title.trim(),
           description: description.trim() || null,
@@ -145,13 +165,17 @@ export default function TripBuilder({
 
           <div className="p-6 sm:p-8 space-y-6">
             <section className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-              <Field label="Customer">
+              <Field label="Client">
                 <select
                   value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
+                  onChange={(e) => {
+                    setCustomerId(e.target.value);
+                    // Travellers belong to one client.
+                    setPickedTravelers([]);
+                  }}
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
-                  <option value="">Select a customer…</option>
+                  <option value="">Select a client…</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -175,6 +199,21 @@ export default function TripBuilder({
                     </option>
                   ))}
                 </select>
+              </Field>
+              <Field label="Travellers" wide>
+                {selectedCustomer ? (
+                  <TravelerPicker
+                    key={selectedCustomer.id}
+                    clientName={selectedCustomer.name}
+                    options={travelers.filter((t) => t.customerId === selectedCustomer.id)}
+                    picked={pickedTravelers}
+                    onChange={setPickedTravelers}
+                  />
+                ) : (
+                  <p className="px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium text-gray-400">
+                    Pick a client to choose their travellers.
+                  </p>
+                )}
               </Field>
               <Field label="Title" wide>
                 <input
@@ -295,6 +334,146 @@ function Field({
         {label}
       </label>
       <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+/** Longest list rendered at once; some clients have hundreds of travellers. */
+const MAX_SUGGESTIONS = 50;
+
+function TravelerPicker({
+  clientName,
+  options,
+  picked,
+  onChange,
+}: {
+  clientName: string;
+  /** The client's travellers. */
+  options: TravelerOption[];
+  /** Lead first. */
+  picked: PickedTraveler[];
+  onChange: (next: PickedTraveler[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const normalized = query.trim().toLowerCase();
+
+  const pickedIds = new Set(picked.flatMap((t) => (t.travelerId ? [t.travelerId] : [])));
+  const matches = options.filter(
+    (t) => !pickedIds.has(t.id) && (normalized === '' || t.name.toLowerCase().includes(normalized)),
+  );
+  // A name that's already a traveller of this client should be picked, not created twice.
+  const canAddNew =
+    normalized !== '' &&
+    !options.some((t) => t.name.toLowerCase() === normalized) &&
+    !picked.some((t) => t.name.toLowerCase() === normalized);
+
+  const add = (traveler: PickedTraveler) => {
+    onChange([...picked, traveler]);
+    setQuery('');
+  };
+  const remove = (index: number) => onChange(picked.filter((_, i) => i !== index));
+  const makeLead = (index: number) =>
+    onChange([picked[index], ...picked.filter((_, i) => i !== index)]);
+
+  return (
+    <div className="space-y-3">
+      {picked.length > 0 && (
+        <ul className="flex flex-wrap gap-2">
+          {picked.map((traveler, index) => (
+            <li
+              key={traveler.travelerId ?? `new:${traveler.name}`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 py-1 pl-3 pr-1 text-xs font-bold text-primary"
+            >
+              {traveler.name}
+              {index === 0 && (
+                <span className="rounded-full bg-primary px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-white">
+                  Lead
+                </span>
+              )}
+              {!traveler.travelerId && (
+                <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-amber-700">
+                  New
+                </span>
+              )}
+              {index > 0 && (
+                <button
+                  type="button"
+                  onClick={() => makeLead(index)}
+                  className="rounded-full px-1.5 py-0.5 text-[10px] text-primary/70 hover:bg-primary/10 hover:text-primary"
+                >
+                  Make lead
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => remove(index)}
+                aria-label={`Remove ${traveler.name}`}
+                className="rounded-full p-1 text-primary/60 hover:bg-primary/10 hover:text-primary"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          if (matches[0]) add({ travelerId: matches[0].id, name: matches[0].name });
+          else if (canAddNew) add({ name: query.trim() });
+        }}
+        placeholder={
+          options.length > 0
+            ? `Search ${clientName}'s travellers, or type a new name`
+            : 'Type a name to add a traveller'
+        }
+        className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
+      />
+
+      {options.length === 0 && !canAddNew && (
+        <p className="text-xs font-medium text-gray-400">
+          {clientName} has no travellers yet. New ones you add here are saved to the client.
+        </p>
+      )}
+
+      {(matches.length > 0 || canAddNew) && (
+        <ul className="max-h-52 overflow-y-auto rounded-2xl border border-gray-100 divide-y divide-gray-50">
+          {matches.slice(0, MAX_SUGGESTIONS).map((t) => (
+            <li key={t.id}>
+              <button
+                type="button"
+                onClick={() => add({ travelerId: t.id, name: t.name })}
+                className="w-full px-4 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                {t.name}
+              </button>
+            </li>
+          ))}
+          {canAddNew && (
+            <li>
+              <button
+                type="button"
+                onClick={() => add({ name: query.trim() })}
+                className="w-full px-4 py-2.5 text-left text-sm font-bold text-primary hover:bg-primary/5"
+              >
+                + Add &ldquo;{query.trim()}&rdquo; as a new traveller for {clientName}
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+      {matches.length > MAX_SUGGESTIONS && (
+        <p className="text-xs font-medium text-gray-400">
+          Showing {MAX_SUGGESTIONS} of {matches.length}. Keep typing to narrow the list.
+        </p>
+      )}
     </div>
   );
 }

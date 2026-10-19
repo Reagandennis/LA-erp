@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 
 import { getServerAuth } from '@/lib/auth';
 import { listCustomers } from '@/lib/customers';
-import { listOwnerCandidates, listTripsForUser } from '@/lib/trips';
+import { listOwnerCandidates, listTravelerOptions, listTripsForUser } from '@/lib/trips';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
 
@@ -21,10 +21,11 @@ export default async function TripPlanningPage() {
     redirect('/dashboard');
   }
 
-  const [trips, customers, owners] = await Promise.all([
+  const [trips, customers, owners, travelers] = await Promise.all([
     listTripsForUser({ userId: auth.user.id, isAdmin }),
     listCustomers(),
     listOwnerCandidates(auth.user.id),
+    listTravelerOptions(),
   ]);
 
   return (
@@ -38,6 +39,7 @@ export default async function TripPlanningPage() {
         email: c.email,
       }))}
       initialOwners={owners}
+      initialTravelers={travelers}
     />
   );
 }

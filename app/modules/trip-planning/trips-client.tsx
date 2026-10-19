@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import TripBuilder from './trip-builder';
-import type { OwnerOption, TripDetail, TripStatusFilter, TripSummary } from './types';
+import type { OwnerOption, TravelerOption, TripDetail, TripStatusFilter, TripSummary } from './types';
 
 interface CustomerOption {
   id: number;
@@ -20,6 +20,7 @@ interface TripsClientProps {
   initialTrips: TripSummary[];
   initialCustomers: CustomerOption[];
   initialOwners: OwnerOption[];
+  initialTravelers: TravelerOption[];
 }
 
 const STATUS_FILTERS: TripStatusFilter[] = ['All', 'Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
@@ -32,6 +33,13 @@ const STATUS_STYLES: Record<string, string> = {
   Cancelled: 'bg-rose-50 text-rose-700',
 };
 
+/** "Lead Name +2", or null when the trip has no travellers yet. */
+function travelerLine(travelers: TripSummary['travelers']): string | null {
+  if (travelers.length === 0) return null;
+  const [lead, ...rest] = travelers;
+  return rest.length > 0 ? `${lead.name} +${rest.length}` : lead.name;
+}
+
 function formatDate(value: string | null) {
   if (!value) return '—';
   return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -42,6 +50,7 @@ export default function TripsClient({
   initialTrips,
   initialCustomers,
   initialOwners,
+  initialTravelers,
 }: TripsClientProps) {
   const router = useRouter();
   const [trips, setTrips] = useState<TripSummary[]>(initialTrips);
@@ -69,7 +78,8 @@ export default function TripsClient({
         trip.trackingCode.toLowerCase().includes(normalized) ||
         trip.title.toLowerCase().includes(normalized) ||
         trip.customer.name.toLowerCase().includes(normalized) ||
-        (trip.customer.company?.toLowerCase().includes(normalized) ?? false);
+        (trip.customer.company?.toLowerCase().includes(normalized) ?? false) ||
+        trip.travelers.some((traveler) => traveler.name.toLowerCase().includes(normalized));
       const matchesFilter = activeFilter === 'All' || trip.status === activeFilter;
       return matchesSearch && matchesFilter;
     });
@@ -102,6 +112,7 @@ export default function TripsClient({
         createdAt: trip.createdAt,
         updatedAt: trip.updatedAt,
         customer: trip.customer,
+        travelers: trip.travelers,
         createdBy: trip.createdBy,
         owner: trip.owner,
         sourceQuote: trip.sourceQuote,
@@ -169,7 +180,7 @@ export default function TripsClient({
             </svg>
             <input
               type="text"
-              placeholder="Search by reference, tracking code, title, or customer…"
+              placeholder="Search by reference, tracking code, title, client, or traveller…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -211,6 +222,9 @@ export default function TripsClient({
                 {trip.customer.name}
                 {trip.customer.company ? ` · ${trip.customer.company}` : ''}
               </p>
+              {travelerLine(trip.travelers) && (
+                <p className="mt-0.5 truncate text-xs text-gray-500">{travelerLine(trip.travelers)}</p>
+              )}
               <p className="mt-2 text-xs text-gray-400">
                 {trip.itemCount} items · {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
               </p>
@@ -228,7 +242,7 @@ export default function TripsClient({
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Reference</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Customer</th>
+                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Client</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Tracking</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</th>
                 <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Owner</th>
@@ -253,6 +267,11 @@ export default function TripsClient({
                   <td className="px-6 py-4">
                     <p className="text-sm text-gray-700">{trip.customer.name}</p>
                     {trip.customer.company && <p className="mt-0.5 text-xs text-gray-400">{trip.customer.company}</p>}
+                    {travelerLine(trip.travelers) && (
+                      <p className="mt-0.5 max-w-[220px] truncate text-xs text-gray-500" title={trip.travelers.map((t) => t.name).join(', ')}>
+                        {travelerLine(trip.travelers)}
+                      </p>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm font-medium text-primary">{trip.trackingCode}</p>
@@ -294,6 +313,7 @@ export default function TripsClient({
       {builderOpen && (
         <TripBuilder
           customers={initialCustomers}
+          travelers={initialTravelers}
           owners={initialOwners}
           currentUser={currentUser}
           onClose={() => setBuilderOpen(false)}

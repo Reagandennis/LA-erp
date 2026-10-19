@@ -212,7 +212,7 @@ export default function InvoiceBuilder({
     setError(null);
     const numericCustomerId = Number(customerId);
     if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
-      setError('Pick a customer to bill');
+      setError('Pick a client to bill');
       return;
     }
     const numericApproverId = approverId ? Number(approverId) : null;
@@ -299,7 +299,7 @@ export default function InvoiceBuilder({
       subtitle={
         mode === 'edit'
           ? 'Update the details below and save.'
-          : 'Bill a customer — save it as a draft or submit it for approval.'
+          : 'Bill a client — save it as a draft or submit it for approval.'
       }
       busy={submitting !== null}
       onClose={onClose}
@@ -327,7 +327,7 @@ export default function InvoiceBuilder({
         </BuilderFooter>
       }
     >
-      <Section title="From & to" description="The company sending this invoice and the customer paying it.">
+      <Section title="From & to" description="The company sending this invoice and the client paying it.">
         <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @2xl:gap-x-6">
           <BrandSelect
             label="From (your company)"

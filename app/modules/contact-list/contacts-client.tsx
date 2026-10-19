@@ -474,13 +474,13 @@ export default function ContactsClient({
               </div>
 
               <div>
-                <Label>Linked customer</Label>
+                <Label>Linked client</Label>
                 <select
                   className={inputClass}
                   value={form.customerId}
                   onChange={(e) => setForm({ ...form, customerId: e.target.value })}
                 >
-                  <option value="">No linked customer</option>
+                  <option value="">No linked client</option>
                   {customers.map((cust) => (
                     <option key={cust.id} value={cust.id}>
                       {cust.company ? `${cust.name} — ${cust.company}` : cust.name}
@@ -610,7 +610,7 @@ export default function ContactsClient({
                 <DetailRow label="Phone" value={selected.phone} href={selected.phone ? `tel:${selected.phone}` : null} />
                 <DetailRow label="Location" value={selected.location} />
                 <DetailRow
-                  label="Customer"
+                  label="Client"
                   value={selected.customer ? selected.customer.company || selected.customer.name : null}
                 />
               </div>

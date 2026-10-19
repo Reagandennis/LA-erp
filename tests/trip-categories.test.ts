@@ -12,10 +12,10 @@ import {
 import { tripItemDetailsSchema } from '../lib/validation';
 
 describe('categories', () => {
-  it('covers Travefy\'s seven categories plus information blocks', () => {
+  it('offers flights first and transport beside them, without cruises', () => {
     expect(TRIP_ITEM_CATEGORIES).toEqual([
-      'activity', 'lodging', 'flight', 'transportation',
-      'cruise', 'tour', 'booking', 'information',
+      'flight', 'transportation', 'activity', 'lodging',
+      'tour', 'booking', 'information',
     ]);
   });
 
@@ -28,7 +28,6 @@ describe('categories', () => {
     expect(keysFor('lodging')).toContain('roomType');
     expect(keysFor('lodging')).toContain('nights');
     expect(keysFor('transportation')).toContain('pickupLocation');
-    expect(keysFor('cruise')).toContain('shipName');
     expect(keysFor('tour')).toContain('meetingPoint');
     expect(keysFor('booking')).toContain('bookingRef');
 

@@ -254,7 +254,7 @@ export default function QuoteBuilder({
 
     const numericCustomerId = Number(customerId);
     if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
-      setError('Pick a customer');
+      setError('Pick a client');
       return;
     }
     if (!subject.trim()) {
@@ -456,7 +456,7 @@ export default function QuoteBuilder({
         </div>
       )}
 
-      <Section title="From & to" description="The company issuing this quote and the customer it's for.">
+      <Section title="From & to" description="The company issuing this quote and the client it's for.">
         <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @2xl:gap-x-6">
           <BrandSelect
             label="Issued by"

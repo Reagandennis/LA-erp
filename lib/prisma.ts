@@ -40,6 +40,7 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     backupRun?: unknown;
     aiUsage?: unknown;
     aiSettings?: unknown;
+    tripItemAttachment?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -67,7 +68,8 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.backupSettings &&
       candidate.backupRun &&
       candidate.aiUsage &&
-      candidate.aiSettings,
+      candidate.aiSettings &&
+      candidate.tripItemAttachment,
   );
 }
 

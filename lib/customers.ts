@@ -144,12 +144,12 @@ export async function updateCustomer(id: number, patch: UpdateCustomerInput): Pr
 
 export async function deleteCustomer(id: number): Promise<true | { error: string }> {
   const existing = await getCustomerClient().findUnique({ where: { id } });
-  if (!existing) return { error: 'Customer not found' };
+  if (!existing) return { error: 'Client not found' };
   try {
     await getCustomerClient().delete({ where: { id } });
     return true;
   } catch {
     // Foreign-key restriction: the customer is referenced by quotes/invoices/trips.
-    return { error: 'This customer cannot be deleted because it has related quotes, invoices, or trips.' };
+    return { error: 'This client cannot be deleted because it has related quotes, invoices, or trips.' };
   }
 }

@@ -152,7 +152,7 @@ export const personalTodoBoardSchema = z.object({
 });
 
 export const customerCreateSchema = z.object({
-  name: z.string().trim().min(1, 'Customer name is required').max(120),
+  name: z.string().trim().min(1, 'Client name is required').max(120),
   email: z
     .string()
     .trim()
@@ -212,7 +212,7 @@ const currencySchema = z
   .transform((value) => value.toUpperCase());
 
 export const quoteCreateSchema = z.object({
-  customerId: z.number().int().positive('Customer is required'),
+  customerId: z.number().int().positive('Client is required'),
   approverId: z.number().int().positive('Approver is required').optional().nullable(),
   brandProfileId: z.number().int().positive().optional().nullable(),
   subject: z.string().trim().min(1, 'Subject is required').max(200),
@@ -308,7 +308,6 @@ export const tripItemCategorySchema = z.enum([
   'lodging',
   'flight',
   'transportation',
-  'cruise',
   'tour',
   'booking',
   'information',
@@ -323,7 +322,7 @@ export const tripItemCategorySchema = z.enum([
 const detailShapes = {
   flight: {
     flightNumber: true, cabin: true, departAirport: true, arriveAirport: true,
-    terminal: true, gate: true, seat: true, baggage: true,
+    terminal: true, gate: true, seat: true, baggage: true, timezone: true,
   },
   lodging: {
     roomType: true, nights: true, guests: true, checkInTime: true,
@@ -331,11 +330,7 @@ const detailShapes = {
   },
   transportation: {
     mode: true, vehicle: true, pickupLocation: true, dropoffLocation: true,
-    driverName: true, driverPhone: true,
-  },
-  cruise: {
-    shipName: true, portOfCall: true, cabin: true, deck: true,
-    embarkTime: true, disembarkTime: true,
+    driverName: true, driverPhone: true, distanceKm: true,
   },
   tour: {
     meetingPoint: true, durationText: true, groupSize: true, languages: true,
@@ -360,7 +355,6 @@ export const tripItemDetailsSchema = z.union([
   detailSchemaFor(detailShapes.flight),
   detailSchemaFor(detailShapes.lodging),
   detailSchemaFor(detailShapes.transportation),
-  detailSchemaFor(detailShapes.cruise),
   detailSchemaFor(detailShapes.tour),
   detailSchemaFor(detailShapes.booking),
   detailSchemaFor(detailShapes.activity),
@@ -378,7 +372,23 @@ const tripItemSharedFields = {
   placeName: z.string().trim().max(200).optional().nullable(),
   address: z.string().trim().max(400).optional().nullable(),
   details: tripItemDetailsSchema.optional().nullable(),
+  // Crew, from Task Assignment's registers.
+  driverId: z.number().int().positive().optional().nullable(),
+  officerId: z.number().int().positive().optional().nullable(),
+  vehicleId: z.number().int().positive().optional().nullable(),
 };
+
+/** Ground movements need someone to drive and something to drive; a CPO is optional. */
+export const CREWED_CATEGORIES = ['flight', 'transportation'] as const;
+
+function requireCrew(
+  item: { category?: string; driverId?: number | null; vehicleId?: number | null },
+  ctx: z.RefinementCtx,
+) {
+  if (!(CREWED_CATEGORIES as readonly string[]).includes(item.category ?? '')) return;
+  if (!item.driverId) ctx.addIssue({ code: 'custom', message: 'Pick a driver', path: ['driverId'] });
+  if (!item.vehicleId) ctx.addIssue({ code: 'custom', message: 'Pick a vehicle', path: ['vehicleId'] });
+}
 
 export const tripItemTypeSchema = z.enum([
   'flight',
@@ -412,8 +422,19 @@ const tripItineraryItemDraftSchema = z.object({
   confirmationCode: z.string().trim().max(100).optional().nullable(),
 });
 
+/** An existing traveller of the trip's client, or a new one to create for that client. */
+export const tripTravelerInputSchema = z.union([
+  z.object({ travelerId: z.number().int().positive() }).strict(),
+  z.object({ name: z.string().trim().min(1, 'Traveller name is required').max(200) }).strict(),
+]);
+
 export const tripCreateSchema = z.object({
-  customerId: z.number().int().positive('Customer is required'),
+  customerId: z.number().int().positive('Client is required'),
+  // The first entry is the lead traveller.
+  travelers: z
+    .array(tripTravelerInputSchema)
+    .min(1, 'Add at least one traveller')
+    .max(50, 'A trip can have at most 50 travellers'),
   ownerId: z.number().int().positive().optional().nullable(),
   title: z.string().trim().min(1, 'Title is required').max(200),
   description: z.string().trim().max(10000).optional().nullable(),
@@ -441,7 +462,10 @@ export const tripUpdateSchema = z
   .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated');
 
 export const tripItineraryItemAddSchema = z.object({
-  items: z.array(tripItineraryItemDraftSchema).min(1, 'Add at least one item').max(100),
+  items: z
+    .array(tripItineraryItemDraftSchema.superRefine(requireCrew))
+    .min(1, 'Add at least one item')
+    .max(100),
 });
 
 export const tripItineraryItemUpdateSchema = z
@@ -619,7 +643,7 @@ const invoiceItemSchema = z.object({
 });
 
 export const invoiceCreateSchema = z.object({
-  customerId: z.number().int().positive('Customer is required'),
+  customerId: z.number().int().positive('Client is required'),
   brandProfileId: z.number().int().positive().optional().nullable(),
   sourceQuoteId: z.number().int().positive().optional().nullable(),
   issueDate: isoDateSchema,

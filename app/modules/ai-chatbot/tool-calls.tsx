@@ -20,7 +20,8 @@ export interface ToolCallView {
 /** Derives a readable name/target/status from a raw tool result. */
 export function describeAction(action: ActionItem, index: number): ToolCallView {
   const result = (action.result ?? {}) as Record<string, unknown>;
-  const name = action.tool.replace(/_/g, ' ');
+  // Tool names keep the `customer` identifier; users see the business term "client".
+  const name = action.tool.replace(/_/g, ' ').replace(/\bcustomer(s?)\b/g, 'client$1');
   const failed = typeof result.error === 'string';
 
   const identifier = result.reference ?? result.number ?? result.id;

@@ -47,7 +47,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
   if (!invoice.customer.email) {
     return NextResponse.json(
-      { error: 'This customer has no email address on file. Add one before sending.' },
+      { error: 'This client has no email address on file. Add one before sending.' },
       { status: 400 },
     );
   }

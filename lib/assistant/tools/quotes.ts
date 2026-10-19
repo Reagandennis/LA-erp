@@ -42,7 +42,7 @@ const createQuoteTool: ToolDefinition = {
   functionDeclaration: {
     name: 'create_quote',
     description:
-      'Create a draft quote for a customer. Find the customer ID with list_customers first. Dates are YYYY-MM-DD; defaults: issue=today, expiry=+14 days.',
+      'Create a draft quote for a client. Find the client ID with list_customers first. Dates are YYYY-MM-DD; defaults: issue=today, expiry=+14 days.',
     parameters: {
       type: 'object',
       properties: {

@@ -70,7 +70,7 @@ const listContactsTool: ToolDefinition = {
   requiredModule: 'contact-list',
   functionDeclaration: {
     name: 'list_contacts',
-    description: 'List operational contacts (name, job title, category, email, phone, linked customer).',
+    description: 'List operational contacts (name, job title, category, email, phone, linked client).',
     parameters: {
       type: 'object',
       properties: { query: { type: 'string', description: 'Filter by name/company/email substring' } },
@@ -105,7 +105,7 @@ const createContactTool: ToolDefinition = {
   requiredModule: 'contact-list',
   functionDeclaration: {
     name: 'create_contact',
-    description: 'Add a contact. Optionally link it to a customer (find the ID with list_customers).',
+    description: 'Add a contact. Optionally link it to a client (find the ID with list_customers).',
     parameters: {
       type: 'object',
       properties: {

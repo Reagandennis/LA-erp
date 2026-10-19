@@ -10,7 +10,7 @@ const listCustomersTool: ToolDefinition = {
   requiredModule: 'quotes',
   functionDeclaration: {
     name: 'list_customers',
-    description: 'List customers/clients. Use to find a customer ID before creating a quote, invoice, or trip.',
+    description: 'List clients. Use to find a client ID before creating a quote, invoice, or trip.',
     parameters: { type: 'object', properties: {} },
   },
   async handler() {
@@ -24,11 +24,11 @@ const createCustomerTool: ToolDefinition = {
   requiredModule: 'quotes',
   functionDeclaration: {
     name: 'create_customer',
-    description: 'Create a new customer / client record.',
+    description: 'Create a new client record.',
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Customer or company contact name' },
+        name: { type: 'string', description: 'Client or company contact name' },
         email: { type: 'string' },
         phone: { type: 'string' },
         company: { type: 'string' },
@@ -39,7 +39,7 @@ const createCustomerTool: ToolDefinition = {
   },
   async handler(args, ctx) {
     const name = asString(args.name);
-    if (!name) return { error: 'A customer name is required.' };
+    if (!name) return { error: 'A client name is required.' };
     const created = await createCustomer({
       name,
       email: asNullableString(args.email),
@@ -66,7 +66,7 @@ const updateCustomerTool: ToolDefinition = {
   functionDeclaration: {
     name: 'update_customer',
     description:
-      "Update an existing customer's details (email, phone, company, address, or name). Find the customer ID with list_customers first. Only provide the fields you want to change.",
+      "Update an existing client's details (email, phone, company, address, or name). Find the client ID with list_customers first. Only provide the fields you want to change.",
     parameters: {
       type: 'object',
       properties: {
@@ -99,7 +99,7 @@ const updateCustomerTool: ToolDefinition = {
     if (Object.keys(patch).length === 0) return { error: 'Provide at least one field to update.' };
 
     const updated = await updateCustomer(id, patch);
-    if (!updated) return { error: 'Customer not found.' };
+    if (!updated) return { error: 'Client not found.' };
     await recordAuditEvent({
       action: 'ai.customer.update',
       entityType: 'Customer',
@@ -117,7 +117,7 @@ const deleteCustomerTool: ToolDefinition = {
   requiredModule: 'quotes',
   functionDeclaration: {
     name: 'delete_customer',
-    description: 'Delete a customer. Fails if the customer has related quotes, invoices, or trips.',
+    description: 'Delete a client. Fails if the client has related quotes, invoices, or trips.',
     parameters: {
       type: 'object',
       properties: { customerId: { type: 'integer' } },

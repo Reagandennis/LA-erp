@@ -287,7 +287,7 @@ export async function createDeal(
   if (!title) return { error: 'Deal title is required' };
 
   const customer = await prisma.customer.findUnique({ where: { id: input.customerId }, select: { id: true } });
-  if (!customer) return { error: 'Customer not found' };
+  if (!customer) return { error: 'Client not found' };
 
   const stage = input.stage === undefined ? 'lead' : input.stage;
   if (!isStage(stage)) return { error: 'Invalid stage' };
@@ -397,7 +397,7 @@ export async function createActivity(
   }
 
   const customer = await prisma.customer.findUnique({ where: { id: input.customerId }, select: { id: true } });
-  if (!customer) return { error: 'Customer not found' };
+  if (!customer) return { error: 'Client not found' };
 
   const row = await prisma.crmActivity.create({
     data: {
@@ -447,7 +447,7 @@ export async function updateCrmCustomer(
   const data: Record<string, unknown> = {};
   if (patch.name !== undefined) {
     const name = patch.name.trim();
-    if (!name) return { error: 'Customer name is required' };
+    if (!name) return { error: 'Client name is required' };
     data.name = name;
   }
   if (patch.email !== undefined) data.email = patch.email?.trim() || null;
