@@ -1,6 +1,11 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
-export default function Home() {
+import { getServerAuth } from '@/lib/auth';
+
+export default async function Home() {
+  if (await getServerAuth()) redirect('/dashboard');
+
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100">
       <nav className="border-b border-white/10">

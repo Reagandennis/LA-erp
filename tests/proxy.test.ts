@@ -25,7 +25,9 @@ describe('proxy auth gating', () => {
     expect(response.headers.get('location')).toBe('http://localhost/auth/login');
   });
 
-  it('redirects authenticated users away from auth pages', () => {
+  it('lets a signed cookie reach the auth pages, which check the session themselves', () => {
+    // The JWT can outlive its Session row; redirecting here on the JWT alone
+    // loops with the protected pages' own redirect to /auth/login.
     verifySessionToken.mockReturnValue({
       sub: '1',
       sid: 'session_123',
@@ -33,15 +35,14 @@ describe('proxy auth gating', () => {
       email: 'admin@example.com',
     });
 
-    const request = new NextRequest('http://localhost/auth/login', {
-      headers: {
-        cookie: 'auth_token=token',
-      },
-    });
-    const response = proxy(request);
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('http://localhost/dashboard');
+    for (const path of ['/', '/auth/login', '/auth/signup']) {
+      const request = new NextRequest(`http://localhost${path}`, {
+        headers: {
+          cookie: 'auth_token=token',
+        },
+      });
+      expect(proxy(request).status).toBe(200);
+    }
   });
 
   it('allows authenticated users through protected routes', () => {

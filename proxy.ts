@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SESSION_COOKIE_NAME, verifySessionToken } from '@/lib/session-token';
 
 const protectedPrefixes = ['/dashboard', '/admin', '/modules'];
-const authPages = ['/', '/auth/login', '/auth/signup'];
 
 export default function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -12,16 +11,15 @@ export default function proxy(request: NextRequest) {
   const isProtected = protectedPrefixes.some((prefix) =>
     pathname.startsWith(prefix),
   );
-  const isAuthPage = authPages.includes(pathname);
 
   if (isProtected && !session) {
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
 
-  if (isAuthPage && session) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
-  }
-
+  // Signed-in users are sent from the auth pages to /dashboard by those pages
+  // (getServerAuth), not here. A JWT can outlive its Session row (revoked,
+  // pruned, DB restored), and redirecting on the JWT alone would bounce
+  // /dashboard -> /auth/login -> /dashboard forever.
   return NextResponse.next();
 }
 
