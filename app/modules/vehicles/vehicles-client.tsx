@@ -1,5 +1,7 @@
 'use client';
 
+import ShowMoreButton from '@/app/ui/show-more-button';
+import { useShowMore } from '@/app/ui/use-show-more';
 import { APP_LOCALE } from '@/lib/locale';
 import React, { useMemo, useRef, useState } from 'react';
 
@@ -92,6 +94,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
         .some((field) => String(field).toLowerCase().includes(q));
     });
   }, [vehicles, search, statusFilter]);
+  const { visible, hiddenCount, showMore, showAll } = useShowMore(filtered);
 
   const stats = useMemo(
     () => [
@@ -333,7 +336,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.map((v) => {
+            {visible.map((v) => {
               const dot = statusDotStyle(v.status);
               return (
                 <button
@@ -385,6 +388,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
             })}
           </div>
         )}
+        <ShowMoreButton hiddenCount={hiddenCount} onShowMore={showMore} onShowAll={showAll} noun="vehicles" />
       </div>
 
       {/* Add / Edit modal */}

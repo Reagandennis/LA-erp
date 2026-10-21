@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 
 import { listPersonalTodoNotifications } from '@/lib/notification-feed';
+import { notifyNotificationsChanged } from '@/lib/notification-events';
 import { prisma } from '@/lib/prisma';
 import { requireRequestAuth } from '@/lib/request-auth';
 
@@ -43,6 +44,7 @@ export async function PATCH(request: NextRequest) {
     SET "readAt" = NOW()
     WHERE "userId" = ${auth.user.id} AND "id" IN (${Prisma.join(normalizedIds)})
   `;
+  if (updated > 0) notifyNotificationsChanged(auth.user.id);
 
   return NextResponse.json({ updated });
 }

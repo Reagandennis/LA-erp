@@ -41,101 +41,210 @@ function parseDate(value: unknown): Date | null {
 
 // --- Serialized shape ------------------------------------------------------
 
-export type TravelerSummary = {
+/**
+ * What the directory's cards, filters and search need. Passport number, date
+ * of birth, medical/dietary notes and next of kin stay on the detail record
+ * (`TravelerSummary`), fetched when a card is opened: with hundreds of
+ * travellers the long text was most of the list payload.
+ */
+export type TravelerListItem = {
   id: number;
   name: string;
   email: string | null;
   phone: string | null;
   nationality: string | null;
-  dateOfBirth: string | null;
-  passportNumber: string | null;
   passportExpiry: string | null;
   status: string;
   riskLevel: string;
+  hasPhoto: boolean;
+  customer: { id: number; name: string; company: string | null } | null;
+  tripCount: number;
+};
+
+/** The full record, for the detail drawer and the edit form. */
+export type TravelerSummary = TravelerListItem & {
+  dateOfBirth: string | null;
+  passportNumber: string | null;
   dietaryNotes: string | null;
   medicalNotes: string | null;
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
   notes: string | null;
-  hasPhoto: boolean;
-  customer: { id: number; name: string; company: string | null } | null;
-  tripCount: number;
   createdAt: string;
 };
 
-const SELECT = {
+const LIST_SELECT = {
   id: true,
   name: true,
   email: true,
   phone: true,
   nationality: true,
-  dateOfBirth: true,
-  passportNumber: true,
   passportExpiry: true,
   status: true,
   riskLevel: true,
+  photoName: true,
+  customer: { select: { id: true, name: true, company: true } },
+  _count: { select: { trips: true } },
+} as const;
+
+const SELECT = {
+  ...LIST_SELECT,
+  dateOfBirth: true,
+  passportNumber: true,
   dietaryNotes: true,
   medicalNotes: true,
   emergencyContactName: true,
   emergencyContactPhone: true,
   notes: true,
-  photoName: true,
   createdAt: true,
-  customer: { select: { id: true, name: true, company: true } },
-  _count: { select: { trips: true } },
 } as const;
 
-type TravelerRow = {
+type TravelerListRow = {
   id: number;
   name: string;
   email: string | null;
   phone: string | null;
   nationality: string | null;
-  dateOfBirth: Date | null;
-  passportNumber: string | null;
   passportExpiry: Date | null;
   status: string;
   riskLevel: string;
+  photoName: string | null;
+  customer: { id: number; name: string; company: string | null } | null;
+  _count: { trips: number };
+};
+
+type TravelerRow = TravelerListRow & {
+  dateOfBirth: Date | null;
+  passportNumber: string | null;
   dietaryNotes: string | null;
   medicalNotes: string | null;
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
   notes: string | null;
-  photoName: string | null;
   createdAt: Date;
-  customer: { id: number; name: string; company: string | null } | null;
-  _count: { trips: number };
 };
 
-function serialize(row: TravelerRow): TravelerSummary {
+function serializeListItem(row: TravelerListRow): TravelerListItem {
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     phone: row.phone,
     nationality: row.nationality,
-    dateOfBirth: row.dateOfBirth?.toISOString() ?? null,
-    passportNumber: row.passportNumber,
     passportExpiry: row.passportExpiry?.toISOString() ?? null,
     status: row.status,
     riskLevel: row.riskLevel,
+    hasPhoto: Boolean(row.photoName),
+    customer: row.customer,
+    tripCount: row._count.trips,
+  };
+}
+
+function serialize(row: TravelerRow): TravelerSummary {
+  return {
+    ...serializeListItem(row),
+    dateOfBirth: row.dateOfBirth?.toISOString() ?? null,
+    passportNumber: row.passportNumber,
     dietaryNotes: row.dietaryNotes,
     medicalNotes: row.medicalNotes,
     emergencyContactName: row.emergencyContactName,
     emergencyContactPhone: row.emergencyContactPhone,
     notes: row.notes,
-    hasPhoto: Boolean(row.photoName),
-    customer: row.customer,
-    tripCount: row._count.trips,
     createdAt: row.createdAt.toISOString(),
   };
 }
 
 // --- Reads -----------------------------------------------------------------
 
-export async function listTravelers(): Promise<TravelerSummary[]> {
-  const rows = await prisma.traveler.findMany({ orderBy: [{ name: 'asc' }], select: SELECT });
-  return rows.map(serialize);
+/** Every traveller as a list row, name order. Prefer `searchTravelers` for a screen. */
+export async function listTravelers(): Promise<TravelerListItem[]> {
+  const rows = await prisma.traveler.findMany({ orderBy: [{ name: 'asc' }], select: LIST_SELECT });
+  return rows.map(serializeListItem);
+}
+
+export const TRAVELER_PAGE_SIZE = 60;
+const MAX_PAGE_SIZE = 200;
+
+export type TravelerSearch = {
+  /** Case-insensitive match on name, email, phone, nationality, client name or company. */
+  q?: string | null;
+  /** A risk level, or anything else for all. */
+  risk?: string | null;
+  /** A status, or anything else for all. */
+  status?: string | null;
+  /** 1-based. */
+  page?: number | null;
+  pageSize?: number | null;
+};
+
+export type TravelerPage = {
+  items: TravelerListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+function searchWhere(params: TravelerSearch) {
+  const q = params.q?.trim() ?? '';
+  const where: Record<string, unknown>[] = [];
+  if (params.risk && (RISK_LEVELS as readonly string[]).includes(params.risk)) where.push({ riskLevel: params.risk });
+  if (params.status && (TRAVELER_STATUSES as readonly string[]).includes(params.status)) {
+    where.push({ status: params.status });
+  }
+  if (q) {
+    const contains = { contains: q, mode: 'insensitive' as const };
+    where.push({
+      OR: [
+        { name: contains },
+        { email: contains },
+        { phone: contains },
+        { nationality: contains },
+        { customer: { is: { name: contains } } },
+        { customer: { is: { company: contains } } },
+      ],
+    });
+  }
+  return where.length > 0 ? { AND: where } : {};
+}
+
+/** One page of the directory, filtered and searched in the database. */
+export async function searchTravelers(params: TravelerSearch = {}): Promise<TravelerPage> {
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(params.pageSize ?? TRAVELER_PAGE_SIZE)));
+  const page = Math.max(1, Math.trunc(params.page ?? 1));
+  const where = searchWhere(params);
+  const [rows, total] = await Promise.all([
+    prisma.traveler.findMany({
+      where,
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: LIST_SELECT,
+    }),
+    prisma.traveler.count({ where }),
+  ]);
+  return { items: rows.map(serializeListItem), total, page, pageSize };
+}
+
+export type TravelerStats = {
+  total: number;
+  active: number;
+  /** Elevated or High risk. */
+  elevatedRisk: number;
+  /** Passport expired, or expiring within the next 180 days. */
+  passportExpiring: number;
+};
+
+/** The directory's stat tiles, counted in the database rather than from a full list. */
+export async function travelerStats(now = new Date()): Promise<TravelerStats> {
+  const cutoff = new Date(now);
+  cutoff.setUTCDate(cutoff.getUTCDate() + 180);
+  const [total, active, elevatedRisk, passportExpiring] = await Promise.all([
+    prisma.traveler.count(),
+    prisma.traveler.count({ where: { status: 'Active' } }),
+    prisma.traveler.count({ where: { riskLevel: { not: 'Standard' } } }),
+    prisma.traveler.count({ where: { passportExpiry: { lte: cutoff } } }),
+  ]);
+  return { total, active, elevatedRisk, passportExpiring };
 }
 
 export async function getTravelerById(id: number): Promise<TravelerSummary | null> {

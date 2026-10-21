@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { Prisma } from '@prisma/client';
 
+import { notifyNotificationsChanged } from '@/lib/notification-events';
 import { prisma } from '@/lib/prisma';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
@@ -93,6 +94,7 @@ export async function POST(
       VALUES ${Prisma.join(notificationValues)}
     `,
   );
+  notifyNotificationsChanged(existingIds);
 
   return NextResponse.json({ shared: existingIds.length, notified: existingIds.length });
 }

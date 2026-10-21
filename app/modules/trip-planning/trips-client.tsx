@@ -3,7 +3,9 @@
 import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+
+import ShowMoreButton from '@/app/ui/show-more-button';
 
 import CloseoutPanel from './closeout-panel';
 import TripBuilder from './trip-builder';
@@ -13,6 +15,8 @@ import type {
   TravelerOption,
   TripCloseout,
   TripDetail,
+  TripPage,
+  TripStatusCounts,
   TripStatusFilter,
   TripSummary,
   TripsTab,
@@ -29,13 +33,21 @@ interface TripsClientProps {
   currentUser: { id: number; name: string; email: string };
   /** False for a verifier with only the close-out grant: the Close out tab alone. */
   canPlan: boolean;
+  /** Whether the Close out tab exists for this user at all. */
+  canCloseOut: boolean;
   initialTab: TripsTab;
+  /** The first page of the unfiltered list; the rest comes from /api/trips. */
   initialTrips: TripSummary[];
+  initialTotal: number;
+  initialPageSize: number;
+  initialCounts: TripStatusCounts;
   initialCustomers: CustomerOption[];
   initialOwners: OwnerOption[];
   initialTravelers: TravelerOption[];
-  /** Null without the close-out grant. */
+  /** Null until the Close out tab is opened (or without the grant); then fetched on demand. */
   initialCloseoutTrips: CloseoutTrip[] | null;
+  /** Completed trips awaiting close-out, for the tab badge while the list isn't loaded. */
+  initialPendingCloseouts: number;
 }
 
 const STATUS_FILTERS: TripStatusFilter[] = ['All', 'Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
@@ -47,6 +59,8 @@ const STATUS_STYLES: Record<string, string> = {
   Completed: 'bg-violet-50 text-violet-700',
   Cancelled: 'bg-rose-50 text-rose-700',
 };
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 /** "Lead Name +2", or null when the trip has no travellers yet. */
 function travelerLine(travelers: TripSummary['travelers']): string | null {
@@ -60,23 +74,65 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** What the list is showing: the search box (settled) and the status pill. */
+interface ListQuery {
+  q: string;
+  status: TripStatusFilter;
+}
+
+const queryKey = (query: ListQuery) => `${query.status}\u0000${query.q}`;
+
+async function fetchTripPage(query: ListQuery, page: number): Promise<TripPage> {
+  const params = new URLSearchParams({ page: String(page) });
+  if (query.q) params.set('q', query.q);
+  if (query.status !== 'All') params.set('status', query.status);
+  const r = await fetch(`/api/trips?${params}`, { credentials: 'include', cache: 'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return (await r.json()) as TripPage;
+}
+
+/** The rows loaded so far for one query, page by page. */
+interface LoadedList {
+  key: string;
+  trips: TripSummary[];
+  total: number;
+  page: number;
+}
+
 export default function TripsClient({
   currentUser,
   canPlan,
+  canCloseOut,
   initialTab,
   initialTrips,
+  initialTotal,
+  initialCounts,
   initialCustomers,
   initialOwners,
   initialTravelers,
   initialCloseoutTrips,
+  initialPendingCloseouts,
 }: TripsClientProps) {
   const router = useRouter();
   const [tab, setTab] = useState<TripsTab>(initialTab);
-  const [trips, setTrips] = useState<TripSummary[]>(initialTrips);
   const [closeoutTrips, setCloseoutTrips] = useState<CloseoutTrip[] | null>(initialCloseoutTrips);
+  const [closeoutError, setCloseoutError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [settledQuery, setSettledQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<TripStatusFilter>('All');
+  const [counts, setCounts] = useState<TripStatusCounts>(initialCounts);
   const [builderOpen, setBuilderOpen] = useState(false);
+
+  const query: ListQuery = { q: settledQuery, status: activeFilter };
+  const wantKey = queryKey(query);
+  const [loaded, setLoaded] = useState<LoadedList>({
+    key: queryKey({ q: '', status: 'All' }),
+    trips: initialTrips,
+    total: initialTotal,
+    page: 1,
+  });
+  const [listError, setListError] = useState<{ key: string; message: string } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Honour legacy ?focus=<tripId> deep links (from quote drawer, notifications) by
   // redirecting to the dedicated itinerary page.
@@ -89,59 +145,91 @@ export default function TripsClient({
     }
   }, [router]);
 
-  const filteredTrips = useMemo(() => {
-    const normalized = searchQuery.trim().toLowerCase();
-    return trips.filter((trip) => {
-      const matchesSearch =
-        normalized.length === 0 ||
-        trip.reference.toLowerCase().includes(normalized) ||
-        trip.trackingCode.toLowerCase().includes(normalized) ||
-        trip.title.toLowerCase().includes(normalized) ||
-        trip.customer.name.toLowerCase().includes(normalized) ||
-        (trip.customer.company?.toLowerCase().includes(normalized) ?? false) ||
-        trip.travelers.some((traveler) => traveler.name.toLowerCase().includes(normalized));
-      const matchesFilter = activeFilter === 'All' || trip.status === activeFilter;
-      return matchesSearch && matchesFilter;
-    });
-  }, [trips, searchQuery, activeFilter]);
+  // Typing settles into a query after a pause, so each keystroke isn't a request.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSettledQuery(searchQuery.trim()), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
 
-  const totals = useMemo(
-    () => ({
-      total: trips.length,
-      planned: trips.filter((t) => t.status === 'Planned').length,
-      active: trips.filter((t) => t.status === 'Active').length,
-      completed: trips.filter((t) => t.status === 'Completed').length,
-    }),
-    [trips],
-  );
+  // A new query (search text or status pill) fetches its first page from the
+  // server. The list keeps showing the previous rows, dimmed, until it arrives.
+  const listCurrent = loaded.key === wantKey;
+  const listFailed = listError?.key === wantKey;
+  useEffect(() => {
+    if (listCurrent || listFailed) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const page = await fetchTripPage({ q: settledQuery, status: activeFilter }, 1);
+        if (cancelled) return;
+        setLoaded({ key: wantKey, trips: page.trips, total: page.total, page: page.page });
+      } catch {
+        if (!cancelled) setListError({ key: wantKey, message: "The trips couldn't be loaded. Try again." });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [wantKey, listCurrent, listFailed, settledQuery, activeFilter]);
+
+  const loadMore = async () => {
+    if (!listCurrent || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchTripPage(query, loaded.page + 1);
+      setLoaded((current) => {
+        if (current.key !== wantKey) return current;
+        const seen = new Set(current.trips.map((t) => t.id));
+        return {
+          ...current,
+          trips: [...current.trips, ...page.trips.filter((t) => !seen.has(t.id))],
+          total: page.total,
+          page: page.page,
+        };
+      });
+    } catch {
+      setListError({ key: wantKey, message: "More trips couldn't be loaded. Try again." });
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const upsertTrip = (trip: TripSummary | TripDetail) => {
-    setTrips((current) => {
-      const without = current.filter((t) => t.id !== trip.id);
-      const summary: TripSummary = {
-        id: trip.id,
-        reference: trip.reference,
-        trackingCode: trip.trackingCode,
-        title: trip.title,
-        description: trip.description,
-        status: trip.status,
-        currency: trip.currency,
-        startDate: trip.startDate,
-        endDate: trip.endDate,
-        notes: trip.notes,
-        createdAt: trip.createdAt,
-        updatedAt: trip.updatedAt,
-        customer: trip.customer,
-        travelers: trip.travelers,
-        createdBy: trip.createdBy,
-        owner: trip.owner,
-        sourceQuote: trip.sourceQuote,
-        itemCount: 'items' in trip ? trip.items.length : trip.itemCount,
-        assignmentCount: 'assignmentCount' in trip ? trip.assignmentCount : 0,
-        logCount: trip.logCount,
+    const summary: TripSummary = {
+      id: trip.id,
+      reference: trip.reference,
+      trackingCode: trip.trackingCode,
+      title: trip.title,
+      description: trip.description,
+      status: trip.status,
+      currency: trip.currency,
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      notes: trip.notes,
+      createdAt: trip.createdAt,
+      updatedAt: trip.updatedAt,
+      customer: trip.customer,
+      travelers: trip.travelers,
+      createdBy: trip.createdBy,
+      owner: trip.owner,
+      sourceQuote: trip.sourceQuote,
+      itemCount: 'items' in trip ? trip.items.length : trip.itemCount,
+      assignmentCount: 'assignmentCount' in trip ? trip.assignmentCount : 0,
+      logCount: trip.logCount,
+    };
+    setLoaded((current) => {
+      const isNew = !current.trips.some((t) => t.id === summary.id);
+      return {
+        ...current,
+        trips: [summary, ...current.trips.filter((t) => t.id !== summary.id)],
+        total: isNew ? current.total + 1 : current.total,
       };
-      return [summary, ...without];
     });
+    setCounts((current) => ({
+      ...current,
+      [summary.status]: current[summary.status] + 1,
+      total: current.total + 1,
+    }));
   };
 
   const openTrip = (tripId: number) => {
@@ -156,15 +244,63 @@ export default function TripsClient({
     window.history.replaceState(null, '', url);
   };
 
+  // The close-out list is every completed trip, so it is fetched the first
+  // time the tab is shown rather than shipped with the Trips screen.
+  useEffect(() => {
+    // After a failure the Retry button clears the error, which re-runs this.
+    if (tab !== 'close-out' || !canCloseOut || closeoutTrips !== null || closeoutError) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/trips/closeout', { credentials: 'include', cache: 'no-store' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = (await r.json()) as { trips: CloseoutTrip[] };
+        if (!cancelled) setCloseoutTrips(data.trips);
+      } catch {
+        if (!cancelled) setCloseoutError("The close-out list couldn't be loaded. Try again.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, canCloseOut, closeoutTrips, closeoutError]);
+
   const saveCloseout = (tripId: number, closeout: TripCloseout) => {
     setCloseoutTrips((current) =>
       current ? current.map((trip) => (trip.id === tripId ? { ...trip, closeout } : trip)) : current,
     );
   };
 
-  const pendingCloseouts = closeoutTrips?.filter((trip) => !trip.closeout?.closedAt).length ?? 0;
+  const pendingCloseouts = closeoutTrips
+    ? closeoutTrips.filter((trip) => !trip.closeout?.closedAt).length
+    : initialPendingCloseouts;
 
-  const hasTrips = trips.length > 0;
+  const hasTrips = counts.total > 0;
+  const isFiltered = settledQuery.length > 0 || activeFilter !== 'All';
+  const rows = loaded.trips;
+  const remaining = Math.max(0, loaded.total - rows.length);
+  const listStale = !listCurrent && !listFailed;
+
+  const listFooter = (
+    <>
+      {listFailed && (
+        <div className="px-6 py-4 text-center text-sm text-rose-700">
+          {listError?.message}{' '}
+          <button type="button" className="font-semibold underline" onClick={() => setListError(null)}>
+            Retry
+          </button>
+        </div>
+      )}
+      {listCurrent && rows.length > 0 && (
+        <p className="px-6 pt-4 text-center text-xs text-gray-400">
+          Showing {rows.length.toLocaleString()} of {loaded.total.toLocaleString()} trips
+        </p>
+      )}
+      {listCurrent && (
+        <ShowMoreButton hiddenCount={remaining} onShowMore={() => void loadMore()} noun={loadingMore ? 'trips loading…' : 'trips'} />
+      )}
+    </>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50/50 p-4 sm:p-6 lg:p-10">
@@ -201,12 +337,12 @@ export default function TripsClient({
           )}
         </header>
 
-        {canPlan && closeoutTrips && (
+        {canPlan && canCloseOut && (
           <nav className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-label="Trip planning sections">
             <div className="flex w-max gap-1 rounded-xl border border-gray-100 bg-white p-1">
               {(['trips', 'close-out'] as const).map((id) => {
                 const active = tab === id;
-                const count = id === 'trips' ? trips.length : pendingCloseouts;
+                const count = id === 'trips' ? counts.total : pendingCloseouts;
                 return (
                   <button
                     key={id}
@@ -231,16 +367,30 @@ export default function TripsClient({
           </nav>
         )}
 
-        {tab === 'close-out' && closeoutTrips ? (
-          <CloseoutPanel trips={closeoutTrips} onSaved={saveCloseout} />
+        {tab === 'close-out' && canCloseOut ? (
+          closeoutTrips ? (
+            <CloseoutPanel trips={closeoutTrips} onSaved={saveCloseout} />
+          ) : closeoutError ? (
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-6 py-10 text-center text-sm text-rose-700">
+              {closeoutError}{' '}
+              <button type="button" className="font-semibold underline" onClick={() => setCloseoutError(null)}>
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="animate-pulse space-y-3" aria-busy="true">
+              <div className="h-14 rounded-2xl border border-gray-100 bg-white" />
+              <div className="h-64 rounded-2xl border border-gray-100 bg-white" />
+            </div>
+          )
         ) : (
           <>
             {/* Summary */}
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-              <SummaryCard label="Trips" value={`${totals.total}`} accent="text-primary" />
-              <SummaryCard label="Planned" value={`${totals.planned}`} />
-              <SummaryCard label="Active" value={`${totals.active}`} />
-              <SummaryCard label="Completed" value={`${totals.completed}`} />
+              <SummaryCard label="Trips" value={counts.total.toLocaleString()} accent="text-primary" />
+              <SummaryCard label="Planned" value={counts.Planned.toLocaleString()} />
+              <SummaryCard label="Active" value={counts.Active.toLocaleString()} />
+              <SummaryCard label="Completed" value={counts.Completed.toLocaleString()} />
             </div>
 
             {/* Toolbar */}
@@ -255,7 +405,7 @@ export default function TripsClient({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
                 </svg>
                 <input
-                  type="text"
+                  type="search"
                   placeholder="Search by reference, tracking code, title, client, or traveller…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -279,8 +429,8 @@ export default function TripsClient({
             </div>
 
             {/* Mobile cards */}
-            <div className="space-y-3 md:hidden">
-              {filteredTrips.map((trip) => (
+            <div className={`space-y-3 md:hidden ${listStale ? 'opacity-60' : ''}`} aria-busy={listStale || undefined}>
+              {rows.map((trip) => (
                 <button
                   key={trip.id}
                   type="button"
@@ -309,11 +459,17 @@ export default function TripsClient({
                   </div>
                 </button>
               ))}
-              {filteredTrips.length === 0 && <EmptyState filtered={hasTrips} onCreate={() => setBuilderOpen(true)} />}
+              {listCurrent && rows.length === 0 && (
+                <EmptyState filtered={hasTrips || isFiltered} onCreate={() => setBuilderOpen(true)} />
+              )}
+              {listFooter}
             </div>
 
             {/* Desktop table */}
-            <div className="hidden overflow-hidden rounded-2xl border border-gray-100 bg-white md:block">
+            <div
+              className={`hidden overflow-hidden rounded-2xl border border-gray-100 bg-white md:block ${listStale ? 'opacity-60' : ''}`}
+              aria-busy={listStale || undefined}
+            >
               <table className="w-full border-collapse text-left">
                 <thead>
                   <tr className="border-b border-gray-100">
@@ -328,7 +484,7 @@ export default function TripsClient({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredTrips.map((trip) => (
+                  {rows.map((trip) => (
                     <tr
                       key={trip.id}
                       onClick={() => openTrip(trip.id)}
@@ -382,7 +538,10 @@ export default function TripsClient({
                   ))}
                 </tbody>
               </table>
-              {filteredTrips.length === 0 && <EmptyState filtered={hasTrips} onCreate={() => setBuilderOpen(true)} />}
+              {listCurrent && rows.length === 0 && (
+                <EmptyState filtered={hasTrips || isFiltered} onCreate={() => setBuilderOpen(true)} />
+              )}
+              {listFooter}
             </div>
           </>
         )}

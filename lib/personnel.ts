@@ -83,6 +83,13 @@ export type PersonnelLicence = {
   hasDocument: boolean;
 };
 
+/**
+ * What the directory's cards, filters, stats and presence need. The free-text
+ * notes (a FileMaker profile can run to pages) and the resource mirror ids stay
+ * on the detail record, fetched when a card is opened.
+ */
+export type PersonnelListItem = Omit<PersonnelSummary, 'notes' | 'resource'>;
+
 export type PersonnelSummary = {
   id: number;
   name: string;
@@ -110,7 +117,7 @@ export type PersonnelSummary = {
   createdAt: string;
 };
 
-const SELECT = {
+const LIST_SELECT = {
   id: true,
   name: true,
   email: true,
@@ -137,15 +144,19 @@ const SELECT = {
       documentName: true,
     },
   },
-  driverProfile: { select: { id: true } },
-  officerProfile: { select: { id: true } },
-  notes: true,
   photoName: true,
   createdAt: true,
   user: { select: { id: true, name: true, email: true } },
 } as const;
 
-type PersonnelRow = {
+const SELECT = {
+  ...LIST_SELECT,
+  driverProfile: { select: { id: true } },
+  officerProfile: { select: { id: true } },
+  notes: true,
+} as const;
+
+type PersonnelListRow = {
   id: number;
   name: string;
   email: string | null;
@@ -169,15 +180,18 @@ type PersonnelRow = {
     expiryDate: Date;
     documentName: string | null;
   }[];
-  driverProfile: { id: number } | null;
-  officerProfile: { id: number } | null;
-  notes: string | null;
   photoName: string | null;
   createdAt: Date;
   user: { id: number; name: string; email: string } | null;
 };
 
-function serialize(row: PersonnelRow): PersonnelSummary {
+type PersonnelRow = PersonnelListRow & {
+  driverProfile: { id: number } | null;
+  officerProfile: { id: number } | null;
+  notes: string | null;
+};
+
+function serializeListItem(row: PersonnelListRow): PersonnelListItem {
   return {
     id: row.id,
     name: row.name,
@@ -208,14 +222,20 @@ function serialize(row: PersonnelRow): PersonnelSummary {
         hasDocument: Boolean(l.documentName),
       };
     }),
+    hasPhoto: Boolean(row.photoName),
+    user: row.user,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function serialize(row: PersonnelRow): PersonnelSummary {
+  return {
+    ...serializeListItem(row),
     resource: {
       driverId: row.driverProfile?.id ?? null,
       officerId: row.officerProfile?.id ?? null,
     },
     notes: row.notes,
-    hasPhoto: Boolean(row.photoName),
-    user: row.user,
-    createdAt: row.createdAt.toISOString(),
   };
 }
 
@@ -225,14 +245,14 @@ function serialize(row: PersonnelRow): PersonnelSummary {
  * All personnel, or only those holding `role`. The role pages
  * (drivers, cpos, airport-greeters, security-advisors) all come through here.
  */
-export async function listPersonnel(options?: { role?: PersonnelRole | null }): Promise<PersonnelSummary[]> {
+export async function listPersonnel(options?: { role?: PersonnelRole | null }): Promise<PersonnelListItem[]> {
   const role = options?.role ?? null;
   const rows = await prisma.personnel.findMany({
     where: role ? { roles: { has: role } } : undefined,
     orderBy: [{ name: 'asc' }],
-    select: SELECT,
+    select: LIST_SELECT,
   });
-  return rows.map(serialize);
+  return rows.map(serializeListItem);
 }
 
 /** A single person, for the detail drawer and licence editing. */

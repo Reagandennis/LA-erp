@@ -3,6 +3,7 @@ import 'server-only';
 
 import { Prisma } from '@prisma/client';
 
+import { notifyNotificationsChanged } from './notification-events';
 import { prisma } from './prisma';
 
 export interface TripItineraryItemNotificationSummary {
@@ -126,5 +127,7 @@ export async function markTripNotificationsRead(
        SET "readAt" = NOW()
      WHERE "userId" = ${userId} AND "id" IN (${Prisma.join(normalized)})
   `;
-  return typeof updated === 'number' ? updated : 0;
+  const count = typeof updated === 'number' ? updated : 0;
+  if (count > 0) notifyNotificationsChanged(userId);
+  return count;
 }

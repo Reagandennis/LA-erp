@@ -264,6 +264,50 @@ export async function listAssignments(): Promise<AssignmentSummary[]> {
   return rows.map(serializeAssignment);
 }
 
+/** Only the assignments still in play; the screen shows these without a search. */
+export async function listCurrentAssignments(): Promise<AssignmentSummary[]> {
+  const rows = await prisma.tripAssignment.findMany({
+    where: { status: { in: [...ACTIVE_ASSIGNMENT_STATUSES] } },
+    orderBy: [{ createdAt: 'desc' }],
+    include: ASSIGNMENT_INCLUDE,
+  });
+  return rows.map(serializeAssignment);
+}
+
+/** Completed and cancelled assignments (years of them from FileMaker): counted, not shipped. */
+export async function countPastAssignments(): Promise<number> {
+  return prisma.tripAssignment.count({ where: { status: { notIn: [...ACTIVE_ASSIGNMENT_STATUSES] } } });
+}
+
+export const ASSIGNMENT_SEARCH_LIMIT = 100;
+
+/** The database-side search over the whole history, newest first. */
+export function buildAssignmentSearchWhere(q: string) {
+  const term = q.trim();
+  if (!term) return {};
+  const contains = { contains: term, mode: 'insensitive' as const };
+  return {
+    OR: [
+      { trip: { reference: contains } },
+      { trip: { title: contains } },
+      { trip: { customer: { name: contains } } },
+      { vehicle: { registration: contains } },
+      { driver: { name: contains } },
+      { officer: { name: contains } },
+    ],
+  };
+}
+
+export async function searchAssignments(q: string, limit = ASSIGNMENT_SEARCH_LIMIT): Promise<AssignmentSummary[]> {
+  const rows = await prisma.tripAssignment.findMany({
+    where: buildAssignmentSearchWhere(q),
+    orderBy: [{ createdAt: 'desc' }],
+    include: ASSIGNMENT_INCLUDE,
+    take: Math.max(1, Math.min(limit, ASSIGNMENT_SEARCH_LIMIT)),
+  });
+  return rows.map(serializeAssignment);
+}
+
 export async function listTripOptions(): Promise<TripOption[]> {
   const rows = await prisma.trip.findMany({
     where: { status: { notIn: ['Cancelled', 'Completed'] } },
@@ -275,14 +319,16 @@ export async function listTripOptions(): Promise<TripOption[]> {
 
 export function computeStats(args: {
   trips: TripOption[];
+  /** The assignments loaded (current ones), plus however many past ones were left behind. */
   assignments: AssignmentSummary[];
+  pastAssignments?: number;
   vehicles: VehicleSummary[];
   drivers: DriverSummary[];
   officers: OfficerSummary[];
 }): TaskAssignmentStats {
   return {
     trips: args.trips.length,
-    assignments: args.assignments.length,
+    assignments: args.assignments.length + (args.pastAssignments ?? 0),
     vehiclesAvailable: args.vehicles.filter((v) => v.status === 'Available').length,
     driversAvailable: args.drivers.filter((d) => d.status === 'Available').length,
     officersAvailable: args.officers.filter((o) => o.status === 'Available').length,

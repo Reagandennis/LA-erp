@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getServerAuth } from '@/lib/auth';
 import { listCustomerOptions } from '@/lib/contacts';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { listTravelers } from '@/lib/travelers';
+import { TRAVELER_PAGE_SIZE, searchTravelers, travelerStats } from '@/lib/travelers';
 import { userHasModule, userHasRole } from '@/lib/user';
 
 import TravelersClient from './travelers-client';
@@ -29,12 +29,20 @@ export default async function TravelersPage({
   const { open } = await searchParams;
   const openId = Number(Array.isArray(open) ? open[0] : open);
 
-  const [items, customers] = await Promise.all([listTravelers(), listCustomerOptions()]);
+  // The first page only; searches, filters and later pages come from /api/travelers.
+  const [firstPage, stats, customers] = await Promise.all([
+    searchTravelers({ page: 1, pageSize: TRAVELER_PAGE_SIZE }),
+    travelerStats(),
+    listCustomerOptions(),
+  ]);
 
   return (
     <TravelersClient
       isAdmin={isAdmin}
-      initialItems={items}
+      initialItems={firstPage.items}
+      initialTotal={firstPage.total}
+      initialStats={stats}
+      pageSize={TRAVELER_PAGE_SIZE}
       initialCustomers={customers}
       initialOpenId={Number.isInteger(openId) && openId > 0 ? openId : null}
     />

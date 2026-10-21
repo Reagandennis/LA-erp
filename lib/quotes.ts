@@ -2,6 +2,7 @@ import 'server-only';
 
 import { Prisma } from '@prisma/client';
 
+import { notifyNotificationsChanged } from './notification-events';
 import { prisma } from './prisma';
 import { syncQuoteToWave } from './wave';
 
@@ -669,6 +670,7 @@ export async function submitQuote(params: {
       },
     ],
   });
+  notifyNotificationsChanged(existing.approverId);
 
   const refreshed = await getQuoteClient().findUnique({
     where: { id: params.id },
@@ -716,6 +718,7 @@ export async function decideQuote(params: {
       },
     ],
   });
+  notifyNotificationsChanged(existing.createdById);
 
   const refreshed = await getQuoteClient().findUnique({
     where: { id: params.id },
@@ -861,11 +864,13 @@ export async function listQuoteNotifications(userId: number): Promise<QuoteNotif
 export async function markQuoteNotificationsRead(userId: number, ids: number[]): Promise<number> {
   const normalized = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
   if (normalized.length === 0) return 0;
-  return prisma.$executeRaw`
+  const updated = await prisma.$executeRaw`
     UPDATE "QuoteNotification"
     SET "readAt" = NOW()
     WHERE "userId" = ${userId} AND "id" IN (${Prisma.join(normalized)})
   `;
+  if (updated > 0) notifyNotificationsChanged(userId);
+  return updated;
 }
 
 export async function listApproverCandidates(excludeUserId: number) {

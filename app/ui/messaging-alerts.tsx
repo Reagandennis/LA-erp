@@ -10,6 +10,7 @@ import {
   getViewingChat,
   type MessagingService,
   setUnread,
+  subscribeServerEvents,
   type UnreadByService,
   useMessagingUnread,
 } from './messaging-alerts-store';
@@ -203,14 +204,13 @@ export default function MessagingAlerts() {
       });
     };
 
-    const source = new EventSource('/api/messaging/stream', { withCredentials: true });
     // `ready` opens every connection, reconnects included: resync the badges.
-    source.addEventListener('ready', () => void refresh());
-    source.addEventListener('messaging', (event) => {
+    const unsubscribeReady = subscribeServerEvents('ready', () => void refresh());
+    const unsubscribeMessaging = subscribeServerEvents('messaging', (event) => {
       refreshSoon();
       let payload: MessagingEvent;
       try {
-        payload = JSON.parse((event as MessageEvent).data) as MessagingEvent;
+        payload = JSON.parse(event.data) as MessagingEvent;
       } catch {
         return;
       }
@@ -233,7 +233,8 @@ export default function MessagingAlerts() {
 
     return () => {
       stopped = true;
-      source.close();
+      unsubscribeReady();
+      unsubscribeMessaging();
       stopPolling();
       if (pending) clearTimeout(pending);
     };

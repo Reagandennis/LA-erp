@@ -27,6 +27,14 @@ const nextConfig: NextConfig = {
   // When the reverse proxy (Caddy `encode zstd gzip`) already compresses
   // responses, let it own that CPU work instead of Node. Read at build time.
   compress: process.env.REVERSE_PROXY_COMPRESSION !== 'true',
+  experimental: {
+    // Every screen is rendered on demand, so without this the client cache
+    // holds a visited page for 0 s and each sidebar click waits on the server
+    // again. Thirty seconds makes back-and-forth navigation instant; screens
+    // that write data elsewhere call router.refresh() after saving (see the
+    // quote form), which drops the cached copy.
+    staleTimes: { dynamic: 30, static: 300 },
+  },
   async headers() {
     return [
       {

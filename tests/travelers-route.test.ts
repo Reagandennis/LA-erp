@@ -3,27 +3,47 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-const { requireModuleRequest, requireAdminRequest, listTravelers, createTraveler, listCustomerOptions } =
-  vi.hoisted(() => ({
-    requireModuleRequest: vi.fn(),
-    requireAdminRequest: vi.fn(),
-    listTravelers: vi.fn(),
-    createTraveler: vi.fn(),
-    listCustomerOptions: vi.fn(),
-  }));
+const {
+  requireModuleRequest,
+  requireAdminRequest,
+  listTravelers,
+  searchTravelers,
+  travelerStats,
+  getTravelerById,
+  createTraveler,
+  listCustomerOptions,
+} = vi.hoisted(() => ({
+  requireModuleRequest: vi.fn(),
+  requireAdminRequest: vi.fn(),
+  listTravelers: vi.fn(),
+  searchTravelers: vi.fn(),
+  travelerStats: vi.fn(),
+  getTravelerById: vi.fn(),
+  createTraveler: vi.fn(),
+  listCustomerOptions: vi.fn(),
+}));
 
 vi.mock('../lib/request-auth', () => ({ requireModuleRequest, requireAdminRequest }));
-vi.mock('../lib/travelers', () => ({ listTravelers, createTraveler }));
+vi.mock('../lib/travelers', () => ({ listTravelers, searchTravelers, travelerStats, getTravelerById, createTraveler }));
 vi.mock('../lib/contacts', () => ({ listCustomerOptions }));
 
 import { GET, POST } from '../app/api/travelers/route';
+import { GET as GET_ONE } from '../app/api/travelers/[id]/route';
 
 const authed = { auth: { user: { id: 7 } }, response: undefined };
 
 describe('travelers collection route', () => {
   beforeEach(() => {
-    [requireModuleRequest, requireAdminRequest, listTravelers, createTraveler, listCustomerOptions]
-      .forEach((m) => m.mockReset());
+    [
+      requireModuleRequest,
+      requireAdminRequest,
+      listTravelers,
+      searchTravelers,
+      travelerStats,
+      getTravelerById,
+      createTraveler,
+      listCustomerOptions,
+    ].forEach((m) => m.mockReset());
   });
 
   it('refuses callers without the travelers module', async () => {
@@ -51,6 +71,37 @@ describe('travelers collection route', () => {
     expect(response.status).toBe(200);
     expect(payload.items).toHaveLength(1);
     expect(payload.customers).toHaveLength(1);
+  });
+
+  it('searches and pages in the database when asked to', async () => {
+    requireModuleRequest.mockResolvedValue(authed);
+    searchTravelers.mockResolvedValue({ items: [{ id: 1, name: 'Jane Doe' }], total: 41, page: 2, pageSize: 20 });
+    travelerStats.mockResolvedValue({ total: 41, active: 40, elevatedRisk: 3, passportExpiring: 2 });
+
+    const response = await GET(new NextRequest('http://localhost/api/travelers?q=jane&risk=High&status=Active&page=2&pageSize=20'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(searchTravelers).toHaveBeenCalledWith({ q: 'jane', risk: 'High', status: 'Active', page: 2, pageSize: 20 });
+    expect(payload).toEqual({
+      items: [{ id: 1, name: 'Jane Doe' }],
+      total: 41,
+      page: 2,
+      pageSize: 20,
+      stats: { total: 41, active: 40, elevatedRisk: 3, passportExpiring: 2 },
+    });
+    // The unpaged shape is for other callers; a search never loads everything.
+    expect(listTravelers).not.toHaveBeenCalled();
+  });
+
+  it('treats a bad page number as the first page', async () => {
+    requireModuleRequest.mockResolvedValue(authed);
+    searchTravelers.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 60 });
+    travelerStats.mockResolvedValue({ total: 0, active: 0, elevatedRisk: 0, passportExpiring: 0 });
+
+    await GET(new NextRequest('http://localhost/api/travelers?page=abc'));
+
+    expect(searchTravelers).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: null }));
   });
 
   it('requires admin to create a traveller', async () => {
@@ -103,5 +154,52 @@ describe('travelers collection route', () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toBe('Name is required');
+  });
+});
+
+describe('traveler detail route', () => {
+  beforeEach(() => {
+    [requireModuleRequest, getTravelerById].forEach((m) => m.mockReset());
+  });
+
+  it('is gated on the travelers module like the list', async () => {
+    requireModuleRequest.mockResolvedValue({
+      auth: null,
+      response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    });
+
+    const response = await GET_ONE(new NextRequest('http://localhost/api/travelers/5'), {
+      params: Promise.resolve({ id: '5' }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(getTravelerById).not.toHaveBeenCalled();
+  });
+
+  it('returns the full record', async () => {
+    requireModuleRequest.mockResolvedValue(authed);
+    getTravelerById.mockResolvedValue({ id: 5, name: 'Jane Doe', medicalNotes: 'Penicillin allergy' });
+
+    const response = await GET_ONE(new NextRequest('http://localhost/api/travelers/5'), {
+      params: Promise.resolve({ id: '5' }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(getTravelerById).toHaveBeenCalledWith(5);
+    expect(payload.item.medicalNotes).toBe('Penicillin allergy');
+  });
+
+  it('rejects a malformed id and reports a missing record', async () => {
+    requireModuleRequest.mockResolvedValue(authed);
+    getTravelerById.mockResolvedValue(null);
+
+    const bad = await GET_ONE(new NextRequest('http://localhost/api/travelers/x'), { params: Promise.resolve({ id: 'x' }) });
+    const missing = await GET_ONE(new NextRequest('http://localhost/api/travelers/9'), {
+      params: Promise.resolve({ id: '9' }),
+    });
+
+    expect(bad.status).toBe(400);
+    expect(missing.status).toBe(404);
   });
 });

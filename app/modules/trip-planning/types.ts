@@ -122,6 +122,16 @@ export interface TripSummary {
   logCount: number;
 }
 
+/** One page of the list from GET /api/trips?q=&status=&page= (mirrors lib/trips.ts). */
+export interface TripPage {
+  trips: TripSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type TripStatusCounts = Record<TripStatus, number> & { total: number };
+
 export interface TripDetail extends TripSummary {
   items: TripItineraryItemSummary[];
   days: TripDaySummary[];

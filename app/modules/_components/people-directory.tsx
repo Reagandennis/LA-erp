@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import ShowMoreButton from '@/app/ui/show-more-button';
+import { useShowMore } from '@/app/ui/use-show-more';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { PeopleView } from '@/lib/people-views';
 import { CPO_GRADES, ENGAGEMENT_TYPES, PERSONNEL_ROLES } from '@/lib/people-views';
-import type { PersonnelLicence, PersonnelSummary, UserOption } from '@/lib/personnel';
+import type { PersonnelLicence, PersonnelListItem, PersonnelSummary, UserOption } from '@/lib/personnel';
 import { AvatarStatus, StatusDot, presenceOf, usePresence } from '@/app/ui/status-dot';
 
 /**
@@ -57,7 +59,8 @@ function formatDate(iso: string | null) {
 type Props = {
   view: PeopleView;
   isAdmin: boolean;
-  initialItems: PersonnelSummary[];
+  /** List rows only; a card's full record is fetched when it is opened. */
+  initialItems: PersonnelListItem[];
   initialUsers: UserOption[];
   /** Opens straight onto one person — used by the licence watchlist deep links. */
   initialSelectedId?: number | null;
@@ -93,7 +96,7 @@ type LicenceForm = { licenseNumber: string; category: string; expiryDate: string
 const EMPTY_LICENCE: LicenceForm = { licenseNumber: '', category: 'Class A', expiryDate: '', document: null };
 
 export default function PeopleDirectory({ view, isAdmin, initialItems, initialUsers, initialSelectedId }: Props) {
-  const [items, setItems] = useState<PersonnelSummary[]>(initialItems);
+  const [items, setItems] = useState<PersonnelListItem[]>(initialItems);
   const [users, setUsers] = useState<UserOption[]>(initialUsers);
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('All');
@@ -113,17 +116,56 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
   const [licenceOpen, setLicenceOpen] = useState(false);
   const [licenceForm, setLicenceForm] = useState<LicenceForm>(EMPTY_LICENCE);
 
-  const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
+  // The open card's full record (notes, resource links); the list rows carry
+  // only what the cards show. `detail` lags `selectedId` while it loads.
+  const [detail, setDetail] = useState<PersonnelSummary | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailVersion, setDetailVersion] = useState(0);
+
+  useEffect(() => {
+    if (selectedId === null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/personnel/${selectedId}`, { credentials: 'include', cache: 'no-store' });
+        if (cancelled) return;
+        if (!res.ok) {
+          setDetail(null);
+          setDetailError(res.status === 404 ? 'This record no longer exists.' : "This record couldn't be loaded.");
+          return;
+        }
+        const data = (await res.json()) as { item: PersonnelSummary };
+        if (cancelled) return;
+        setDetail(data.item);
+        setDetailError(null);
+      } catch {
+        if (!cancelled) setDetailError("This record couldn't be loaded.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, detailVersion]);
+
+  const selected = detail && detail.id === selectedId ? detail : null;
+  const detailLoading = selectedId !== null && selected === null && detailError === null;
+
+  const closeDetail = () => {
+    setSelectedId(null);
+    setDetailError(null);
+  };
 
   const listUrl = view.role ? `/api/personnel?role=${encodeURIComponent(view.role)}` : '/api/personnel';
 
+  /** Reload the list (and the open record, whose licences live on both). */
   const refresh = async () => {
     try {
       const res = await fetch(listUrl, { credentials: 'include' });
       if (!res.ok) return;
       const data = await res.json();
-      if (Array.isArray(data.items)) setItems(data.items as PersonnelSummary[]);
+      if (Array.isArray(data.items)) setItems(data.items as PersonnelListItem[]);
       if (Array.isArray(data.users)) setUsers(data.users as UserOption[]);
+      setDetailVersion((v) => v + 1);
     } catch {
       /* keep current data on transient failure */
     }
@@ -145,6 +187,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
         .some((f) => String(f).toLowerCase().includes(q));
     });
   }, [items, search, deptFilter, statusFilter, roleFilter]);
+  const { visible, hiddenCount, showMore, showAll } = useShowMore(filtered);
 
   const stats = useMemo(() => {
     const base = [
@@ -161,7 +204,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
     return [...base, { label: 'From vendors', value: items.filter((p) => p.engagement !== 'Employee').length }];
   }, [items, view]);
 
-  const photoUrl = (p: PersonnelSummary) =>
+  const photoUrl = (p: { id: number }) =>
     `/api/personnel/${p.id}/photo${photoVersion[p.id] ? `?v=${photoVersion[p.id]}` : ''}`;
 
   // --- Form -----------------------------------------------------------------
@@ -225,6 +268,8 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
       return;
     }
     setPhotoVersion((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+    setItems((current) => current.map((row) => (row.id === id ? { ...row, hasPhoto: true } : row)));
+    setDetail((current) => (current && current.id === id ? { ...current, hasPhoto: true } : current));
   };
 
   const submitForm = async (e: React.FormEvent) => {
@@ -295,7 +340,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
     try {
       const res = await fetch(`/api/personnel/${id}`, { method: 'DELETE', credentials: 'include' });
       if (res.ok) {
-        setSelectedId(null);
+        closeDetail();
         await refresh();
       }
     } finally {
@@ -426,7 +471,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.map((p) => {
+            {visible.map((p) => {
               const worstLicence = licenceNeedingAttention(p.licenses);
               return (
                 <button key={p.id} onClick={() => setSelectedId(p.id)} className="text-left bg-white rounded-2xl p-5 border border-gray-100 hover:border-[#03458f]/40 hover:shadow-sm transition-all">
@@ -481,22 +526,43 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
             })}
           </div>
         )}
+        <ShowMoreButton hiddenCount={hiddenCount} onShowMore={showMore} onShowAll={showAll} noun="people" />
       </div>
 
       {/* Detail drawer */}
-      {selected && (
+      {selectedId !== null && (
         <>
-          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={() => setSelectedId(null)} />
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={closeDetail} />
           <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-semibold text-gray-900">Personnel details</h2>
-              <button onClick={() => setSelectedId(null)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
+              <button onClick={closeDetail} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
+            {detailLoading && (
+              <div className="p-6 animate-pulse space-y-4" aria-busy="true">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-xl bg-gray-100" />
+                  <div className="space-y-2">
+                    <div className="h-5 w-40 rounded bg-gray-100" />
+                    <div className="h-4 w-28 rounded bg-gray-100" />
+                  </div>
+                </div>
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div key={i} className="h-4 w-full rounded bg-gray-100" />
+                ))}
+                <span className="sr-only">Loading…</span>
+              </div>
+            )}
+            {detailError && (
+              <div className="m-6 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-700">{detailError}</div>
+            )}
+
+            {selected && (
             <div className="p-6 flex-1 space-y-6">
               <div className="flex items-center gap-4">
                 <Avatar person={selected} src={selected.hasPhoto ? photoUrl(selected) : null} size={64} />
@@ -625,8 +691,9 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
                 </div>
               )}
             </div>
+            )}
 
-            {isAdmin && (
+            {isAdmin && selected && (
               <div className="p-6 border-t border-gray-100 sticky bottom-0 bg-white flex gap-3">
                 <button onClick={() => remove(selected.id)} disabled={busy} className="px-4 py-2.5 rounded-xl border border-rose-200 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">
                   Delete
@@ -836,7 +903,7 @@ function Row({ label, value, href }: { label: string; value: string | null; href
   );
 }
 
-function Avatar({ person, src, size }: { person: PersonnelSummary; src: string | null; size: number }) {
+function Avatar({ person, src, size }: { person: { name: string }; src: string | null; size: number }) {
   const dim = { width: size, height: size };
   if (src) {
     // eslint-disable-next-line @next/next/no-img-element

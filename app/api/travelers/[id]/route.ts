@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireAdminRequest } from '@/lib/request-auth';
-import { deleteTraveler, updateTraveler } from '@/lib/travelers';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
+import { deleteTraveler, getTravelerById, updateTraveler } from '@/lib/travelers';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -9,6 +9,22 @@ export const revalidate = 0;
 function parseId(value: string) {
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+const TRAVELERS_MODULE = 'travelers';
+
+/** The full record for the detail drawer; the list carries only what its cards show. */
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { auth, response } = await requireModuleRequest(request, TRAVELERS_MODULE);
+  if (response || !auth) return response;
+
+  const { id: raw } = await params;
+  const id = parseId(raw);
+  if (!id) return NextResponse.json({ error: 'Invalid traveller id' }, { status: 400 });
+
+  const item = await getTravelerById(id);
+  if (!item) return NextResponse.json({ error: 'Traveller not found' }, { status: 404 });
+  return NextResponse.json({ item });
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

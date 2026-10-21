@@ -2,6 +2,7 @@ import 'server-only';
 
 import { Prisma } from '@prisma/client';
 
+import { notifyNotificationsChanged } from './notification-events';
 import { prisma } from './prisma';
 import { syncInvoicePaymentToQuickBooks, type QuickBooksSyncResult } from './quickbooks';
 import { syncInvoiceToWave } from './wave';
@@ -645,6 +646,7 @@ export async function submitInvoiceForApproval(params: {
       message: `${existing.createdBy.name} submitted invoice ${existing.number} for your approval`,
     },
   });
+  notifyNotificationsChanged(params.approverId);
 
   const fresh = await prisma.invoice.findUnique({ where: { id: params.id }, include: invoiceInclude });
   return serializeDetail(fresh!);
@@ -688,6 +690,7 @@ export async function decideInvoice(params: {
           : `Invoice ${existing.number} was declined${params.note ? `: ${params.note}` : ''}`,
     },
   });
+  notifyNotificationsChanged(existing.createdById);
 
   const fresh = await prisma.invoice.findUnique({ where: { id: params.id }, include: invoiceInclude });
   return serializeDetail(fresh!);
@@ -717,5 +720,6 @@ export async function markInvoiceNotificationsRead(userId: number, ids: number[]
     where: { userId, id: { in: normalized } },
     data: { readAt: new Date() },
   });
+  if (result.count > 0) notifyNotificationsChanged(userId);
   return result.count;
 }

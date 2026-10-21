@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   requireRequestAuth,
   listTripsForUser,
+  searchTrips,
   createTrip,
   recordAuditEvent,
   enforceRateLimit,
@@ -11,6 +12,7 @@ const {
 } = vi.hoisted(() => ({
   requireRequestAuth: vi.fn(),
   listTripsForUser: vi.fn(),
+  searchTrips: vi.fn(),
   createTrip: vi.fn(),
   recordAuditEvent: vi.fn(),
   enforceRateLimit: vi.fn(),
@@ -24,8 +26,11 @@ vi.mock('../lib/request-auth', () => ({
 }));
 vi.mock('../lib/trips', () => ({
   listTripsForUser,
+  searchTrips,
   createTrip,
   TripTravelerError,
+  TRIP_STATUSES: ['Draft', 'Planned', 'Active', 'Completed', 'Cancelled'],
+  TRIP_PAGE_SIZE_MAX: 200,
 }));
 vi.mock('../lib/trip-costs', () => ({
   canSeeTripCosts: () => true,
@@ -43,6 +48,7 @@ describe('trips collection route', () => {
   beforeEach(() => {
     requireRequestAuth.mockReset();
     listTripsForUser.mockReset();
+    searchTrips.mockReset();
     createTrip.mockReset();
     recordAuditEvent.mockReset();
     enforceRateLimit.mockReset();
@@ -72,6 +78,33 @@ describe('trips collection route', () => {
     const payload = await r.json();
     expect(payload.trips).toHaveLength(1);
     expect(listTripsForUser).toHaveBeenCalledWith({ userId: 5, isAdmin: false });
+    expect(searchTrips).not.toHaveBeenCalled();
+  });
+
+  it('returns one page when searched, filtered or paged', async () => {
+    requireRequestAuth.mockResolvedValue({
+      auth: { user: { id: 5, roles: [] } },
+      response: null,
+    });
+    searchTrips.mockResolvedValue({ trips: [{ id: 7 }], total: 120, page: 3, pageSize: 50 });
+
+    const r = await GET(new NextRequest('http://localhost/api/trips?q=nairobi&status=Active&page=3'));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ trips: [{ id: 7 }], total: 120, page: 3, pageSize: 50 });
+    expect(searchTrips).toHaveBeenCalledWith({ userId: 5, isAdmin: false, q: 'nairobi', status: 'Active', page: 3 });
+    expect(listTripsForUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown status or a bad page with 400', async () => {
+    requireRequestAuth.mockResolvedValue({
+      auth: { user: { id: 5, roles: [] } },
+      response: null,
+    });
+
+    expect((await GET(new NextRequest('http://localhost/api/trips?status=Lost'))).status).toBe(400);
+    expect((await GET(new NextRequest('http://localhost/api/trips?page=0'))).status).toBe(400);
+    expect((await GET(new NextRequest('http://localhost/api/trips?pageSize=999'))).status).toBe(400);
+    expect(searchTrips).not.toHaveBeenCalled();
   });
 
   it('creates a trip with audit and 201', async () => {

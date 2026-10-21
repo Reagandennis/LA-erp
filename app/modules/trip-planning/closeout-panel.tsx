@@ -5,6 +5,9 @@ import { CLOSEOUT_CHECKS, allChecksConfirmed } from '@/lib/trip-closeout-checks'
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
+import ShowMoreButton from '@/app/ui/show-more-button';
+import { useShowMore } from '@/app/ui/use-show-more';
+
 import type { CloseoutTrip, TripCloseout } from './types';
 
 type CloseoutFilter = 'All' | 'Pending' | 'Closed out';
@@ -69,6 +72,7 @@ export default function CloseoutPanel({
       return matchesSearch && matchesFilter;
     });
   }, [trips, searchQuery, filter]);
+  const { visible, hiddenCount, showMore, showAll } = useShowMore(filtered);
 
   const openTrip = trips.find((trip) => trip.id === openId) ?? null;
 
@@ -116,7 +120,7 @@ export default function CloseoutPanel({
 
       {/* Mobile cards */}
       <div className="space-y-3 md:hidden">
-        {filtered.map((trip) => (
+        {visible.map((trip) => (
           <button
             key={trip.id}
             type="button"
@@ -140,6 +144,7 @@ export default function CloseoutPanel({
           </button>
         ))}
         {filtered.length === 0 && <EmptyState filtered={trips.length > 0} />}
+        <ShowMoreButton hiddenCount={hiddenCount} onShowMore={showMore} onShowAll={showAll} noun="trips" />
       </div>
 
       {/* Desktop table */}
@@ -156,7 +161,7 @@ export default function CloseoutPanel({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {filtered.map((trip) => (
+            {visible.map((trip) => (
               <tr
                 key={trip.id}
                 onClick={() => setOpenId(trip.id)}
@@ -209,6 +214,7 @@ export default function CloseoutPanel({
             ))}
           </tbody>
         </table>
+        <ShowMoreButton hiddenCount={hiddenCount} onShowMore={showMore} onShowAll={showAll} noun="trips" />
         {filtered.length === 0 && <EmptyState filtered={trips.length > 0} />}
       </div>
 

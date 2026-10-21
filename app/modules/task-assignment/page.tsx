@@ -4,7 +4,8 @@ import { getServerAuth } from '@/lib/auth';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import {
   computeStats,
-  listAssignments,
+  countPastAssignments,
+  listCurrentAssignments,
   listDrivers,
   listOfficers,
   listTripOptions,
@@ -27,11 +28,13 @@ export default async function TaskAssignmentPage() {
     redirect('/dashboard');
   }
 
-  const [vehicles, drivers, officers, assignments, trips] = await Promise.all([
+  // Current assignments travel with the screen; the history is searched on demand.
+  const [vehicles, drivers, officers, assignments, pastAssignments, trips] = await Promise.all([
     listVehicles(),
     listDrivers(),
     listOfficers(),
-    listAssignments(),
+    listCurrentAssignments(),
+    countPastAssignments(),
     listTripOptions(),
   ]);
 
@@ -42,8 +45,9 @@ export default async function TaskAssignmentPage() {
         drivers,
         officers,
         assignments,
+        pastAssignments,
         trips,
-        stats: computeStats({ trips, assignments, vehicles, drivers, officers }),
+        stats: computeStats({ trips, assignments, pastAssignments, vehicles, drivers, officers }),
       }}
     />
   );

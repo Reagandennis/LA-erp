@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import ShowMoreButton from '@/app/ui/show-more-button';
+import React, { useEffect, useRef, useState } from 'react';
 
 import type { CustomerOption } from '@/lib/contacts';
 import { RISK_LEVELS, TRAVELER_STATUSES } from '@/lib/traveler-options';
-import type { TravelerSummary } from '@/lib/travelers';
+import type { TravelerListItem, TravelerStats, TravelerSummary } from '@/lib/travelers';
 
 /**
  * Travellers are the people we protect. They belong to a client account rather
@@ -52,11 +53,52 @@ function daysUntil(iso: string | null): number | null {
 
 type Props = {
   isAdmin: boolean;
-  initialItems: TravelerSummary[];
+  /** The first page, unfiltered; later pages and searches come from /api/travelers. */
+  initialItems: TravelerListItem[];
+  initialTotal: number;
+  initialStats: TravelerStats;
+  pageSize: number;
   initialCustomers: CustomerOption[];
   /** Traveller to open on arrival, from a `?open=<id>` link. */
   initialOpenId?: number | null;
 };
+
+type ListQuery = { q: string; risk: string; status: string };
+
+type PageResponse = {
+  items: TravelerListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  stats: TravelerStats;
+};
+
+const SEARCH_DEBOUNCE_MS = 300;
+
+function listUrl(query: ListQuery, page: number, pageSize: number): string {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (query.q.trim()) params.set('q', query.q.trim());
+  if (query.risk !== 'All') params.set('risk', query.risk);
+  if (query.status !== 'All') params.set('status', query.status);
+  return `/api/travelers?${params.toString()}`;
+}
+
+/** The list row for a record that was just created or edited. */
+function toListItem(t: TravelerSummary): TravelerListItem {
+  return {
+    id: t.id,
+    name: t.name,
+    email: t.email,
+    phone: t.phone,
+    nationality: t.nationality,
+    passportExpiry: t.passportExpiry,
+    status: t.status,
+    riskLevel: t.riskLevel,
+    hasPhoto: t.hasPhoto,
+    customer: t.customer,
+    tripCount: t.tripCount,
+  };
+}
 
 type Form = {
   name: string;
@@ -82,15 +124,31 @@ const EMPTY_FORM: Form = {
   dietaryNotes: '', medicalNotes: '', emergencyContactName: '', emergencyContactPhone: '', notes: '',
 };
 
-export default function TravelersClient({ isAdmin, initialItems, initialCustomers, initialOpenId = null }: Props) {
-  const [items, setItems] = useState<TravelerSummary[]>(initialItems);
+export default function TravelersClient({
+  isAdmin,
+  initialItems,
+  initialTotal,
+  initialStats,
+  pageSize,
+  initialCustomers,
+  initialOpenId = null,
+}: Props) {
+  const [items, setItems] = useState<TravelerListItem[]>(initialItems);
+  const [total, setTotal] = useState(initialTotal);
+  const [stats, setStats] = useState<TravelerStats>(initialStats);
   const [customers] = useState<CustomerOption[]>(initialCustomers);
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
-  const [selectedId, setSelectedId] = useState<number | null>(() =>
-    initialOpenId !== null && initialItems.some((i) => i.id === initialOpenId) ? initialOpenId : null,
-  );
+  const [page, setPage] = useState(1);
+  const [listLoading, setListLoading] = useState(false);
+  const [moreLoading, setMoreLoading] = useState(false);
+
+  // The card that is open, and its full record (the list only carries what
+  // the cards show). `detail` lags `selectedId` while it loads.
+  const [selectedId, setSelectedId] = useState<number | null>(initialOpenId);
+  const [detail, setDetail] = useState<TravelerSummary | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -104,87 +162,139 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
   // A new `?open=` link while we're already here re-renders with a new prop but
   // doesn't remount, so open that traveller now (adjusted during render). Any
   // open form is dismissed first, as Cancel would, so an edit can never be saved
-  // onto the newly selected record. An id we don't have yet (added since this
-  // list loaded) waits for one reload below; if it still isn't there, it's ignored.
+  // onto the newly selected record.
   const [openId, setOpenId] = useState(initialOpenId);
-  const [pendingOpenId, setPendingOpenId] = useState<number | null>(null);
   if (openId !== initialOpenId) {
     setOpenId(initialOpenId);
-    if (initialOpenId !== null && items.some((i) => i.id === initialOpenId)) {
+    if (initialOpenId !== null) {
       setFormOpen(false);
       setSelectedId(initialOpenId);
-      setPendingOpenId(null);
-    } else {
-      setPendingOpenId(initialOpenId);
     }
   }
 
+  const query: ListQuery = { q: search, risk: riskFilter, status: statusFilter };
+  const queryKey = `${search.trim()}\u0000${riskFilter}\u0000${statusFilter}`;
+  // The first page of the unfiltered list arrived with the page; only a
+  // changed search or filter has to go to the server.
+  const loadedQueryKey = useRef(`\u0000All\u0000All`);
+  const requestSeq = useRef(0);
+
   useEffect(() => {
-    if (pendingOpenId === null) return;
-    let cancelled = false;
-    void (async () => {
-      let fresh: TravelerSummary[] | null = null;
-      try {
-        const res = await fetch('/api/travelers', { credentials: 'include' });
-        const data = res.ok ? await res.json() : null;
-        if (Array.isArray(data?.items)) fresh = data.items as TravelerSummary[];
-      } catch {
-        /* keep current data on transient failure */
-      }
-      if (cancelled) return;
-      if (fresh) {
-        setItems(fresh);
-        if (fresh.some((i) => i.id === pendingOpenId)) {
-          setFormOpen(false);
-          setSelectedId(pendingOpenId);
+    if (queryKey === loadedQueryKey.current) return;
+    const seq = ++requestSeq.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setListLoading(true);
+        try {
+          const res = await fetch(listUrl(query, 1, pageSize), { credentials: 'include', cache: 'no-store' });
+          if (!res.ok) return;
+          const data = (await res.json()) as PageResponse;
+          if (seq !== requestSeq.current) return; // a newer keystroke won
+          loadedQueryKey.current = queryKey;
+          setItems(data.items);
+          setTotal(data.total);
+          setStats(data.stats);
+          setPage(1);
+        } catch {
+          /* keep current data on transient failure */
+        } finally {
+          if (seq === requestSeq.current) setListLoading(false);
         }
-      }
-      setPendingOpenId(null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingOpenId]);
+      })();
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+    // `query` is derived from the three pieces of state that make up queryKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey, pageSize]);
 
-  const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
-
+  /** Reload the current search from the first page (after a create or delete). */
   const refresh = async () => {
+    const seq = ++requestSeq.current;
     try {
-      const res = await fetch('/api/travelers', { credentials: 'include' });
+      const res = await fetch(listUrl(query, 1, pageSize), { credentials: 'include', cache: 'no-store' });
       if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data.items)) setItems(data.items as TravelerSummary[]);
+      const data = (await res.json()) as PageResponse;
+      if (seq !== requestSeq.current) return;
+      loadedQueryKey.current = queryKey;
+      setItems(data.items);
+      setTotal(data.total);
+      setStats(data.stats);
+      setPage(1);
     } catch {
       /* keep current data on transient failure */
     }
   };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((t) => {
-      if (riskFilter !== 'All' && t.riskLevel !== riskFilter) return false;
-      if (statusFilter !== 'All' && t.status !== statusFilter) return false;
-      if (!q) return true;
-      return [t.name, t.email, t.phone, t.nationality, t.customer?.name, t.customer?.company]
-        .filter(Boolean)
-        .some((f) => String(f).toLowerCase().includes(q));
-    });
-  }, [items, search, riskFilter, statusFilter]);
+  const showMore = async () => {
+    if (moreLoading) return;
+    setMoreLoading(true);
+    try {
+      const res = await fetch(listUrl(query, page + 1, pageSize), { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) return;
+      const data = (await res.json()) as PageResponse;
+      setItems((current) => {
+        const seen = new Set(current.map((t) => t.id));
+        return [...current, ...data.items.filter((t) => !seen.has(t.id))];
+      });
+      setTotal(data.total);
+      setPage(data.page);
+    } catch {
+      /* keep current data on transient failure */
+    } finally {
+      setMoreLoading(false);
+    }
+  };
 
-  const stats = [
-    { label: 'Total travellers', value: items.length },
-    { label: 'Active', value: items.filter((t) => t.status === 'Active').length },
-    { label: 'Elevated / high risk', value: items.filter((t) => t.riskLevel !== 'Standard').length },
-    {
-      label: 'Passport expiring',
-      value: items.filter((t) => {
-        const d = daysUntil(t.passportExpiry);
-        return d !== null && d <= 180;
-      }).length,
-    },
+  // Fetch the full record whenever a different card is opened.
+  useEffect(() => {
+    if (selectedId === null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/travelers/${selectedId}`, { credentials: 'include', cache: 'no-store' });
+        if (cancelled) return;
+        if (!res.ok) {
+          setDetail(null);
+          setDetailError(res.status === 404 ? 'This traveller no longer exists.' : "This traveller couldn't be loaded.");
+          return;
+        }
+        const data = (await res.json()) as { item: TravelerSummary };
+        if (cancelled) return;
+        setDetail(data.item);
+        setDetailError(null);
+      } catch {
+        if (!cancelled) setDetailError("This traveller couldn't be loaded.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  const selected = detail && detail.id === selectedId ? detail : null;
+  const detailLoading = selectedId !== null && selected === null && detailError === null;
+
+  const closeDetail = () => {
+    setSelectedId(null);
+    setDetailError(null);
+  };
+
+  /** A saved record: the drawer shows it and its list row catches up. */
+  const applySaved = (t: TravelerSummary) => {
+    setDetail(t);
+    setItems((current) => current.map((row) => (row.id === t.id ? toListItem(t) : row)));
+  };
+
+  const hiddenCount = Math.max(0, total - items.length);
+
+  const statTiles = [
+    { label: 'Total travellers', value: stats.total },
+    { label: 'Active', value: stats.active },
+    { label: 'Elevated / high risk', value: stats.elevatedRisk },
+    { label: 'Passport expiring', value: stats.passportExpiring },
   ];
 
-  const photoUrl = (t: TravelerSummary) =>
+  const photoUrl = (t: { id: number }) =>
     `/api/travelers/${t.id}/photo${photoVersion[t.id] ? `?v=${photoVersion[t.id]}` : ''}`;
 
   const openCreate = () => {
@@ -236,6 +346,8 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
       return;
     }
     setPhotoVersion((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+    setItems((current) => current.map((row) => (row.id === id ? { ...row, hasPhoto: true } : row)));
+    setDetail((current) => (current && current.id === id ? { ...current, hasPhoto: true } : current));
   };
 
   const submitForm = async (e: React.FormEvent) => {
@@ -275,7 +387,12 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
           setBusy(false);
           return;
         }
+        if (payload?.item) applySaved(payload.item as TravelerSummary);
         if (pendingPhoto) await uploadPhoto(selectedId, pendingPhoto);
+        // Risk or status may have moved between stat tiles.
+        await refresh();
+        setFormOpen(false);
+        return;
       } else {
         const res = await fetch('/api/travelers', {
           method: 'POST', credentials: 'include',
@@ -304,7 +421,7 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
     try {
       const res = await fetch(`/api/travelers/${id}`, { method: 'DELETE', credentials: 'include' });
       if (res.ok) {
-        setSelectedId(null);
+        closeDetail();
         await refresh();
       }
     } finally {
@@ -333,7 +450,7 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-          {stats.map((s) => (
+          {statTiles.map((s) => (
             <div key={s.label} className="bg-white p-4 rounded-2xl border border-gray-100">
               <p className="text-xs text-gray-400 mb-1">{s.label}</p>
               <p className="text-xl font-semibold text-gray-900">{s.value}</p>
@@ -367,18 +484,22 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
         </div>
 
         {/* Grid */}
-        {filtered.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
-            <p className="text-gray-900 font-medium">{items.length === 0 ? 'No travellers yet' : 'No matching travellers'}</p>
+        {items.length === 0 ? (
+          <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200" aria-busy={listLoading}>
+            <p className="text-gray-900 font-medium">
+              {listLoading ? 'Searching…' : stats.total === 0 ? 'No travellers yet' : 'No matching travellers'}
+            </p>
             <p className="text-gray-500 text-sm mt-1">
-              {items.length === 0
-                ? (isAdmin ? 'Add the first person you are protecting.' : 'No travellers have been added yet.')
-                : 'Try a different search or filter.'}
+              {listLoading
+                ? ''
+                : stats.total === 0
+                  ? (isAdmin ? 'Add the first person you are protecting.' : 'No travellers have been added yet.')
+                  : 'Try a different search or filter.'}
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.map((t) => {
+          <div className={`grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 transition-opacity ${listLoading ? 'opacity-60' : ''}`} aria-busy={listLoading}>
+            {items.map((t) => {
               const passportDays = daysUntil(t.passportExpiry);
               return (
                 <button key={t.id} onClick={() => setSelectedId(t.id)} className="text-left bg-white rounded-2xl p-5 border border-gray-100 hover:border-[#03458f]/40 hover:shadow-sm transition-all">
@@ -409,22 +530,43 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
             })}
           </div>
         )}
+        <ShowMoreButton hiddenCount={hiddenCount} onShowMore={() => void showMore()} noun="travellers" />
       </div>
 
       {/* Detail drawer */}
-      {selected && (
+      {selectedId !== null && (
         <>
-          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={() => setSelectedId(null)} />
+          <div className="fixed inset-0 bg-gray-900/20 backdrop-blur-sm z-[220]" onClick={closeDetail} />
           <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-[230] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
               <h2 className="text-lg font-semibold text-gray-900">Traveller details</h2>
-              <button onClick={() => setSelectedId(null)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
+              <button onClick={closeDetail} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
+            {detailLoading && (
+              <div className="p-6 animate-pulse space-y-4" aria-busy="true">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-xl bg-gray-100" />
+                  <div className="space-y-2">
+                    <div className="h-5 w-40 rounded bg-gray-100" />
+                    <div className="h-4 w-28 rounded bg-gray-100" />
+                  </div>
+                </div>
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div key={i} className="h-4 w-full rounded bg-gray-100" />
+                ))}
+                <span className="sr-only">Loading…</span>
+              </div>
+            )}
+            {detailError && (
+              <div className="m-6 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-700">{detailError}</div>
+            )}
+
+            {selected && (
             <div className="p-6 flex-1 space-y-6">
               <div className="flex items-center gap-4">
                 <Avatar name={selected.name} src={selected.hasPhoto ? photoUrl(selected) : null} size={64} />
@@ -473,8 +615,9 @@ export default function TravelersClient({ isAdmin, initialItems, initialCustomer
                 </div>
               )}
             </div>
+            )}
 
-            {isAdmin && (
+            {isAdmin && selected && (
               <div className="p-6 border-t border-gray-100 sticky bottom-0 bg-white flex gap-3">
                 <button onClick={() => remove(selected.id)} disabled={busy} className="px-4 py-2.5 rounded-xl border border-rose-200 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">
                   Delete

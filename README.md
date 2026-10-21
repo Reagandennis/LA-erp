@@ -509,6 +509,23 @@ npm run test
 
 Tests live in `tests/` and run on Vitest.
 
+### Navigation performance budget
+
+`npm run perf` drives a headless browser through the main screens of a running
+app and fails when a navigation is slower than its budget (default 1.5 s to
+content). It is what `.github/workflows/perf.yml` runs on every pull request
+against the demo data. Locally:
+
+```bash
+npm i --no-save playwright@1.58.2 && npx playwright install chromium
+BASE_URL=http://127.0.0.1:3100 BENCH_EMAIL=... BENCH_PASSWORD=... \
+  npm run perf -- --latency 170 --runs 3
+```
+
+`--latency` adds a simulated round trip so the numbers reflect a user far from
+the server. Slow database statements (over 200 ms) are logged by PostgreSQL to
+its own log; check it before adding indexes.
+
 ---
 
 ## Deployment

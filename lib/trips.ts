@@ -102,11 +102,13 @@ export interface TripSummary {
   reference: string;
   trackingCode: string;
   title: string;
+  /** Null in list responses: the long text is only loaded with a trip's detail. */
   description: string | null;
   status: TripStatus;
   currency: string;
   startDate: string | null;
   endDate: string | null;
+  /** Null in list responses, like `description`. */
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -169,7 +171,11 @@ interface TripRecord {
 }
 
 /** What the list query returns: counts in place of the itinerary. */
-type TripListRecord = Omit<TripRecord, 'items' | 'days'> & { items?: undefined };
+type TripListRecord = Omit<TripRecord, 'items' | 'days' | 'description' | 'notes'> & {
+  items?: undefined;
+  description?: string | null;
+  notes?: string | null;
+};
 
 interface TripDayRecord {
   id: number;
@@ -249,7 +255,12 @@ const tripInclude = {
   _count: { select: { assignments: true, logEntries: true } },
 };
 
-/** The list needs counts only; a FileMaker-sized history has thousands of stops. */
+/**
+ * The list needs counts only; a FileMaker-sized history has thousands of stops.
+ * Its long text (description, notes: ~800 KB across the imported trips) stays
+ * on the detail page, so a list row is a few hundred bytes.
+ */
+const tripListOmit = { description: true, notes: true } as const;
 const tripListInclude = {
   customer: tripInclude.customer,
   travelers: tripInclude.travelers,
@@ -263,6 +274,7 @@ type TripCollectionClient = {
   findMany: (args: {
     where?: unknown;
     include?: typeof tripInclude | typeof tripListInclude;
+    omit?: typeof tripListOmit;
     orderBy?: Array<{ createdAt?: 'asc' | 'desc'; updatedAt?: 'asc' | 'desc' }>;
   }) => Promise<Array<TripRecord | TripListRecord>>;
   findUnique: (args: { where: { id: number }; include?: typeof tripInclude }) => Promise<TripRecord | null>;
@@ -487,12 +499,12 @@ function serializeSummary(record: TripRecord | TripListRecord): TripSummary {
     reference: record.reference,
     trackingCode: record.trackingCode,
     title: record.title,
-    description: record.description,
+    description: record.description ?? null,
     status: record.status as TripStatus,
     currency: record.currency,
     startDate: record.startDate?.toISOString() ?? null,
     endDate: record.endDate?.toISOString() ?? null,
-    notes: record.notes,
+    notes: record.notes ?? null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     customer: record.customer,
@@ -557,9 +569,99 @@ export async function listTripsForUser(params: {
   const records = await tripClient.findMany({
     where: buildAccessFilter(params.userId, params.isAdmin),
     include: tripListInclude,
+    omit: tripListOmit,
     orderBy: [{ updatedAt: 'desc' }],
   });
   return records.map(serializeSummary);
+}
+
+export const TRIP_PAGE_SIZE = 50;
+export const TRIP_PAGE_SIZE_MAX = 200;
+
+export interface TripSearchInput {
+  userId: number;
+  isAdmin: boolean;
+  /** Free text over reference, tracking code, title, client and traveller names. */
+  q?: string | null;
+  status?: TripStatus | null;
+  /** 1-based. */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface TripPage {
+  trips: TripSummary[];
+  /** Rows matching the search and status filter, across all pages. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** The list's filter: the viewer's access, then the status pill, then the search box. */
+export function buildTripSearchWhere(params: Pick<TripSearchInput, 'userId' | 'isAdmin' | 'q' | 'status'>): Prisma.TripWhereInput {
+  const and: Prisma.TripWhereInput[] = [buildAccessFilter(params.userId, params.isAdmin)];
+  if (params.status) and.push({ status: params.status });
+  const q = params.q?.trim();
+  if (q) {
+    const contains = { contains: q, mode: 'insensitive' as const };
+    and.push({
+      OR: [
+        { reference: contains },
+        { trackingCode: contains },
+        { title: contains },
+        { customer: { name: contains } },
+        { customer: { company: contains } },
+        { travelers: { some: { traveler: { name: contains } } } },
+      ],
+    });
+  }
+  return { AND: and };
+}
+
+export function normalizeTripPaging(params: Pick<TripSearchInput, 'page' | 'pageSize'>): { page: number; pageSize: number } {
+  const page = Number.isInteger(params.page) && (params.page as number) > 0 ? (params.page as number) : 1;
+  const requested = Number.isInteger(params.pageSize) && (params.pageSize as number) > 0 ? (params.pageSize as number) : TRIP_PAGE_SIZE;
+  return { page, pageSize: Math.min(requested, TRIP_PAGE_SIZE_MAX) };
+}
+
+/**
+ * One page of the trips list, searched and filtered in the database. The
+ * full list (`listTripsForUser`) stays for reports and other whole-table
+ * readers; the screen itself only ever needs a page.
+ */
+export async function searchTrips(params: TripSearchInput): Promise<TripPage> {
+  const { page, pageSize } = normalizeTripPaging(params);
+  const where = buildTripSearchWhere(params);
+  const [records, total] = await Promise.all([
+    prisma.trip.findMany({
+      where,
+      include: tripListInclude,
+      omit: tripListOmit,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.trip.count({ where }),
+  ]);
+  return { trips: records.map((record) => serializeSummary(record as TripListRecord)), total, page, pageSize };
+}
+
+export type TripStatusCounts = Record<TripStatus, number> & { total: number };
+
+/** How many trips the viewer has in each status, for the list's summary cards. */
+export async function countTripsByStatus(userId: number, isAdmin: boolean): Promise<TripStatusCounts> {
+  const rows = await prisma.trip.groupBy({
+    by: ['status'],
+    where: buildAccessFilter(userId, isAdmin),
+    _count: { _all: true },
+  });
+  const counts: TripStatusCounts = { Draft: 0, Planned: 0, Active: 0, Completed: 0, Cancelled: 0, total: 0 };
+  for (const row of rows) {
+    const status = row.status as TripStatus;
+    if (status in counts) counts[status] = row._count._all;
+    counts.total += row._count._all;
+  }
+  return counts;
 }
 
 export async function getTripForUser(params: {

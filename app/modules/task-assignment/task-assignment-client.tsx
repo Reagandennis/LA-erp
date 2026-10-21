@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import {
   ASSIGNMENT_STATUSES,
@@ -180,6 +180,7 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
   ];
 
   const q = search.trim().toLowerCase();
+  const assignmentView = useAssignmentSearch(data, q, tab === 'dashboard' || tab === 'assignments');
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 lg:p-10">
@@ -249,7 +250,7 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
           />
         </div>
 
-        {tab === 'dashboard' && <Dashboard data={data} q={q} />}
+        {tab === 'dashboard' && <Dashboard data={data} view={assignmentView} q={q} />}
 
         {error && (
           <div className="mb-4 flex items-start gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-700">
@@ -267,7 +268,7 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
 
         {tab === 'assignments' && (
           <AssignmentList
-            data={data}
+            view={assignmentView}
             q={q}
             busy={busy}
             send={send}
@@ -324,29 +325,76 @@ type PhotoHandler = (id: number, file: File) => void;
 
 type Sender = (url: string, method: 'POST' | 'PATCH' | 'DELETE', body?: unknown) => Promise<boolean>;
 
-const CURRENT_STATUSES = new Set(['Planned', 'Confirmed', 'Active']);
 
-/**
- * Completed and cancelled assignments (years of them, from FileMaker) stay out
- * of view until searched for; a search covers the whole history.
- */
-function visibleAssignments(all: AssignmentSummary[], q: string): AssignmentSummary[] {
-  return all.filter((a) => {
-    if (!q) return CURRENT_STATUSES.has(a.status);
-    const hay = [a.trip?.reference, a.trip?.title, a.trip?.customerName, a.vehicle?.registration, a.driver?.name, a.officer?.name]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    return hay.includes(q);
-  });
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** The assignments the Dashboard and Assignments tabs show, and where they came from. */
+interface AssignmentView {
+  items: AssignmentSummary[];
+  /** A search is typed but its results haven't arrived yet. */
+  searching: boolean;
+  error: string | null;
+  /** Completed and cancelled assignments not loaded with the screen. */
+  past: number;
 }
 
-function PastAssignmentsHint({ all, q }: { all: AssignmentSummary[]; q: string }) {
-  const past = all.filter((a) => !CURRENT_STATUSES.has(a.status)).length;
-  if (q || past === 0) return null;
+/**
+ * Completed and cancelled assignments (years of them, from FileMaker) never
+ * travel with the screen: without a search the current ones show, and a
+ * search (after a typing pause) asks the server to look through the history.
+ */
+function useAssignmentSearch(data: TaskAssignmentData, q: string, enabled: boolean): AssignmentView {
+  const [settled, setSettled] = useState('');
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSettled(q), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+
+  const [result, setResult] = useState<{ q: string; data: TaskAssignmentData; items: AssignmentSummary[] } | null>(null);
+  const [failure, setFailure] = useState<{ q: string; message: string } | null>(null);
+  const active = enabled && settled.length > 0;
+  // Results belong to a search term and the data they were fetched alongside;
+  // a reload after a save fetches them again.
+  const fresh = result !== null && result.q === settled && result.data === data;
+  const failed = failure?.q === settled;
+
+  useEffect(() => {
+    if (!active || fresh || failed) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/task-assignment/assignments?q=${encodeURIComponent(settled)}`, {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const payload = (await r.json()) as { items: AssignmentSummary[] };
+        if (!cancelled) setResult({ q: settled, data, items: payload.items });
+      } catch {
+        if (!cancelled) setFailure({ q: settled, message: "The search couldn't be run. Try again." });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, fresh, failed, settled, data]);
+
+  if (!q) return { items: data.assignments, searching: false, error: null, past: data.pastAssignments };
+  return {
+    items: fresh ? result.items : (result?.items ?? []),
+    searching: !fresh && !failed,
+    error: failed ? failure.message : null,
+    past: data.pastAssignments,
+  };
+}
+
+function PastAssignmentsHint({ view, q }: { view: AssignmentView; q: string }) {
+  if (view.error) return <p className="mb-3 text-xs text-rose-600">{view.error}</p>;
+  if (q) return view.searching ? <p className="mb-3 text-xs text-gray-400">Searching all assignments…</p> : null;
+  if (view.past === 0) return null;
   return (
     <p className="mb-3 text-xs text-gray-400">
-      Showing current assignments. Search to find {past.toLocaleString()} past ones.
+      Showing current assignments. Search to find {view.past.toLocaleString()} past ones.
     </p>
   );
 }
@@ -485,21 +533,21 @@ function PhotoThumb({
 // --- Assignments -----------------------------------------------------------
 
 function AssignmentList({
-  data,
+  view,
   q,
   busy,
   send,
   onEdit,
 }: {
-  data: TaskAssignmentData;
+  view: AssignmentView;
   q: string;
   busy: boolean;
   send: Sender;
   onEdit: (a: AssignmentSummary) => void;
 }) {
-  const items = visibleAssignments(data.assignments, q);
+  const items = view.items;
 
-  const hint = <PastAssignmentsHint all={data.assignments} q={q} />;
+  const hint = <PastAssignmentsHint view={view} q={q} />;
   if (items.length === 0) {
     return (
       <>
@@ -1055,17 +1103,17 @@ function PhotoField({ label, file, onChange }: { label: string; file: File | nul
 
 // --- Dashboard: resources flowing into their trip --------------------------
 
-function Dashboard({ data, q }: { data: TaskAssignmentData; q: string }) {
+function Dashboard({ data, view, q }: { data: TaskAssignmentData; view: AssignmentView; q: string }) {
   const vById = new Map(data.vehicles.map((v) => [v.id, v]));
   const dById = new Map(data.drivers.map((d) => [d.id, d]));
   const oById = new Map(data.officers.map((o) => [o.id, o]));
 
-  const items = visibleAssignments(data.assignments, q);
+  const items = view.items;
 
   if (items.length === 0) {
     return (
       <>
-        <PastAssignmentsHint all={data.assignments} q={q} />
+        <PastAssignmentsHint view={view} q={q} />
         <EmptyState label={q ? 'matching assignments' : 'current assignments to visualise'} />
       </>
     );

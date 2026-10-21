@@ -4,7 +4,8 @@ import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
 import {
   computeStats,
-  listAssignments,
+  countPastAssignments,
+  listCurrentAssignments,
   listDrivers,
   listOfficers,
   listTripOptions,
@@ -18,11 +19,13 @@ export async function GET(request: NextRequest) {
   const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.vehicles);
   if (response || !auth) return response;
 
-  const [vehicles, drivers, officers, assignments, trips] = await Promise.all([
+  // Current assignments travel with the screen; the history is searched on demand.
+  const [vehicles, drivers, officers, assignments, pastAssignments, trips] = await Promise.all([
     listVehicles(),
     listDrivers(),
     listOfficers(),
-    listAssignments(),
+    listCurrentAssignments(),
+    countPastAssignments(),
     listTripOptions(),
   ]);
 
@@ -31,7 +34,8 @@ export async function GET(request: NextRequest) {
     drivers,
     officers,
     assignments,
+    pastAssignments,
     trips,
-    stats: computeStats({ trips, assignments, vehicles, drivers, officers }),
+    stats: computeStats({ trips, assignments, pastAssignments, vehicles, drivers, officers }),
   });
 }

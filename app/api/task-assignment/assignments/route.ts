@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
-import { createAssignment, ResourceConflictError } from '@/lib/task-assignment';
+import { createAssignment, ResourceConflictError, searchAssignments } from '@/lib/task-assignment';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -10,6 +10,16 @@ export const revalidate = 0;
 function optionalId(value: unknown): number | null {
   if (typeof value !== 'number') return null;
   return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/** Searches the whole assignment history (`?q=`), newest first, at most 100 rows. */
+export async function GET(request: NextRequest) {
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.vehicles);
+  if (response || !auth) return response;
+
+  const q = (request.nextUrl.searchParams.get('q') ?? '').trim().slice(0, 200);
+  if (!q) return NextResponse.json({ error: 'A search term is required' }, { status: 400 });
+  return NextResponse.json({ items: await searchAssignments(q) });
 }
 
 export async function POST(request: NextRequest) {

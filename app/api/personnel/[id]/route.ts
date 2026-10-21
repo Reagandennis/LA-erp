@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { deletePersonnel, updatePersonnel } from '@/lib/personnel';
-import { requireAdminRequest } from '@/lib/request-auth';
+import { PEOPLE_MODULE_SLUGS } from '@/lib/people-views';
+import { deletePersonnel, getPersonnelById, updatePersonnel } from '@/lib/personnel';
+import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -9,6 +10,20 @@ export const revalidate = 0;
 function parseId(value: string) {
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** The full record for the detail drawer; the list carries only what its cards show. */
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { auth, response } = await requireModuleRequest(request, ...PEOPLE_MODULE_SLUGS);
+  if (response || !auth) return response;
+
+  const { id: raw } = await params;
+  const id = parseId(raw);
+  if (!id) return NextResponse.json({ error: 'Invalid personnel id' }, { status: 400 });
+
+  const item = await getPersonnelById(id);
+  if (!item) return NextResponse.json({ error: 'Personnel not found' }, { status: 404 });
+  return NextResponse.json({ item });
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

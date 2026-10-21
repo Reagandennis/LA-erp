@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { notifyNotificationsChanged } from '@/lib/notification-events';
 import { prisma } from '@/lib/prisma';
 import { broadcastToMembers } from '@/lib/chat-bus';
 
@@ -228,6 +229,7 @@ export async function markConversationRead(conversationId: number, userId: numbe
     where: { userId, conversationId, readAt: null },
     data: { readAt: new Date() },
   });
+  notifyNotificationsChanged(userId);
 
   // Tell the other members so their sent-message receipts update without a poll.
   const receipt: ReadReceipt = {
@@ -290,6 +292,7 @@ export async function sendMessage(
         message: `${senderName}: ${preview}`,
       })),
     });
+    notifyNotificationsChanged(recipientIds);
   }
 
   const summary: MessageSummary = {
@@ -350,5 +353,6 @@ export async function markMessageNotificationsRead(userId: number, ids: number[]
     where: { userId, id: { in: normalized } },
     data: { readAt: new Date() },
   });
+  if (result.count > 0) notifyNotificationsChanged(userId);
   return result.count;
 }

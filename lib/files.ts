@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { notifyNotificationsChanged } from '@/lib/notification-events';
 import { prisma } from '@/lib/prisma';
 
 export type ShareTarget = { id: number; name: string };
@@ -271,6 +272,7 @@ export async function shareFile(
       });
     }
     await prisma.fileNotification.createMany({ data: notifications });
+    notifyNotificationsChanged(notifications.map((n) => n.userId));
   }
 
   const row = await prisma.storedFile.findUnique({ where: { id }, select: SUMMARY_SELECT });
@@ -327,5 +329,6 @@ export async function markFileNotificationsRead(userId: number, ids: number[]): 
     where: { userId, id: { in: normalized } },
     data: { readAt: new Date() },
   });
+  if (result.count > 0) notifyNotificationsChanged(userId);
   return result.count;
 }

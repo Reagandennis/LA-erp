@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 
 import { startVisibleInterval } from '@/lib/visible-interval';
 
+import { subscribeServerEvents } from './messaging-alerts-store';
 import { dismissPushedToast, Toast, ToastStack, usePushedToasts } from './toast';
 import { useIsClient } from './use-client';
 
@@ -316,12 +317,31 @@ export default function NotificationsBell() {
     };
 
     void loadNotifications();
-    // Seven endpoints per tick, so only poll while the tab is actually visible.
-    const stopPolling = startVisibleInterval(() => void loadNotifications(), 10000);
+
+    // Pushed: the server says this user's feed changed (lib/notification-events),
+    // and `ready` fires on every (re)connect of the stream. A burst of either
+    // costs one refetch per second at most.
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const refreshSoon = () => {
+      pending ??= setTimeout(() => {
+        pending = null;
+        void loadNotifications();
+      }, 1000);
+    };
+    const unsubscribeChanged = subscribeServerEvents('notifications', refreshSoon);
+    const unsubscribeReady = subscribeServerEvents('ready', refreshSoon);
+
+    // Fallback for a stream that is down longer than the browser's retry, and
+    // for reminders the feed materializes itself (trip, calendar). Seven
+    // queries per tick, so only while the tab is visible.
+    const stopPolling = startVisibleInterval(() => void loadNotifications(), 60_000);
 
     return () => {
       isActive = false;
+      unsubscribeChanged();
+      unsubscribeReady();
       stopPolling();
+      if (pending) clearTimeout(pending);
     };
   }, []);
 

@@ -108,3 +108,34 @@ export function updateAlertSettings(patch: Partial<AlertSettings>): void {
 export function useAlertSettings(): AlertSettings {
   return useSyncExternalStore(subscribeSettings, getAlertSettings, () => DEFAULT_SETTINGS);
 }
+
+// --- The server event stream (one connection per tab) ----------------------
+
+type ServerEventHandler = (event: MessageEvent) => void;
+
+/**
+ * The app's per-user Server-Sent Events connection (`/api/messaging/stream`,
+ * which the in-process bus feeds with messaging *and* notification events).
+ * Opened by the first subscriber, shared by every component on the page, and
+ * closed when the last one unsubscribes, so a tab never holds two streams.
+ * The browser reconnects a dropped stream itself and re-emits `ready`.
+ */
+let eventSource: EventSource | null = null;
+let eventSubscribers = 0;
+
+export function subscribeServerEvents(type: string, handler: ServerEventHandler): () => void {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return () => {};
+  eventSource ??= new EventSource('/api/messaging/stream', { withCredentials: true });
+  const source = eventSource;
+  eventSubscribers += 1;
+  source.addEventListener(type, handler as EventListener);
+  return () => {
+    source.removeEventListener(type, handler as EventListener);
+    eventSubscribers -= 1;
+    if (eventSubscribers <= 0 && eventSource === source) {
+      eventSubscribers = 0;
+      source.close();
+      eventSource = null;
+    }
+  };
+}

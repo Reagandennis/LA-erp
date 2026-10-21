@@ -73,7 +73,10 @@ export type TaskAssignmentData = {
   vehicles: VehicleSummary[];
   drivers: DriverSummary[];
   officers: OfficerSummary[];
+  /** Current (planned, confirmed, active) assignments only. */
   assignments: AssignmentSummary[];
+  /** Completed and cancelled assignments, searchable via GET /api/task-assignment/assignments?q=. */
+  pastAssignments: number;
   trips: TripOption[];
   stats: TaskAssignmentStats;
 };

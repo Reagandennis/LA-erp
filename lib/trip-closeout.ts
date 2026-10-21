@@ -76,6 +76,16 @@ function serializeCloseout(row: {
   };
 }
 
+/**
+ * How many completed trips still await close-out: the badge on the Trips
+ * screen's tab, so the screen can open without loading the whole close-out list.
+ */
+export async function countPendingCloseouts(): Promise<number> {
+  return prisma.trip.count({
+    where: { status: 'Completed', OR: [{ closeout: null }, { closeout: { closedAt: null } }] },
+  });
+}
+
 export async function listCloseoutTrips(user: AccessUser): Promise<CloseoutTripDto[]> {
   const isAdmin = userHasRole(user, ADMIN_ROLE_NAME);
   const canPlan = isAdmin || userHasModule(user, 'trip-planning');

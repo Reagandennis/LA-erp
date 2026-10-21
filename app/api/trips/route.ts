@@ -6,20 +6,47 @@ import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
 import { canSeeTripCosts, tripForViewer } from '@/lib/trip-costs';
-import { TripTravelerError, createTrip, listTripsForUser } from '@/lib/trips';
+import { TRIP_PAGE_SIZE_MAX, TRIP_STATUSES, TripTravelerError, createTrip, listTripsForUser, searchTrips, type TripStatus } from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripCreateSchema } from '@/lib/validation';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+const SEARCH_PARAMS = ['q', 'status', 'page', 'pageSize'] as const;
+
+const tripSearchQuerySchema = z.object({
+  q: z.string().trim().max(200).optional(),
+  status: z.enum(TRIP_STATUSES as [TripStatus, ...TripStatus[]]).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(TRIP_PAGE_SIZE_MAX).optional(),
+});
+
+/**
+ * With `q`, `status`, `page` or `pageSize` the response is one page
+ * (`{ trips, total, page, pageSize }`); with none it is the whole list
+ * (`{ trips }`), which other screens still read.
+ */
 export async function GET(request: NextRequest) {
   const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.trips);
   if (response || !auth) return response;
 
   const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
-  const trips = await listTripsForUser({ userId: auth.user.id, isAdmin });
-  return NextResponse.json({ trips });
+  const searchParams = request.nextUrl.searchParams;
+  if (!SEARCH_PARAMS.some((key) => searchParams.has(key))) {
+    const trips = await listTripsForUser({ userId: auth.user.id, isAdmin });
+    return NextResponse.json({ trips });
+  }
+
+  const validation = tripSearchQuerySchema.safeParse(
+    Object.fromEntries(SEARCH_PARAMS.flatMap((key) => (searchParams.has(key) ? [[key, searchParams.get(key)]] : []))),
+  );
+  if (!validation.success) {
+    return NextResponse.json({ error: validation.error.issues[0]?.message ?? 'Invalid query' }, { status: 400 });
+  }
+  const page = await searchTrips({ userId: auth.user.id, isAdmin, ...validation.data });
+  return NextResponse.json(page);
 }
 
 export async function POST(request: NextRequest) {
