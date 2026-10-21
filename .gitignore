@@ -50,3 +50,4 @@ quickbook.txt
 
 # ...but keep the committed template
 !.env.example
+.admin-credentials
