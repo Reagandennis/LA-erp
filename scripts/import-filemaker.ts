@@ -3,12 +3,18 @@
  *
  *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/import-filemaker.ts <export folder> --dry-run
  *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/import-filemaker.ts <export folder> --wipe
+ *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/import-filemaker.ts <export folder> --append
  *
  * --dry-run  maps everything and prints what would be written; touches nothing.
- * --wipe     first deletes all data except admin accounts, the WhatsApp/messaging
- *            mirror and app settings (roles, modules, brand profiles, public
- *            holidays, AI/backup/upload settings). It takes no backup itself:
- *            run pg_dump first.
+ * --append   imports into the database as it is, deleting nothing. Refuses to
+ *            run unless the tables it writes (customers, travellers, personnel,
+ *            vehicles, trips) are empty, so it cannot collide with existing
+ *            references or tracking codes.
+ * --wipe     first deletes all data except user accounts (with their roles,
+ *            module access and sessions), the WhatsApp/messaging mirror and app
+ *            settings (roles, modules, brand profiles, public holidays,
+ *            AI/backup/upload settings). It takes no backup itself: run pg_dump
+ *            first.
  *
  * FileMaker → app:
  *   client → Customer (+ Contact for its POCs, CrmActivity notes)
@@ -34,8 +40,9 @@ const args = process.argv.slice(2);
 const exportDir = args.find((a) => !a.startsWith('--'));
 const DRY_RUN = args.includes('--dry-run');
 const WIPE = args.includes('--wipe');
-if (!exportDir || (!DRY_RUN && !WIPE)) {
-  console.error('Usage: import-filemaker.ts <export folder> (--dry-run | --wipe)');
+const APPEND = args.includes('--append');
+if (!exportDir || [DRY_RUN, WIPE, APPEND].filter(Boolean).length !== 1) {
+  console.error('Usage: import-filemaker.ts <export folder> (--dry-run | --wipe | --append)');
   process.exit(1);
 }
 
@@ -452,7 +459,7 @@ const KEEP_TABLES = new Set([
   'ExchangeRateSnapshot',
   'RateLimitBucket',
 ]);
-/** Trimmed to the kept admin accounts rather than emptied. */
+/** Trimmed to the kept user accounts rather than emptied. */
 const PARTIAL_TABLES = new Set(['User', 'UserRole', 'UserModule', 'Session', 'Personnel']);
 
 async function wipe(keepUserIds: number[]) {
@@ -948,6 +955,24 @@ async function importAll(adminId: number) {
   console.log(`  trip travellers ${tripTravelerRows.length}, assignments ${assignmentRows.length}, log entries ${logRows.length}`);
 }
 
+/** --append never deletes, so the tables it fills must already be empty. */
+async function assertEmptyTargets() {
+  const counts = {
+    customers: await prisma.customer.count(),
+    travellers: await prisma.traveler.count(),
+    personnel: await prisma.personnel.count(),
+    vehicles: await prisma.vehicle.count(),
+    trips: await prisma.trip.count(),
+  };
+  const occupied = Object.entries(counts).filter(([, n]) => n > 0);
+  if (occupied.length) {
+    throw new Error(
+      `--append needs empty target tables, found ${occupied.map(([t, n]) => `${t} ${n}`).join(', ')}. ` +
+        'Delete those rows first or use --wipe.',
+    );
+  }
+}
+
 async function main() {
   report();
   if (DRY_RUN) return;
@@ -958,9 +983,14 @@ async function main() {
     orderBy: { id: 'asc' },
   });
   if (admins.length === 0) throw new Error('No admin account found; refusing to wipe.');
-  console.log(`Keeping admin accounts: ${admins.map((a) => a.email).join(', ')}`);
+  // Every login is kept, not only admins: staff accounts created in the app
+  // before the cut-over must survive it. The first admin owns imported records.
+  const users = await prisma.user.findMany({ select: { id: true, email: true }, orderBy: { id: 'asc' } });
+  const keepIds = [admins[0].id, ...users.map((u) => u.id).filter((id) => id !== admins[0].id)];
+  console.log(`Keeping user accounts: ${users.map((u) => u.email).join(', ')}`);
 
-  if (WIPE) await wipe(admins.map((a) => a.id));
+  if (WIPE) await wipe(keepIds);
+  if (APPEND) await assertEmptyTargets();
   await importAll(admins[0].id);
 }
 

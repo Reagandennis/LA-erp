@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { Prisma } from '@prisma/client';
+
 import { prisma } from './prisma';
 
 export interface UploadLimits {
@@ -26,12 +28,20 @@ function serialize(record: UploadLimits): UploadLimits {
 }
 
 export async function getUploadLimits(): Promise<UploadLimits> {
-  const record = await prisma.uploadLimitSettings.upsert({
-    where: { id: 1 },
-    create: { id: 1 },
-    update: {},
-  });
-  return serialize(record);
+  const existing = await prisma.uploadLimitSettings.findUnique({ where: { id: 1 } });
+  if (existing) return serialize(existing);
+  // First read on a fresh database: create the singleton row. Concurrent
+  // requests can race here (upsert is not atomic for a missing row), so a
+  // unique-constraint failure just means another request won — read theirs.
+  try {
+    return serialize(await prisma.uploadLimitSettings.create({ data: { id: 1 } }));
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const record = await prisma.uploadLimitSettings.findUniqueOrThrow({ where: { id: 1 } });
+      return serialize(record);
+    }
+    throw error;
+  }
 }
 
 /** Resolve one category's limit in bytes, for upload-route size checks. */
