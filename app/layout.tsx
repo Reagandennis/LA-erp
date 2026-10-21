@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import Sidebar from "@/app/ui/sidebar";
 import { BannerProvider } from "@/app/ui/banner";
@@ -8,6 +9,7 @@ import MessagingAlerts from "@/app/ui/messaging-alerts";
 import NotificationsBell from "@/app/ui/notifications-bell";
 import WorldClockTicker from "@/app/ui/world-clock-ticker";
 import { getServerAuth } from "@/lib/auth";
+import { PUBLIC_PAGE_HEADER } from "@/lib/public-pages";
 import { getAccessibleModulesForUser } from "@/lib/user";
 import { resolveWorldClockZones } from "@/lib/world-clocks";
 
@@ -31,12 +33,14 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const auth = await getServerAuth();
+  // A client's trip link: none of the app around it, even for a signed-in colleague.
+  const isPublicPage = (await headers()).get(PUBLIC_PAGE_HEADER) === '1';
+  const auth = isPublicPage ? null : await getServerAuth();
   const accessibleModules = auth ? await getAccessibleModulesForUser(auth.user) : [];
   const sidebarUser = auth
     ? { name: auth.user.name, email: auth.user.email }
     : { name: 'Guest', email: 'guest@la-erp.local' };
-  const shouldShowSidebar = true;
+  const shouldShowSidebar = !isPublicPage;
 
   // Modules for the search box: names and slugs only, never anything sensitive.
   const searchModules = accessibleModules.map((m) => ({ slug: m.slug, name: m.name, category: m.category }));

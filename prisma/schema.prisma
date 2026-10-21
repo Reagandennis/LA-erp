@@ -55,6 +55,9 @@ model User {
   organizationUpdates            OrganizationSettings[]          @relation("OrganizationUpdatedBy")
   createdTrips                   Trip[]                          @relation("TripCreatedBy")
   tripLogEntries                 TripLogEntry[]                  @relation("TripLogEntryCreatedBy")
+  closedOutTrips                 TripCloseout[]                  @relation("TripCloseoutClosedBy")
+  editedTripCloseouts            TripCloseout[]                  @relation("TripCloseoutUpdatedBy")
+  tripShareLinks                 TripShareLink[]                 @relation("TripShareLinkCreatedBy")
   ownedTrips                     Trip[]                          @relation("TripOwner")
   tripItineraryItemNotifications TripItineraryItemNotification[]
   createdConversations           Conversation[]                  @relation("ConversationCreatedBy")
@@ -867,6 +870,8 @@ model Trip {
   days          TripDay[]
   travelers     TripTraveler[]
   logEntries    TripLogEntry[]
+  closeout      TripCloseout?
+  shareLink     TripShareLink?
 
   @@index([createdById, status])
   @@index([ownerId, status])
@@ -1019,6 +1024,48 @@ model TripLogEntry {
 
   @@index([tripId, loggedAt])
   @@index([escalated])
+}
+
+/// Verification of a completed trip (lib/trip-closeout.ts). Stays editable after
+/// the trip is closed out; closedAt is null while the close-out is still open.
+model TripCloseout {
+  id             Int       @id @default(autoincrement())
+  tripId         Int       @unique
+  /// The checks confirmed so far: keys of CLOSEOUT_CHECKS in lib/trip-closeout-checks.ts.
+  checks         String[]  @default([])
+  summary        String?
+  issues         String?
+  clientFeedback String?
+  closedAt       DateTime?
+  closedById     Int?
+  updatedById    Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  trip           Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  closedBy       User?     @relation("TripCloseoutClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  updatedBy      User?     @relation("TripCloseoutUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([closedAt])
+}
+
+/// The client's read-only link to a trip's itinerary (lib/trip-share.ts). One
+/// per trip: a new link replaces the old token, and deleting the row revokes it.
+model TripShareLink {
+  id                 Int       @id @default(autoincrement())
+  tripId             Int       @unique
+  /// Random and URL-safe. It is the whole credential, so it never goes in logs or audit metadata.
+  token              String    @unique
+  /// Crew names and phones, vehicles and item notes (which often name security staff).
+  includeCrew        Boolean   @default(false)
+  /// Each stop's photos and documents (tickets, vouchers), served through the link.
+  includeAttachments Boolean   @default(true)
+  createdById        Int?
+  viewCount          Int       @default(0)
+  lastViewedAt       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  trip               Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdBy          User?     @relation("TripShareLinkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 }
 
 // --- Task assignment: fleet & protection resources allocated to trips ---

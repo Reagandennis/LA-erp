@@ -1,12 +1,16 @@
 import 'server-only';
 
+import type { ClientItinerary } from '@/app/modules/trip-planning/[tripId]/client-itinerary';
+
 import { getBrandProfile, getBrandProfileLogo } from './brand-profiles';
 import { getCustomerById } from './customers';
 import { renderInvoicePdf } from './invoice-pdf';
 import type { InvoiceDetail } from './invoices';
 import { getOrganizationLogo, getOrganizationSettings } from './organization';
-import { renderQuotePdf } from './quote-pdf';
+import { type BrandPdfInfo, renderQuotePdf } from './quote-pdf';
 import type { QuoteDetail } from './quotes';
+import { loadPdfPhotos } from './trip-attachments';
+import { pdfPhotoIds, renderTripItineraryPdf } from './trip-pdf';
 
 interface DocumentCustomerRef {
   id: number;
@@ -16,18 +20,17 @@ interface DocumentCustomerRef {
 }
 
 /**
- * Resolves the brand block, tax label, logo and customer address used by both
- * the invoice and quote PDFs. Centralised so the PDF download routes and the
- * email-attachment path stay in sync.
+ * The brand a document goes out under: its brand profile, or the organization.
+ * Shared with the trip share page, which shows the same header as the PDF.
  */
-async function resolveDocumentContext(args: {
-  brandProfileId: number | null;
-  customer: DocumentCustomerRef;
-}) {
-  const [organization, customer, brandProfile] = await Promise.all([
+export async function resolveDocumentBrand(brandProfileId: number | null): Promise<{
+  brand: BrandPdfInfo;
+  logo: { buffer: Buffer; mimeType: string } | null;
+  taxLabel: string;
+}> {
+  const [organization, brandProfile] = await Promise.all([
     getOrganizationSettings(),
-    getCustomerById(args.customer.id),
-    args.brandProfileId ? getBrandProfile(args.brandProfileId) : Promise.resolve(null),
+    brandProfileId ? getBrandProfile(brandProfileId) : Promise.resolve(null),
   ]);
 
   const [orgLogo, brandLogo] = await Promise.all([
@@ -63,11 +66,27 @@ async function resolveDocumentContext(args: {
         primaryColor: '#03458f',
       };
 
+  return { brand, taxLabel: organization.taxLabel || 'Tax', logo: brandProfile ? brandLogo : orgLogo };
+}
+
+/**
+ * Resolves the brand block, tax label, logo and customer address used by both
+ * the invoice and quote PDFs. Centralised so the PDF download routes and the
+ * email-attachment path stay in sync.
+ */
+async function resolveDocumentContext(args: {
+  brandProfileId: number | null;
+  customer: DocumentCustomerRef;
+}) {
+  const [{ brand, logo, taxLabel }, customer] = await Promise.all([
+    resolveDocumentBrand(args.brandProfileId),
+    getCustomerById(args.customer.id),
+  ]);
+
   return {
-    organization,
     brand,
-    taxLabel: organization.taxLabel || 'Tax',
-    logo: brandProfile ? brandLogo : orgLogo,
+    taxLabel,
+    logo,
     customer: {
       name: args.customer.name,
       company: args.customer.company,
@@ -106,4 +125,23 @@ export async function buildQuotePdf(quote: QuoteDetail): Promise<Buffer> {
     logo: ctx.logo,
     customer: ctx.customer,
   });
+}
+
+/** Renders a trip's client itinerary under the brand of the quote it came from. */
+export async function buildTripItineraryPdf(
+  itinerary: ClientItinerary,
+  brandProfileId: number | null,
+): Promise<Buffer> {
+  const { brand, logo } = await resolveDocumentBrand(brandProfileId);
+  return renderItineraryPdf({ itinerary, brand, logo });
+}
+
+/** The itinerary PDF for a brand already in hand, with the photos it shares. */
+export async function renderItineraryPdf(input: {
+  itinerary: ClientItinerary;
+  brand: BrandPdfInfo;
+  logo: { buffer: Buffer; mimeType: string } | null;
+}): Promise<Buffer> {
+  const photos = await loadPdfPhotos(pdfPhotoIds(input.itinerary));
+  return renderTripItineraryPdf({ ...input, photos });
 }

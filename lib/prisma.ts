@@ -41,6 +41,8 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     aiUsage?: unknown;
     aiSettings?: unknown;
     tripItemAttachment?: unknown;
+    tripCloseout?: unknown;
+    tripShareLink?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -69,7 +71,9 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.backupRun &&
       candidate.aiUsage &&
       candidate.aiSettings &&
-      candidate.tripItemAttachment,
+      candidate.tripItemAttachment &&
+      candidate.tripCloseout &&
+      candidate.tripShareLink,
   );
 }
 

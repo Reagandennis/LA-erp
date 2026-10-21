@@ -62,4 +62,20 @@ describe('proxy auth gating', () => {
 
     expect(response.status).toBe(200);
   });
+
+  it('marks a client share page for the layout, and strips the mark from everything else', () => {
+    // Next passes request-header overrides upstream as x-middleware-request-* headers.
+    const shared = proxy(new NextRequest('http://localhost/share/trip/abc'));
+    expect(shared.status).toBe(200);
+    expect(shared.headers.get('x-middleware-request-x-la-public-page')).toBe('1');
+
+    verifySessionToken.mockReturnValue({ sub: '1', sid: 'session_123', ver: 1, email: 'admin@example.com' });
+    const spoofed = proxy(
+      new NextRequest('http://localhost/dashboard', {
+        headers: { cookie: 'auth_token=token', 'x-la-public-page': '1' },
+      }),
+    );
+    expect(spoofed.headers.get('x-middleware-request-x-la-public-page')).toBeNull();
+    expect(spoofed.headers.get('x-middleware-override-headers')).not.toContain('x-la-public-page');
+  });
 });

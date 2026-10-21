@@ -31,6 +31,8 @@ const SIGNED_IN_ONLY: Record<string, string> = {
   'auth/login': 'public: signs people in',
   'auth/signup': 'public: account requests',
   'auth/google': 'public: Google sign-in',
+  'share/trip/[token]/pdf': "public: a client's share link, where the token is the credential (lib/trip-share)",
+  'share/trip/[token]/attachments/[attachmentId]': "public: files on a client's share link, behind the same token",
   'auth/logout': "the caller's own session",
   'auth/session': "the caller's own session",
   'messaging/webhook': 'called by wacli, authorised by a per-process secret',

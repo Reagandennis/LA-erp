@@ -575,6 +575,12 @@ export async function getTripForUser(params: {
   return serializeDetail(record);
 }
 
+/** No access check: only for callers that established access another way (a client's share link). */
+export async function getTripDetail(id: number): Promise<TripDetail | null> {
+  const record = await tripClient.findUnique({ where: { id }, include: tripInclude });
+  return record ? serializeDetail(record) : null;
+}
+
 /** Who may change a trip and its itinerary. Shared with the attachment routes. */
 export function canEditTrip(
   record: Pick<TripRecord, 'status' | 'ownerId' | 'createdById'>,

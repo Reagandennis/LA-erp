@@ -5,8 +5,18 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
+import CloseoutPanel from './closeout-panel';
 import TripBuilder from './trip-builder';
-import type { OwnerOption, TravelerOption, TripDetail, TripStatusFilter, TripSummary } from './types';
+import type {
+  CloseoutTrip,
+  OwnerOption,
+  TravelerOption,
+  TripCloseout,
+  TripDetail,
+  TripStatusFilter,
+  TripSummary,
+  TripsTab,
+} from './types';
 
 interface CustomerOption {
   id: number;
@@ -17,10 +27,15 @@ interface CustomerOption {
 
 interface TripsClientProps {
   currentUser: { id: number; name: string; email: string };
+  /** False for a verifier with only the close-out grant: the Close out tab alone. */
+  canPlan: boolean;
+  initialTab: TripsTab;
   initialTrips: TripSummary[];
   initialCustomers: CustomerOption[];
   initialOwners: OwnerOption[];
   initialTravelers: TravelerOption[];
+  /** Null without the close-out grant. */
+  initialCloseoutTrips: CloseoutTrip[] | null;
 }
 
 const STATUS_FILTERS: TripStatusFilter[] = ['All', 'Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
@@ -47,13 +62,18 @@ function formatDate(value: string | null) {
 
 export default function TripsClient({
   currentUser,
+  canPlan,
+  initialTab,
   initialTrips,
   initialCustomers,
   initialOwners,
   initialTravelers,
+  initialCloseoutTrips,
 }: TripsClientProps) {
   const router = useRouter();
+  const [tab, setTab] = useState<TripsTab>(initialTab);
   const [trips, setTrips] = useState<TripSummary[]>(initialTrips);
+  const [closeoutTrips, setCloseoutTrips] = useState<CloseoutTrip[] | null>(initialCloseoutTrips);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<TripStatusFilter>('All');
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -128,6 +148,22 @@ export default function TripsClient({
     router.push(`/modules/trip-planning/${tripId}`);
   };
 
+  const showTab = (next: TripsTab) => {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === 'trips') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', next);
+    window.history.replaceState(null, '', url);
+  };
+
+  const saveCloseout = (tripId: number, closeout: TripCloseout) => {
+    setCloseoutTrips((current) =>
+      current ? current.map((trip) => (trip.id === tripId ? { ...trip, closeout } : trip)) : current,
+    );
+  };
+
+  const pendingCloseouts = closeoutTrips?.filter((trip) => !trip.closeout?.closedAt).length ?? 0;
+
   const hasTrips = trips.length > 0;
 
   return (
@@ -136,178 +172,220 @@ export default function TripsClient({
         {/* Header */}
         <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">Trip planning</h1>
-            <p className="mt-1 text-sm text-gray-500">Run approved quotes as scheduled trips.</p>
+            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">
+              {canPlan ? 'Trip planning' : 'Trip close-out'}
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              {tab === 'close-out' ? 'Verify completed trips and close them out.' : 'Run approved quotes as scheduled trips.'}
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/modules/quotes"
-              className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary"
-            >
-              Back to quotes
-            </Link>
-            <button
-              type="button"
-              onClick={() => setBuilderOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
-              </svg>
-              New trip
-            </button>
-          </div>
-        </header>
-
-        {/* Summary */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-          <SummaryCard label="Trips" value={`${totals.total}`} accent="text-primary" />
-          <SummaryCard label="Planned" value={`${totals.planned}`} />
-          <SummaryCard label="Active" value={`${totals.active}`} />
-          <SummaryCard label="Completed" value={`${totals.completed}`} />
-        </div>
-
-        {/* Toolbar */}
-        <div className="flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-3 lg:flex-row lg:items-center">
-          <div className="relative flex-1">
-            <svg
-              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search by reference, tracking code, title, client, or traveller…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
-            {STATUS_FILTERS.map((status) => (
+          {canPlan && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href="/modules/quotes"
+                className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary"
+              >
+                Back to quotes
+              </Link>
               <button
                 type="button"
-                key={status}
-                onClick={() => setActiveFilter(status)}
-                className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
-                  activeFilter === status ? 'bg-primary text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
-                }`}
+                onClick={() => setBuilderOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90"
               >
-                {status}
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+                </svg>
+                New trip
               </button>
-            ))}
-          </div>
-        </div>
+            </div>
+          )}
+        </header>
 
-        {/* Mobile cards */}
-        <div className="space-y-3 md:hidden">
-          {filteredTrips.map((trip) => (
-            <button
-              key={trip.id}
-              type="button"
-              onClick={() => openTrip(trip.id)}
-              className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left transition-colors hover:border-primary/30"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-gray-900">{trip.reference}</p>
-                  <p className="truncate text-sm text-gray-500">{trip.title}</p>
-                </div>
-                <StatusBadge status={trip.status} />
-              </div>
-              <p className="mt-2 truncate text-xs text-gray-400">
-                {trip.customer.name}
-                {trip.customer.company ? ` · ${trip.customer.company}` : ''}
-              </p>
-              {travelerLine(trip.travelers) && (
-                <p className="mt-0.5 truncate text-xs text-gray-500">{travelerLine(trip.travelers)}</p>
-              )}
-              <p className="mt-2 text-xs text-gray-400">
-                {trip.itemCount} items · {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
-              </p>
-              <div className="mt-2">
-                <ResourceBadge count={trip.assignmentCount} />
-              </div>
-            </button>
-          ))}
-          {filteredTrips.length === 0 && <EmptyState filtered={hasTrips} onCreate={() => setBuilderOpen(true)} />}
-        </div>
-
-        {/* Desktop table */}
-        <div className="hidden overflow-hidden rounded-2xl border border-gray-100 bg-white md:block">
-          <table className="w-full border-collapse text-left">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Reference</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Client</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Tracking</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Owner</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Dates</th>
-                <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Resources</th>
-                <th className="w-10 px-6 py-3.5" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filteredTrips.map((trip) => (
-                <tr
-                  key={trip.id}
-                  onClick={() => openTrip(trip.id)}
-                  className="group cursor-pointer transition-colors hover:bg-gray-50/70"
-                >
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-semibold text-gray-900 transition-colors group-hover:text-primary">
-                      {trip.reference}
-                    </p>
-                    <p className="mt-0.5 max-w-[220px] truncate text-sm text-gray-500">{trip.title}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-gray-700">{trip.customer.name}</p>
-                    {trip.customer.company && <p className="mt-0.5 text-xs text-gray-400">{trip.customer.company}</p>}
-                    {travelerLine(trip.travelers) && (
-                      <p className="mt-0.5 max-w-[220px] truncate text-xs text-gray-500" title={trip.travelers.map((t) => t.name).join(', ')}>
-                        {travelerLine(trip.travelers)}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-medium text-primary">{trip.trackingCode}</p>
-                    {trip.sourceQuote && <p className="mt-0.5 text-xs text-gray-400">from {trip.sourceQuote.reference}</p>}
-                  </td>
-                  <td className="px-6 py-4">
-                    <StatusBadge status={trip.status} />
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-gray-600">
-                      {trip.owner?.name ?? <span className="text-gray-300">Unassigned</span>}
-                    </p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-gray-500">{formatDate(trip.startDate)}</p>
-                    <p className="text-xs text-gray-400">→ {formatDate(trip.endDate)}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <ResourceBadge count={trip.assignmentCount} />
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <svg
-                      className="ml-auto h-4 w-4 text-gray-300 transition-colors group-hover:text-primary"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+        {canPlan && closeoutTrips && (
+          <nav className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-label="Trip planning sections">
+            <div className="flex w-max gap-1 rounded-xl border border-gray-100 bg-white p-1">
+              {(['trips', 'close-out'] as const).map((id) => {
+                const active = tab === id;
+                const count = id === 'trips' ? trips.length : pendingCloseouts;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => showTab(id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                      active ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {id === 'trips' ? 'Trips' : 'Close out'}
+                    <span
+                      className={`rounded-full px-1.5 text-xs tabular-nums ${active ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}
+                      title={id === 'close-out' ? 'Awaiting close-out' : undefined}
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </td>
-                </tr>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+        )}
+
+        {tab === 'close-out' && closeoutTrips ? (
+          <CloseoutPanel trips={closeoutTrips} onSaved={saveCloseout} />
+        ) : (
+          <>
+            {/* Summary */}
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+              <SummaryCard label="Trips" value={`${totals.total}`} accent="text-primary" />
+              <SummaryCard label="Planned" value={`${totals.planned}`} />
+              <SummaryCard label="Active" value={`${totals.active}`} />
+              <SummaryCard label="Completed" value={`${totals.completed}`} />
+            </div>
+
+            {/* Toolbar */}
+            <div className="flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-3 lg:flex-row lg:items-center">
+              <div className="relative flex-1">
+                <svg
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Search by reference, tracking code, title, client, or traveller…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+                {STATUS_FILTERS.map((status) => (
+                  <button
+                    type="button"
+                    key={status}
+                    onClick={() => setActiveFilter(status)}
+                    className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                      activeFilter === status ? 'bg-primary text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="space-y-3 md:hidden">
+              {filteredTrips.map((trip) => (
+                <button
+                  key={trip.id}
+                  type="button"
+                  onClick={() => openTrip(trip.id)}
+                  className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left transition-colors hover:border-primary/30"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-900">{trip.reference}</p>
+                      <p className="truncate text-sm text-gray-500">{trip.title}</p>
+                    </div>
+                    <StatusBadge status={trip.status} />
+                  </div>
+                  <p className="mt-2 truncate text-xs text-gray-400">
+                    {trip.customer.name}
+                    {trip.customer.company ? ` · ${trip.customer.company}` : ''}
+                  </p>
+                  {travelerLine(trip.travelers) && (
+                    <p className="mt-0.5 truncate text-xs text-gray-500">{travelerLine(trip.travelers)}</p>
+                  )}
+                  <p className="mt-2 text-xs text-gray-400">
+                    {trip.itemCount} items · {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
+                  </p>
+                  <div className="mt-2">
+                    <ResourceBadge count={trip.assignmentCount} />
+                  </div>
+                </button>
               ))}
-            </tbody>
-          </table>
-          {filteredTrips.length === 0 && <EmptyState filtered={hasTrips} onCreate={() => setBuilderOpen(true)} />}
-        </div>
+              {filteredTrips.length === 0 && <EmptyState filtered={hasTrips} onCreate={() => setBuilderOpen(true)} />}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden overflow-hidden rounded-2xl border border-gray-100 bg-white md:block">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Reference</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Client</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Tracking</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Owner</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Dates</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Resources</th>
+                    <th className="w-10 px-6 py-3.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filteredTrips.map((trip) => (
+                    <tr
+                      key={trip.id}
+                      onClick={() => openTrip(trip.id)}
+                      className="group cursor-pointer transition-colors hover:bg-gray-50/70"
+                    >
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-semibold text-gray-900 transition-colors group-hover:text-primary">
+                          {trip.reference}
+                        </p>
+                        <p className="mt-0.5 max-w-[220px] truncate text-sm text-gray-500">{trip.title}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-gray-700">{trip.customer.name}</p>
+                        {trip.customer.company && <p className="mt-0.5 text-xs text-gray-400">{trip.customer.company}</p>}
+                        {travelerLine(trip.travelers) && (
+                          <p className="mt-0.5 max-w-[220px] truncate text-xs text-gray-500" title={trip.travelers.map((t) => t.name).join(', ')}>
+                            {travelerLine(trip.travelers)}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-medium text-primary">{trip.trackingCode}</p>
+                        {trip.sourceQuote && <p className="mt-0.5 text-xs text-gray-400">from {trip.sourceQuote.reference}</p>}
+                      </td>
+                      <td className="px-6 py-4">
+                        <StatusBadge status={trip.status} />
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-gray-600">
+                          {trip.owner?.name ?? <span className="text-gray-300">Unassigned</span>}
+                        </p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-gray-500">{formatDate(trip.startDate)}</p>
+                        <p className="text-xs text-gray-400">→ {formatDate(trip.endDate)}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <ResourceBadge count={trip.assignmentCount} />
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <svg
+                          className="ml-auto h-4 w-4 text-gray-300 transition-colors group-hover:text-primary"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredTrips.length === 0 && <EmptyState filtered={hasTrips} onCreate={() => setBuilderOpen(true)} />}
+            </div>
+          </>
+        )}
       </div>
 
       {builderOpen && (

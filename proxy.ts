@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { PUBLIC_PAGE_HEADER, isPublicPage } from '@/lib/public-pages';
 import { SESSION_COOKIE_NAME, verifySessionToken } from '@/lib/session-token';
 
 const protectedPrefixes = ['/dashboard', '/admin', '/modules'];
@@ -20,7 +21,12 @@ export default function proxy(request: NextRequest) {
   // (getServerAuth), not here. A JWT can outlive its Session row (revoked,
   // pruned, DB restored), and redirecting on the JWT alone would bounce
   // /dashboard -> /auth/login -> /dashboard forever.
-  return NextResponse.next();
+
+  // Tell the root layout whether this is a page for outsiders (lib/public-pages).
+  const requestHeaders = new Headers(request.headers);
+  if (isPublicPage(pathname)) requestHeaders.set(PUBLIC_PAGE_HEADER, '1');
+  else requestHeaders.delete(PUBLIC_PAGE_HEADER);
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

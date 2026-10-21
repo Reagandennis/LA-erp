@@ -338,6 +338,14 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     category: 'Operations',
     sortOrder: 40,
   },
+  // A permission more than a page: its link opens Trip Planning's Close out tab.
+  {
+    slug: 'trip-closeout',
+    name: 'Trip Close Out',
+    description: 'Verify completed trips and close them out. Closed-out trips stay open to edits.',
+    category: 'Operations',
+    sortOrder: 51,
+  },
   {
     slug: 'task-assignment',
     name: 'Task Assignment',

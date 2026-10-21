@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { CLOSEOUT_CHECK_KEYS } from './trip-closeout-checks';
+
 export const userStatusSchema = z.enum(['active', 'inactive', 'suspended']);
 
 export const emailSchema = z
@@ -565,6 +567,27 @@ export const tripFromQuoteSchema = z.object({
   startDate: z.string().trim().optional().nullable(),
   endDate: z.string().trim().optional().nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
+});
+
+/** The whole close-out, saved at once. `closed` closes it out (every check confirmed) or reopens it. */
+export const tripCloseoutSaveSchema = z.object({
+  checks: z.array(z.enum(CLOSEOUT_CHECK_KEYS)).max(CLOSEOUT_CHECK_KEYS.length),
+  summary: z.string().trim().max(4000).optional().nullable(),
+  issues: z.string().trim().max(4000).optional().nullable(),
+  clientFeedback: z.string().trim().max(4000).optional().nullable(),
+  closed: z.boolean(),
+});
+
+/** The client's share link: what it shows, and whether to swap in a new token. */
+export const tripShareSaveSchema = z.object({
+  includeCrew: z.boolean(),
+  includeAttachments: z.boolean().default(true),
+  regenerate: z.boolean().optional(),
+});
+
+export const tripShareEmailSchema = z.object({
+  includeCrew: z.boolean(),
+  includeAttachments: z.boolean().default(true),
 });
 
 export const organizationUpdateSchema = z.object({

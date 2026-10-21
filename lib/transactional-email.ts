@@ -1,7 +1,9 @@
 import { APP_LOCALE } from './locale';
 import 'server-only';
 
-import { buildInvoicePdf, buildQuotePdf } from './document-pdf';
+import type { ClientItinerary } from '@/app/modules/trip-planning/[tripId]/client-itinerary';
+
+import { buildInvoicePdf, buildQuotePdf, renderItineraryPdf, resolveDocumentBrand } from './document-pdf';
 import { EmailError, escapeEmailHtml, renderEmailLayout, sendEmail } from './email';
 import type { InvoiceDetail } from './invoices';
 import { getOrganizationSettings } from './organization';
@@ -216,4 +218,55 @@ export async function emailWelcomeToUser(params: {
   });
 
   return { to: params.email };
+}
+
+/**
+ * Sends a client their trip: the live link, with the itinerary PDF attached.
+ * Throws {@link EmailError} if the customer has no email or delivery fails.
+ */
+export async function emailTripItineraryToCustomer(params: {
+  itinerary: ClientItinerary;
+  customer: { name: string; email: string | null };
+  shareUrl: string;
+  brandProfileId: number | null;
+}): Promise<{ to: string }> {
+  const to = params.customer.email?.trim();
+  if (!to) {
+    throw new EmailError('This client has no email address on file.');
+  }
+
+  const { itinerary } = params;
+  const { brand, logo } = await resolveDocumentBrand(params.brandProfileId);
+  const orgName = brand.companyName || 'Our company';
+  const pdf = await renderItineraryPdf({ itinerary, brand, logo });
+  const dates =
+    itinerary.startDate || itinerary.endDate
+      ? `${formatDate(itinerary.startDate)} – ${formatDate(itinerary.endDate)}`
+      : 'To be confirmed';
+
+  const bodyHtml = `
+    <p>Hi ${escapeEmailHtml(params.customer.name)},</p>
+    <p>Here is the itinerary for <strong>${escapeEmailHtml(itinerary.title)}</strong> (${escapeEmailHtml(itinerary.reference)}).</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:14px 0;font-size:14px;color:#374151;">
+      <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Dates</td><td>${escapeEmailHtml(dates)}</td></tr>
+      ${itinerary.travelers.length > 0 ? `<tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Travellers</td><td>${escapeEmailHtml(itinerary.travelers.join(', '))}</td></tr>` : ''}
+    </table>
+    <p>The link below always shows the latest plan while the trip is under way, and the PDF attached is a copy to keep. Please don't forward the link: anyone who has it can see the itinerary.</p>`;
+
+  const html = renderEmailLayout({
+    title: `Your itinerary: ${itinerary.title}`,
+    bodyHtml,
+    organizationName: orgName,
+    accentColor: brand.primaryColor,
+    cta: { label: 'View your itinerary', url: params.shareUrl },
+  });
+
+  await sendEmail({
+    to,
+    subject: `Your itinerary for ${itinerary.title} (${itinerary.reference})`,
+    html,
+    attachments: [{ filename: `${itinerary.reference}-itinerary.pdf`, content: pdf, contentType: 'application/pdf' }],
+  });
+
+  return { to };
 }

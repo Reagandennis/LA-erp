@@ -43,4 +43,6 @@ export const API_ACCESS = {
   vehicles: ['task-assignment', 'vehicles'],
   tasks: ['todo-personal'],
   trips: ['trip-planning'],
+  /** Close-out is its own grant: verifiers needn't plan trips, and not every planner verifies. */
+  tripCloseout: ['trip-closeout'],
 } as const satisfies Record<string, readonly string[]>;

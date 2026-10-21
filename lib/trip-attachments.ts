@@ -147,3 +147,32 @@ export async function getTripItemAttachmentFile(params: {
   });
   return row ? { content: row.content, mime: row.mimeType, name: row.filename } : null;
 }
+
+/**
+ * The stored previews as JPEG data URIs for the itinerary PDF, which can't
+ * draw WebP. Callers pass ids from a trip they already have access to.
+ */
+export async function loadPdfPhotos(ids: number[]): Promise<Map<number, string>> {
+  const photos = new Map<number, string>();
+  if (ids.length === 0) return photos;
+  const rows = await prisma.tripItemAttachment.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, thumbnail: true },
+  });
+  await Promise.all(
+    rows.map(async (row) => {
+      if (!row.thumbnail) return;
+      try {
+        const jpeg = await sharp(row.thumbnail)
+          // Sharp enough for a 1.4-inch tile in print, small enough to email.
+          .resize({ width: 360, height: 360, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 78 })
+          .toBuffer();
+        photos.set(row.id, `data:image/jpeg;base64,${jpeg.toString('base64')}`);
+      } catch {
+        // A preview sharp can't read is left out rather than failing the PDF.
+      }
+    }),
+  );
+  return photos;
+}

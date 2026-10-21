@@ -141,3 +141,54 @@ export interface TravelerOption {
   name: string;
   customerId: number;
 }
+
+/** The trip list page's tabs. Close out needs the Trip Close Out grant. */
+export type TripsTab = 'trips' | 'close-out';
+
+/** A trip's verification after completion (see lib/trip-closeout). */
+export interface TripCloseout {
+  /** Keys of CLOSEOUT_CHECKS in lib/trip-closeout-checks. */
+  checks: string[];
+  summary: string | null;
+  issues: string | null;
+  clientFeedback: string | null;
+  /** Null while the close-out is still open. */
+  closedAt: string | null;
+  closedBy: { id: number; name: string } | null;
+  updatedAt: string;
+  updatedBy: { id: number; name: string } | null;
+}
+
+/** A trip on the Close out tab: completed, or already closed out. */
+export interface CloseoutTrip {
+  id: number;
+  reference: string;
+  trackingCode: string;
+  title: string;
+  status: string;
+  startDate: string | null;
+  endDate: string | null;
+  customer: { name: string; company: string | null };
+  /** Lead first. */
+  travelers: string[];
+  owner: { id: number; name: string } | null;
+  itemCount: number;
+  logCount: number;
+  /** The viewer may open the itinerary page. */
+  canOpen: boolean;
+  closeout: TripCloseout | null;
+}
+
+/** The client's link to an active trip (see lib/trip-share). */
+export interface TripShareLink {
+  /** "/share/trip/<token>", without the origin. */
+  path: string;
+  /** Crew names and phones, vehicles and item notes. */
+  includeCrew: boolean;
+  /** Each stop's photos and documents. */
+  includeAttachments: boolean;
+  createdAt: string;
+  createdBy: { id: number; name: string } | null;
+  viewCount: number;
+  lastViewedAt: string | null;
+}
