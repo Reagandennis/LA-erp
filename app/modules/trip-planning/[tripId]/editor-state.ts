@@ -1,6 +1,12 @@
 import type { TripItemAttachmentSummary } from '../types';
 import type { TripItemCategory } from './categories';
 
+/** One of the client's travellers, or a new name that joins the trip on save. */
+export interface EventTraveler {
+  travelerId?: number;
+  name: string;
+}
+
 /** The event editor's form, as typed. */
 export interface EditorState {
   category: TripItemCategory;
@@ -39,4 +45,6 @@ export interface EditorState {
   driverId: number | null;
   officerId: number | null;
   vehicleId: number | null;
+  /** Who the event is for; none is the whole party. */
+  travelers: EventTraveler[];
 }

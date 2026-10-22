@@ -361,6 +361,11 @@ function TimelineItem({ item, context }: { item: ClientItineraryItem; context: V
 
           <h3 className="mt-1.5 text-lg font-semibold leading-snug">{item.title}</h3>
           {item.subtitle && <p className="mt-0.5 text-sm text-gray-500">{item.subtitle}</p>}
+          {item.travelers.length > 0 && (
+            <p className="mt-1 text-sm text-gray-500">
+              For <span className="font-medium text-gray-700">{item.travelers.join(', ')}</span>
+            </p>
+          )}
 
           {route && <FlightRoute from={route.from} to={route.to} />}
 

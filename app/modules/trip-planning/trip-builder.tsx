@@ -2,16 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
-import type { OwnerOption, TravelerOption, TripDetail, TripStatus } from './types';
+import type { CustomerOption, OwnerOption, TravelerOption, TripDetail, TripStatus } from './types';
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'ZAR', 'KES', 'NGN'];
-
-interface CustomerOption {
-  id: number;
-  name: string;
-  company: string | null;
-  email: string | null;
-}
 
 /** A traveller on the new trip: an existing one of the client's, or a name to create. */
 interface PickedTraveler {
@@ -25,6 +18,8 @@ interface TripBuilderProps {
   travelers: TravelerOption[];
   owners: OwnerOption[];
   currentUser: { id: number; name: string; email: string };
+  /** Edit this trip instead of creating one. */
+  trip?: TripDetail;
   onClose: () => void;
   onSaved: (trip: TripDetail) => void;
 }
@@ -40,25 +35,41 @@ function plusDaysIso(days: number): string {
 }
 
 const STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active'];
+/** An existing trip can also be closed or called off. */
+const EDIT_STATUSES: TripStatus[] = [...STATUSES, 'Completed', 'Cancelled'];
+
+/** "YYYY-MM-DD" for a date input; trip dates are stored as UTC midnight. */
+function dateInputValue(iso: string | null): string {
+  return iso ? iso.slice(0, 10) : '';
+}
+
+/** Order matters: the first is the lead. */
+function travelersKey(travelers: PickedTraveler[]): string {
+  return travelers.map((t) => (t.travelerId ? `#${t.travelerId}` : `+${t.name.toLowerCase()}`)).join('|');
+}
 
 export default function TripBuilder({
   customers,
   travelers,
   owners,
   currentUser,
+  trip,
   onClose,
   onSaved,
 }: TripBuilderProps) {
-  const [customerId, setCustomerId] = useState('');
-  const [pickedTravelers, setPickedTravelers] = useState<PickedTraveler[]>([]);
-  const [ownerId, setOwnerId] = useState(String(currentUser.id));
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [status, setStatus] = useState<TripStatus>('Draft');
-  const [startDate, setStartDate] = useState(todayIso());
-  const [endDate, setEndDate] = useState(plusDaysIso(7));
-  const [currency, setCurrency] = useState('USD');
-  const [notes, setNotes] = useState('');
+  const originalTravelers: PickedTraveler[] = trip
+    ? trip.travelers.map((t) => ({ travelerId: t.id, name: t.name }))
+    : [];
+  const [customerId, setCustomerId] = useState(trip ? String(trip.customer.id) : '');
+  const [pickedTravelers, setPickedTravelers] = useState<PickedTraveler[]>(originalTravelers);
+  const [ownerId, setOwnerId] = useState(trip ? String(trip.owner?.id ?? '') : String(currentUser.id));
+  const [title, setTitle] = useState(trip?.title ?? '');
+  const [description, setDescription] = useState(trip?.description ?? '');
+  const [status, setStatus] = useState<TripStatus>(trip?.status ?? 'Draft');
+  const [startDate, setStartDate] = useState(trip ? dateInputValue(trip.startDate) : todayIso());
+  const [endDate, setEndDate] = useState(trip ? dateInputValue(trip.endDate) : plusDaysIso(7));
+  const [currency, setCurrency] = useState(trip?.currency ?? 'USD');
+  const [notes, setNotes] = useState(trip?.notes ?? '');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -79,8 +90,10 @@ export default function TripBuilder({
       setError('Pick a client');
       return;
     }
-    if (pickedTravelers.length === 0) {
-      setError('Add at least one traveller');
+    const travelersChanged = travelersKey(pickedTravelers) !== travelersKey(originalTravelers);
+    // An imported trip with no one on it can still be edited without adding someone.
+    if (pickedTravelers.length === 0 && (!trip || travelersChanged)) {
+      setError(trip ? 'Keep at least one traveller' : 'Add at least one traveller');
       return;
     }
     if (!title.trim()) {
@@ -88,28 +101,67 @@ export default function TripBuilder({
       return;
     }
 
+    const fields = {
+      customerId: cId,
+      ownerId: ownerId ? Number(ownerId) : null,
+      title: title.trim(),
+      description: description.trim() || null,
+      status,
+      startDate: startDate || null,
+      endDate: endDate || null,
+      currency,
+      notes: notes.trim() || null,
+    };
+    // Lead first.
+    const travelers = pickedTravelers.map((t) => (t.travelerId ? { travelerId: t.travelerId } : { name: t.name }));
+
+    let body: Record<string, unknown>;
+    if (trip) {
+      // Only what changed: a status change and an edit are logged as what they are.
+      const before: Record<string, unknown> = {
+        customerId: trip.customer.id,
+        ownerId: trip.owner?.id ?? null,
+        title: trip.title,
+        description: trip.description || null,
+        status: trip.status,
+        startDate: dateInputValue(trip.startDate) || null,
+        endDate: dateInputValue(trip.endDate) || null,
+        currency: trip.currency,
+        notes: trip.notes || null,
+      };
+      body = Object.fromEntries(Object.entries(fields).filter(([key, value]) => value !== before[key]));
+      if (travelersChanged) {
+        body.travelers = travelers;
+        const kept = new Set(travelers.flatMap((t) => ('travelerId' in t ? [t.travelerId] : [])));
+        const onEvents = trip.travelers
+          .filter((t) => !kept.has(t.id))
+          .map((t) => ({ name: t.name, events: trip.items.filter((item) => item.travelers.some((x) => x.id === t.id)).length }))
+          .filter((t) => t.events > 0);
+        if (
+          onEvents.length > 0 &&
+          !confirm(
+            `${onEvents.map((t) => `${t.name} is on ${t.events} event${t.events === 1 ? '' : 's'}`).join('; ')}. ` +
+              'Taking them off the trip takes them off those events too.',
+          )
+        ) {
+          return;
+        }
+      }
+      if (Object.keys(body).length === 0) {
+        onClose();
+        return;
+      }
+    } else {
+      body = { ...fields, travelers, items: [] };
+    }
+
     setPending(true);
     try {
-      const r = await fetch('/api/trips', {
-        method: 'POST',
+      const r = await fetch(trip ? `/api/trips/${trip.id}` : '/api/trips', {
+        method: trip ? 'PATCH' : 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: cId,
-          // Lead first.
-          travelers: pickedTravelers.map((t) =>
-            t.travelerId ? { travelerId: t.travelerId } : { name: t.name },
-          ),
-          ownerId: ownerId ? Number(ownerId) : null,
-          title: title.trim(),
-          description: description.trim() || null,
-          status,
-          startDate,
-          endDate,
-          currency,
-          notes: notes.trim() || null,
-          items: [],
-        }),
+        body: JSON.stringify(body),
       });
       const data = (await r.json().catch(() => null)) as
         | { trip?: TripDetail; error?: string }
@@ -137,13 +189,15 @@ export default function TripBuilder({
           <div className="p-6 sm:p-8 border-b border-gray-100 flex items-start justify-between gap-4 sticky top-0 bg-white z-10">
             <div>
               <p className="text-[10px] font-black text-primary uppercase tracking-[0.3em]">
-                New Trip
+                {trip ? `Edit Trip · ${trip.reference}` : 'New Trip'}
               </p>
               <h2 className="mt-1 text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
-                Plan a new trip
+                {trip ? 'Trip details' : 'Plan a new trip'}
               </h2>
               <p className="text-xs text-gray-500 font-bold mt-2">
-                Set up the basics — you&apos;ll build the day-by-day itinerary on the next page.
+                {trip
+                  ? 'Change the basics and who’s travelling. The itinerary stays as it is.'
+                  : 'Set up the basics — you’ll build the day-by-day itinerary on the next page.'}
               </p>
             </div>
             <button
@@ -170,8 +224,8 @@ export default function TripBuilder({
                   value={customerId}
                   onChange={(e) => {
                     setCustomerId(e.target.value);
-                    // Travellers belong to one client.
-                    setPickedTravelers([]);
+                    // Travellers belong to one client; going back to the trip's own puts its travellers back.
+                    setPickedTravelers(trip && e.target.value === String(trip.customer.id) ? originalTravelers : []);
                   }}
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
@@ -190,9 +244,18 @@ export default function TripBuilder({
                   onChange={(e) => setOwnerId(e.target.value)}
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
+                  {trip && <option value="">Unassigned</option>}
                   <option value={String(currentUser.id)}>
                     {currentUser.name} (you)
                   </option>
+                  {/* An owner who has since left still shows as the current one. */}
+                  {trip?.owner &&
+                    trip.owner.id !== currentUser.id &&
+                    !owners.some((o) => o.id === trip.owner!.id) && (
+                      <option value={trip.owner.id}>
+                        {trip.owner.name} — {trip.owner.email}
+                      </option>
+                    )}
                   {owners.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name} — {o.email}
@@ -247,6 +310,11 @@ export default function TripBuilder({
                   onChange={(e) => setEndDate(e.target.value)}
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
+                {trip && (
+                  <p className="mt-1.5 text-[11px] font-medium text-gray-400">
+                    The itinerary&apos;s days keep their own dates.
+                  </p>
+                )}
               </Field>
               <Field label="Currency">
                 <select
@@ -270,7 +338,7 @@ export default function TripBuilder({
                   onChange={(e) => setStatus(e.target.value as TripStatus)}
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
-                  {STATUSES.map((s) => (
+                  {(trip ? EDIT_STATUSES : STATUSES).map((s) => (
                     <option key={s} value={s}>
                       {s}
                     </option>
@@ -310,7 +378,7 @@ export default function TripBuilder({
               disabled={pending}
               className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary/90 disabled:opacity-50"
             >
-              {pending ? 'Saving…' : 'Create & open itinerary'}
+              {pending ? 'Saving…' : trip ? 'Save changes' : 'Create & open itinerary'}
             </button>
           </div>
         </div>

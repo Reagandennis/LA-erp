@@ -7,13 +7,16 @@ import { useMemo, useState } from 'react';
 import {
   REMINDER_OPTIONS,
   type CrewOptions,
+  type TravelerOption,
   type TripDaySummary,
+  type TripFormOptions,
   type TripDetail,
   type TripItemType,
   type TripItineraryItemSummary,
   type TripStatus,
 } from '../types';
 import { SILENT_BANNER_HEADER } from '@/app/ui/banner';
+import TripBuilder from '../trip-builder';
 import { formatDuration } from '@/lib/flight-status';
 import { isValidTimeZone, localTimeZone, utcToZoned, zonedToUtcIso } from '@/lib/zoned-time';
 
@@ -28,6 +31,7 @@ import {
 import { AttachmentPicker } from './_components/attachment-picker';
 import { AttachmentStrip } from './_components/attachment-strip';
 import { CrewRow } from './_components/crew-row';
+import { EventTravelerFields, TravelerRow, type TravelerChoices } from './_components/event-travelers';
 import { ShareDialog } from './_components/share-dialog';
 import FlightCard from './_components/flight-card';
 import FlightFields from './_components/flight-fields';
@@ -51,6 +55,8 @@ interface ItineraryPageClientProps {
   trip: TripDetail;
   /** Task Assignment's drivers, CPOs and vehicles, for event crews. */
   crewOptions: CrewOptions;
+  /** The client's travellers, for adding someone to an event who isn't on the trip yet. */
+  clientTravelers: TravelerOption[];
   currentUser: { id: number; name: string; email: string };
   isAdmin: boolean;
 }
@@ -80,6 +86,8 @@ interface ItemPayload {
   driverId: number | null;
   officerId: number | null;
   vehicleId: number | null;
+  /** Who it's for; empty is the whole party. Replaces the event's travellers on save. */
+  travelers: Array<{ travelerId: number } | { name: string }>;
   /** Left out entirely for people who can't see costs, so a save never clears one. */
   unitPrice?: number | null;
 }
@@ -206,6 +214,7 @@ function blankEditor(
     driverId: null,
     officerId: null,
     vehicleId: null,
+    travelers: [],
   };
 }
 
@@ -254,6 +263,7 @@ function editorFromItem(item: TripItineraryItemSummary): EditorState {
     driverId: item.driver?.id ?? null,
     officerId: item.officer?.id ?? null,
     vehicleId: item.vehicle?.id ?? null,
+    travelers: item.travelers.map((t) => ({ travelerId: t.id, name: t.name })),
   };
 }
 
@@ -270,6 +280,16 @@ function crewPayload(
   if (!editor.driverId && !editor.details.driverName) return { error: 'Pick a driver' };
   if (!editor.vehicleId && !editor.details.vehicle) return { error: 'Pick a vehicle' };
   return { driverId: editor.driverId, officerId: editor.officerId, vehicleId: editor.vehicleId };
+}
+
+/** An empty run carries no one, whatever was ticked before it became one. */
+function travelersPayload(editor: EditorState): ItemPayload['travelers'] {
+  if (isEmptyRunEditor(editor)) return [];
+  return editor.travelers.map((t) => (t.travelerId ? { travelerId: t.travelerId } : { name: t.name }));
+}
+
+function isEmptyRunEditor(editor: EditorState): boolean {
+  return editor.category === 'transportation' && editor.timeLabel === EMPTY_RUN;
 }
 
 /** Hours and minutes as typed → minutes; null for none. */
@@ -307,6 +327,7 @@ function flightToPayload(editor: EditorState, includeCost: boolean): ItemPayload
   const flightNumber = editor.details.flightNumber?.trim();
   return {
     ...crew,
+    travelers: travelersPayload(editor),
     itemType: 'flight',
     category: 'flight',
     description:
@@ -339,7 +360,7 @@ function flightToPayload(editor: EditorState, includeCost: boolean): ItemPayload
 function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload | { error: string } {
   if (editor.category === 'flight') return flightToPayload(editor, includeCost);
   const transport = editor.category === 'transportation';
-  const emptyRun = transport && editor.timeLabel === EMPTY_RUN;
+  const emptyRun = isEmptyRunEditor(editor);
   const dropOff = editor.timeLabel === 'DROP-OFF';
   const place = (dropOff ? editor.details.dropoffLocation : editor.details.pickupLocation)?.trim();
   const description =
@@ -400,6 +421,7 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
     quantity: 1,
     dayId: editor.dayId,
     ...crew,
+    travelers: travelersPayload(editor),
     ...(includeCost ? { unitPrice: price ? Number(price) : null } : {}),
   };
 }
@@ -407,10 +429,13 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
 export default function ItineraryPageClient({
   trip: initialTrip,
   crewOptions,
+  clientTravelers: initialClientTravelers,
   currentUser,
   isAdmin,
 }: ItineraryPageClientProps) {
   const [trip, setTrip] = useState<TripDetail>(initialTrip);
+  // Follows the trip's client, which the edit form can change.
+  const [clientTravelers, setClientTravelers] = useState(initialClientTravelers);
   const [pending, setPending] = useState<string | null>(null);
   const [pendingItemId, setPendingItemId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -432,6 +457,8 @@ export default function ItineraryPageClient({
   const [editor, setEditor] = useState<EditorState>(blankEditor(null));
   const [dayMenuOpen, setDayMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  /** The trip form is open once its options have loaded. */
+  const [editOptions, setEditOptions] = useState<TripFormOptions | null>(null);
 
   const isCreator = trip.createdBy.id === currentUser.id;
   const isOwner = trip.owner?.id === currentUser.id;
@@ -445,6 +472,12 @@ export default function ItineraryPageClient({
     () => groupItemsByDay(trip.days, trip.items),
     [trip.days, trip.items],
   );
+
+  const travelerChoices: TravelerChoices = {
+    onTrip: trip.travelers,
+    client: clientTravelers,
+    clientName: trip.customer.name,
+  };
 
   const activeGroup = groups.find((group) => group.day.id === currentDayId) ?? null;
   const activeItems = activeGroup ? activeGroup.items : unscheduled;
@@ -806,6 +839,22 @@ export default function ItineraryPageClient({
     }
   };
 
+  const openTripForm = async () => {
+    setPending('edit-trip');
+    setError(null);
+    try {
+      const r = await fetch('/api/trips/form-options', { credentials: 'include' });
+      const data = (await r.json().catch(() => null)) as (TripFormOptions & { error?: string }) | null;
+      if (!r.ok || !data?.customers) {
+        setError(data?.error ?? 'Could not open the trip details');
+        return;
+      }
+      setEditOptions(data);
+    } finally {
+      setPending(null);
+    }
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   const activeLabel = activeGroup ? dayLabel(activeGroup.day) : null;
@@ -851,6 +900,19 @@ export default function ItineraryPageClient({
           <span className="hidden text-xs text-gray-500 sm:block">
             {formatRangeBadge(trip.startDate, trip.endDate)}
           </span>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => void openTripForm()}
+              disabled={pending === 'edit-trip'}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13l6.232-6.232a2.5 2.5 0 113.536 3.536L12.536 16.536 8 18l1.464-4.536z" />
+              </svg>
+              {pending === 'edit-trip' ? 'Opening…' : 'Edit trip'}
+            </button>
+          )}
           {trip.status === 'Active' && (
             <button
               type="button"
@@ -872,6 +934,22 @@ export default function ItineraryPageClient({
           </span>
         </div>
       </header>
+
+      {editOptions && (
+        <TripBuilder
+          trip={trip}
+          customers={editOptions.customers}
+          travelers={editOptions.travelers}
+          owners={editOptions.owners}
+          currentUser={currentUser}
+          onClose={() => setEditOptions(null)}
+          onSaved={(saved) => {
+            applyTrip(saved);
+            setClientTravelers(editOptions.travelers.filter((t) => t.customerId === saved.customer.id));
+            setEditOptions(null);
+          }}
+        />
+      )}
 
       {shareOpen && (
         <ShareDialog
@@ -1157,6 +1235,7 @@ export default function ItineraryPageClient({
                   items={activeItems}
                   days={trip.days}
                   crewOptions={crewOptions}
+                  travelerChoices={travelerChoices}
                   showCost={!trip.costsHidden}
                   canEdit={canEdit}
                   registerEvent={registerEvent}
@@ -1252,6 +1331,7 @@ interface ItemListProps {
   /** For the flight and transport forms' day pickers. */
   days: TripDaySummary[];
   crewOptions: CrewOptions;
+  travelerChoices: TravelerChoices;
   showCost: boolean;
   registerEvent: (id: number) => (el: HTMLElement | null) => (() => void) | undefined;
   onPointerDownItem: (event: React.PointerEvent<HTMLElement>, itemId: number) => void;
@@ -1280,6 +1360,7 @@ function ItemList({
   items,
   days,
   crewOptions,
+  travelerChoices,
   showCost,
   registerEvent,
   onPointerDownItem,
@@ -1316,6 +1397,7 @@ function ItemList({
             showCost={showCost}
             days={days}
             crewOptions={crewOptions}
+            travelerChoices={travelerChoices}
           />
         ) : (
           <div
@@ -1401,6 +1483,7 @@ function ItemList({
           showCost={showCost}
           days={days}
           crewOptions={crewOptions}
+          travelerChoices={travelerChoices}
         />
       )}
 
@@ -1656,6 +1739,7 @@ function BookedRow({
             {item.description}
           </p>
           {item.subtitle && <p className="text-sm text-slate-500">{item.subtitle}</p>}
+          <TravelerRow item={item} />
           {item.body && (
             <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">
               {item.body}
@@ -1752,6 +1836,7 @@ function StopCard({
             {item.description}
           </p>
           {item.subtitle && <p className="text-sm text-slate-500">{item.subtitle}</p>}
+          <TravelerRow item={item} />
           {item.body && (
             <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">
               {item.body}
@@ -1813,11 +1898,13 @@ function ItemEditor({
   showCost,
   days,
   crewOptions,
+  travelerChoices,
 }: {
   /** Costs are quote prices; hidden from people without access to quotes. */
   showCost: boolean;
   days: TripDaySummary[];
   crewOptions: CrewOptions;
+  travelerChoices: TravelerChoices;
   editor: EditorState;
   setEditor: (e: EditorState) => void;
   onSubmit: () => void;
@@ -2119,6 +2206,14 @@ function ItemEditor({
           </details>
 
         </>
+      )}
+
+      {!isEmptyRunEditor(editor) && (
+        <EventTravelerFields
+          choices={travelerChoices}
+          value={editor.travelers}
+          onChange={(travelers) => patch({ travelers })}
+        />
       )}
 
       <AttachmentPicker

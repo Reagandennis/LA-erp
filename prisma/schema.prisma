@@ -929,6 +929,7 @@ model TripItineraryItem {
   sourceQuoteItem       QuoteItem?                      @relation("QuoteItemSourceItinerary", fields: [sourceQuoteItemId], references: [id], onDelete: SetNull)
   notifications         TripItineraryItemNotification[]
   attachments           TripItemAttachment[]
+  travelers             TripItemTraveler[]
 
   @@index([dayId, position])
   @@index([tripId, category])
@@ -939,6 +940,20 @@ model TripItineraryItem {
   @@index([driverId])
   @@index([officerId])
   @@index([vehicleId])
+}
+
+/// Which of the trip's travellers an event is for. None means the whole party.
+/// Points at the trip's traveller link, not the Traveler, so an event can only
+/// name someone on the trip and loses them if they leave it.
+model TripItemTraveler {
+  id             Int               @id @default(autoincrement())
+  itemId         Int
+  tripTravelerId Int
+  item           TripItineraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  tripTraveler   TripTraveler      @relation(fields: [tripTravelerId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, tripTravelerId])
+  @@index([tripTravelerId])
 }
 
 /// Photos and documents on an itinerary event.
@@ -1820,15 +1835,17 @@ model Traveler {
 
 /// Join between a trip and the travellers on it.
 model TripTraveler {
-  id         Int      @id @default(autoincrement())
+  id         Int                @id @default(autoincrement())
   tripId     Int
   travelerId Int
   /// The lead protectee on this trip, when there is more than one.
-  isPrimary  Boolean  @default(false)
+  isPrimary  Boolean            @default(false)
   notes      String?
-  createdAt  DateTime @default(now())
-  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  traveler   Traveler @relation(fields: [travelerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime           @default(now())
+  trip       Trip               @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  traveler   Traveler           @relation(fields: [travelerId], references: [id], onDelete: Cascade)
+  /// The events they're on (see TripItemTraveler).
+  items      TripItemTraveler[]
 
   @@unique([tripId, travelerId])
   @@index([travelerId])

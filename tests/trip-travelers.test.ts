@@ -3,19 +3,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { tx, transaction } = vi.hoisted(() => {
   const tx = {
     traveler: { count: vi.fn(), create: vi.fn() },
-    tripTraveler: { createMany: vi.fn() },
+    tripTraveler: { createMany: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
     tripSequence: { upsert: vi.fn() },
     trackingSequence: { upsert: vi.fn() },
-    trip: { create: vi.fn(), findUnique: vi.fn() },
-    tripItineraryItem: { createMany: vi.fn() },
+    trip: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    tripItineraryItem: { createMany: vi.fn(), createManyAndReturn: vi.fn(), update: vi.fn() },
+    tripItemTraveler: { createMany: vi.fn(), deleteMany: vi.fn() },
   };
   return { tx, transaction: vi.fn((fn: (client: typeof tx) => unknown) => fn(tx)) };
 });
 
 vi.mock('server-only', () => ({}));
-vi.mock('../lib/prisma', () => ({ prisma: { $transaction: transaction } }));
+vi.mock('../lib/prisma', () => ({
+  // Outside a transaction the trip is read through the same mock.
+  prisma: { $transaction: transaction, trip: { findUnique: (...args: unknown[]) => tx.trip.findUnique(...args) } },
+}));
 
-import { TripTravelerError, createTrip } from '../lib/trips';
+import { TripTravelerError, addTripItems, createTrip, updateTrip, updateTripItem } from '../lib/trips';
 
 const tripRecord = {
   id: 7,
@@ -120,5 +124,171 @@ describe('createTrip travellers', () => {
     expect(tx.traveler.count).not.toHaveBeenCalled();
     expect(tx.tripTraveler.createMany).not.toHaveBeenCalled();
     expect(tx.trip.create).toHaveBeenCalled();
+  });
+});
+
+describe('event travellers', () => {
+  // Lead Person (traveller 11) is on the trip through link 100.
+  const dinner = {
+    id: 5,
+    tripId: 7,
+    dayId: null,
+    position: 0,
+    itemType: 'activity',
+    category: 'activity',
+    description: 'Dinner',
+    quantity: 1,
+    scheduledAt: null,
+    reminderMinutesBefore: null,
+    driverId: null,
+    officerId: null,
+    vehicleId: null,
+  };
+  const onTrip = {
+    ...tripRecord,
+    travelers: [{ id: 100, isPrimary: true, traveler: { id: 11, name: 'Lead Person' } }],
+    items: [dinner],
+  };
+
+  beforeEach(() => {
+    for (const delegate of Object.values(tx)) {
+      for (const fn of Object.values(delegate)) fn.mockReset();
+    }
+    tx.trip.findUnique.mockResolvedValue(onTrip);
+    tx.tripItineraryItem.createManyAndReturn.mockResolvedValue([{ id: 900, position: 1 }]);
+  });
+
+  it('puts a trip traveller, another of the client’s and a new name on a new event', async () => {
+    tx.traveler.count.mockResolvedValue(1);
+    tx.traveler.create.mockResolvedValue({ id: 50 });
+    tx.tripTraveler.create.mockResolvedValueOnce({ id: 201 }).mockResolvedValueOnce({ id: 202 });
+
+    const result = await addTripItems({
+      tripId: 7,
+      userId: 1,
+      isAdmin: false,
+      items: [
+        {
+          description: 'Site visit',
+          quantity: 1,
+          travelers: [{ travelerId: 11 }, { travelerId: 12 }, { name: 'New Guest' }],
+        },
+      ],
+    });
+
+    expect(result).not.toHaveProperty('error');
+    // Only the one not on the trip yet has to be the client's.
+    expect(tx.traveler.count).toHaveBeenCalledWith({ where: { id: { in: [12] }, customerId: 3 } });
+    expect(tx.tripTraveler.create.mock.calls.map(([args]) => args.data)).toEqual([
+      { tripId: 7, travelerId: 12, isPrimary: false },
+      { tripId: 7, travelerId: 50, isPrimary: false },
+    ]);
+    expect(tx.tripItemTraveler.createMany).toHaveBeenCalledWith({
+      data: [
+        { itemId: 900, tripTravelerId: 100 },
+        { itemId: 900, tripTravelerId: 201 },
+        { itemId: 900, tripTravelerId: 202 },
+      ],
+    });
+  });
+
+  it('adds an event for the whole party without touching the travellers', async () => {
+    await addTripItems({ tripId: 7, userId: 1, isAdmin: false, items: [{ description: 'Briefing', quantity: 1 }] });
+
+    expect(tx.tripItineraryItem.createManyAndReturn).toHaveBeenCalled();
+    expect(tx.tripTraveler.create).not.toHaveBeenCalled();
+    expect(tx.tripItemTraveler.createMany).not.toHaveBeenCalled();
+  });
+
+  it("turns away another client's traveller", async () => {
+    tx.traveler.count.mockResolvedValue(0);
+
+    const result = await addTripItems({
+      tripId: 7,
+      userId: 1,
+      isAdmin: false,
+      items: [{ description: 'Site visit', quantity: 1, travelers: [{ travelerId: 99 }] }],
+    });
+
+    expect(result).toEqual({ error: "Every traveller must belong to the trip's client", status: 400 });
+    expect(tx.tripItemTraveler.createMany).not.toHaveBeenCalled();
+  });
+
+  it('replaces an edited event’s travellers, and leaves them be when not sent', async () => {
+    await updateTripItem({ tripId: 7, itemId: 5, userId: 1, isAdmin: false, input: { travelers: [{ travelerId: 11 }] } });
+
+    expect(tx.tripItemTraveler.deleteMany).toHaveBeenCalledWith({ where: { itemId: 5 } });
+    expect(tx.tripItemTraveler.createMany).toHaveBeenCalledWith({ data: [{ itemId: 5, tripTravelerId: 100 }] });
+    expect(tx.traveler.count).not.toHaveBeenCalled();
+
+    tx.tripItemTraveler.deleteMany.mockClear();
+    await updateTripItem({ tripId: 7, itemId: 5, userId: 1, isAdmin: false, input: { completed: true } });
+    expect(tx.tripItemTraveler.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('editing who is on a trip', () => {
+  // Lead Person (11) leads through link 100; Second Guest (12) is on it through link 101.
+  const twoAboard = {
+    ...tripRecord,
+    travelers: [
+      { id: 100, isPrimary: true, traveler: { id: 11, name: 'Lead Person' } },
+      { id: 101, isPrimary: false, traveler: { id: 12, name: 'Second Guest' } },
+    ],
+  };
+  const edit = (input: Parameters<typeof updateTrip>[0]['input']) =>
+    updateTrip({ id: 7, userId: 1, isAdmin: false, input });
+
+  beforeEach(() => {
+    for (const delegate of Object.values(tx)) {
+      for (const fn of Object.values(delegate)) fn.mockReset();
+    }
+    tx.trip.findUnique.mockResolvedValue(twoAboard);
+  });
+
+  it('adds, removes and changes the lead in one go', async () => {
+    tx.traveler.count.mockResolvedValue(1);
+    tx.traveler.create.mockResolvedValue({ id: 50 });
+
+    const result = await edit({ travelers: [{ travelerId: 13 }, { travelerId: 11 }, { name: 'New Guest' }] });
+
+    expect(result).not.toHaveProperty('error');
+    // Only the newcomer has to be the client's.
+    expect(tx.traveler.count).toHaveBeenCalledWith({ where: { id: { in: [13] }, customerId: 3 } });
+    // Taking Second Guest off the trip; their events go with the link.
+    expect(tx.tripTraveler.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [101] } } });
+    expect(tx.tripTraveler.create.mock.calls.map(([args]) => args.data)).toEqual([
+      { tripId: 7, travelerId: 13, isPrimary: true },
+      { tripId: 7, travelerId: 50, isPrimary: false },
+    ]);
+    expect(tx.tripTraveler.update).toHaveBeenCalledWith({ where: { id: 100 }, data: { isPrimary: false } });
+  });
+
+  it("checks newcomers against the client it's moving to", async () => {
+    tx.traveler.count.mockResolvedValue(1);
+
+    await edit({ customerId: 4, travelers: [{ travelerId: 20 }] });
+
+    expect(tx.trip.update.mock.calls[0]![0].data.customerId).toBe(4);
+    expect(tx.traveler.count).toHaveBeenCalledWith({ where: { id: { in: [20] }, customerId: 4 } });
+    expect(tx.tripTraveler.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [100, 101] } } });
+  });
+
+  it("turns away another client's traveller", async () => {
+    tx.traveler.count.mockResolvedValue(0);
+
+    const result = await edit({ travelers: [{ travelerId: 11 }, { travelerId: 99 }] });
+
+    expect(result).toEqual({ error: "Every traveller must belong to the trip's client", status: 400 });
+    expect(tx.tripTraveler.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('leaves the travellers alone when the edit is only details', async () => {
+    await edit({ title: 'Renamed', startDate: '' });
+
+    expect(tx.trip.update.mock.calls[0]![0].data).toMatchObject({ title: 'Renamed', startDate: null });
+    expect(tx.traveler.count).not.toHaveBeenCalled();
+    expect(tx.tripTraveler.deleteMany).not.toHaveBeenCalled();
+    expect(tx.tripTraveler.create).not.toHaveBeenCalled();
   });
 });

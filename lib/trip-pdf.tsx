@@ -140,6 +140,8 @@ const styles = StyleSheet.create({
   doneChip: { fontSize: 6.5, color: '#047857', backgroundColor: '#D1FAE5', borderRadius: 6, paddingVertical: 1.5, paddingHorizontal: 5, fontWeight: 700 },
   itemTitle: { fontSize: 11.5, fontWeight: 700, marginTop: 3, lineHeight: 1.25 },
   subtitle: { color: MUTED, marginTop: 2 },
+  travelers: { color: MUTED, marginTop: 2 },
+  travelerNames: { color: INK, fontWeight: 700 },
 
   route: { flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: '#F0F9FF', borderRadius: 6, paddingVertical: 7, paddingHorizontal: 10 },
   routeCode: { fontSize: 16, fontWeight: 700 },
@@ -376,6 +378,11 @@ function ItemRow({ item, accent, last, photos }: { item: ClientItineraryItem; ac
         </View>
         <Text style={styles.itemTitle}>{item.title}</Text>
         {item.subtitle ? <Text style={styles.subtitle}>{item.subtitle}</Text> : null}
+        {item.travelers.length > 0 ? (
+          <Text style={styles.travelers}>
+            For <Text style={styles.travelerNames}>{item.travelers.join(', ')}</Text>
+          </Text>
+        ) : null}
 
         {route ? (
           <View style={styles.route}>

@@ -38,6 +38,8 @@ export interface TripItineraryItemDraft {
   driverId?: number | null;
   officerId?: number | null;
   vehicleId?: number | null;
+  /** Who the event is for; none means the whole party. */
+  travelers?: TripTravelerInput[];
 }
 
 export interface TripDaySummary {
@@ -83,6 +85,8 @@ export interface TripItineraryItemSummary {
   driver: { id: number; name: string; phone: string | null } | null;
   officer: { id: number; name: string; callSign: string | null; grade: string; phone: string | null } | null;
   vehicle: { id: number; registration: string; make: string | null; model: string | null; type: string } | null;
+  /** The trip's travellers this event is for, lead first. Empty means the whole party. */
+  travelers: Array<{ id: number; name: string }>;
 }
 
 export interface TripItemAttachmentSummary {
@@ -161,7 +165,8 @@ interface TripRecord {
   createdAt: Date;
   updatedAt: Date;
   customer: { id: number; name: string; company: string | null; email: string | null };
-  travelers?: Array<{ isPrimary: boolean; traveler: { id: number; name: string } }>;
+  /** `id` is the TripTraveler link's, which an event's travellers point at. */
+  travelers?: Array<{ id: number; isPrimary: boolean; traveler: { id: number; name: string } }>;
   createdBy: { id: number; name: string; email: string };
   owner: { id: number; name: string; email: string } | null;
   sourceQuote: { id: number; reference: string } | null;
@@ -222,12 +227,13 @@ interface TripItineraryItemRecord {
   driver?: TripItineraryItemSummary['driver'];
   officer?: TripItineraryItemSummary['officer'];
   vehicle?: TripItineraryItemSummary['vehicle'];
+  travelers?: Array<{ tripTravelerId: number; tripTraveler: { traveler: { id: number; name: string } } }>;
 }
 
 const tripInclude = {
   customer: { select: { id: true, name: true, company: true, email: true } },
   travelers: {
-    select: { isPrimary: true, traveler: { select: { id: true, name: true } } },
+    select: { id: true, isPrimary: true, traveler: { select: { id: true, name: true } } },
     orderBy: [{ isPrimary: 'desc' as const }, { id: 'asc' as const }],
   },
   createdBy: { select: { id: true, name: true, email: true } },
@@ -247,6 +253,11 @@ const tripInclude = {
       driver: { select: { id: true, name: true, phone: true } },
       officer: { select: { id: true, name: true, callSign: true, grade: true, phone: true } },
       vehicle: { select: { id: true, registration: true, make: true, model: true, type: true } },
+      travelers: {
+        select: { tripTravelerId: true, tripTraveler: { select: { traveler: { select: { id: true, name: true } } } } },
+        // The trip's order: lead first, then as they joined.
+        orderBy: [{ tripTraveler: { isPrimary: 'desc' as const } }, { tripTravelerId: 'asc' as const }],
+      },
     },
   },
   days: {
@@ -283,39 +294,44 @@ type TripCollectionClient = {
   delete: (args: { where: { id: number } }) => Promise<TripRecord>;
 };
 
+type TripItineraryItemCreateData = {
+  tripId: number;
+  dayId?: number | null;
+  position: number;
+  itemType?: string;
+  category?: string;
+  body?: string | null;
+  timeLabel?: string | null;
+  providerName?: string | null;
+  bookingUrl?: string | null;
+  phone?: string | null;
+  placeName?: string | null;
+  address?: string | null;
+  details?: unknown;
+  description: string;
+  subtitle?: string | null;
+  quantity: Prisma.Decimal;
+  unitPrice: Prisma.Decimal | null;
+  sourceQuoteItemId: number | null;
+  scheduledAt?: Date | null;
+  endsAt?: Date | null;
+  durationMinutes?: number | null;
+  reminderMinutesBefore?: number | null;
+  reminderAt?: Date | null;
+  imageUrl?: string | null;
+  confirmationCode?: string | null;
+  driverId?: number | null;
+  officerId?: number | null;
+  vehicleId?: number | null;
+};
+
 type TripItineraryItemCollectionClient = {
-  createMany: (args: {
-    data: Array<{
-      tripId: number;
-      dayId?: number | null;
-      position: number;
-      itemType?: string;
-      category?: string;
-      body?: string | null;
-      timeLabel?: string | null;
-      providerName?: string | null;
-      bookingUrl?: string | null;
-      phone?: string | null;
-      placeName?: string | null;
-      address?: string | null;
-      details?: unknown;
-      description: string;
-      subtitle?: string | null;
-      quantity: Prisma.Decimal;
-      unitPrice: Prisma.Decimal | null;
-      sourceQuoteItemId: number | null;
-      scheduledAt?: Date | null;
-      endsAt?: Date | null;
-      durationMinutes?: number | null;
-      reminderMinutesBefore?: number | null;
-      reminderAt?: Date | null;
-      imageUrl?: string | null;
-      confirmationCode?: string | null;
-      driverId?: number | null;
-      officerId?: number | null;
-      vehicleId?: number | null;
-    }>;
-  }) => Promise<{ count: number }>;
+  createMany: (args: { data: TripItineraryItemCreateData[] }) => Promise<{ count: number }>;
+  /** createMany that hands back each new event's id, to hang its travellers on. */
+  createManyAndReturn: (args: {
+    data: TripItineraryItemCreateData[];
+    select: { id: true; position: true };
+  }) => Promise<Array<{ id: number; position: number }>>;
   findUnique: (args: { where: { id: number } }) => Promise<TripItineraryItemRecord | null>;
   update: (args: {
     where: { id: number };
@@ -453,6 +469,7 @@ function serializeItem(item: TripItineraryItemRecord): TripItineraryItemSummary 
     driver: item.driver ?? null,
     officer: item.officer ?? null,
     vehicle: item.vehicle ?? null,
+    travelers: (item.travelers ?? []).map((link) => link.tripTraveler.traveler),
   };
 }
 
@@ -704,9 +721,10 @@ export type TripTravelerInput = { travelerId: number } | { name: string };
 /** A picked traveller isn't one of the trip's client's travellers. */
 export class TripTravelerError extends Error {}
 
-export async function listTravelerOptions(): Promise<TravelerOption[]> {
+/** Active travellers of every client, or of just the one. */
+export async function listTravelerOptions(customerId?: number): Promise<TravelerOption[]> {
   const rows = await prisma.traveler.findMany({
-    where: { customerId: { not: null }, status: 'Active' },
+    where: { customerId: customerId ?? { not: null }, status: 'Active' },
     select: { id: true, name: true, customerId: true },
     orderBy: [{ name: 'asc' }],
   });
@@ -714,17 +732,21 @@ export async function listTravelerOptions(): Promise<TravelerOption[]> {
 }
 
 /**
- * Turns the picked travellers into Traveler ids, in order (the first is the
- * lead). Existing travellers must belong to the trip's client; new names
- * become travellers of that client.
+ * Turns the picked travellers into Traveler ids, one per input and in order
+ * (the first is the lead). Existing travellers must belong to the trip's
+ * client, unless they're already on the trip; new names become travellers of
+ * that client, once per name.
  */
 async function resolveTripTravelers(
   tx: Prisma.TransactionClient,
   inputs: TripTravelerInput[],
   customerId: number,
   createdById: number,
+  onTrip: ReadonlySet<number> = new Set(),
 ): Promise<number[]> {
-  const existingIds = [...new Set(inputs.flatMap((t) => ('travelerId' in t ? [t.travelerId] : [])))];
+  const existingIds = [
+    ...new Set(inputs.flatMap((t) => ('travelerId' in t && !onTrip.has(t.travelerId) ? [t.travelerId] : []))),
+  ];
   if (existingIds.length > 0) {
     const owned = await tx.traveler.count({ where: { id: { in: existingIds }, customerId } });
     if (owned !== existingIds.length) {
@@ -745,9 +767,46 @@ async function resolveTripTravelers(
         (await tx.traveler.create({ data: { name: input.name, customerId, createdById }, select: { id: true } })).id;
       createdByName.set(key, id);
     }
-    if (!ids.includes(id)) ids.push(id);
+    ids.push(id);
   }
   return ids;
+}
+
+/**
+ * Puts each event's picked travellers on it. Anyone not on the trip yet joins
+ * it first: an existing traveller of the trip's client, or a new name created
+ * for that client. Throws TripTravelerError for someone else's traveller.
+ */
+async function linkEventTravelers(
+  tx: Prisma.TransactionClient,
+  trip: TripRecord,
+  events: Array<{ itemId: number; travelers: TripTravelerInput[] }>,
+  createdById: number,
+): Promise<void> {
+  const linkIds = new Map((trip.travelers ?? []).map((link) => [link.traveler.id, link.id]));
+  const travelerIds = await resolveTripTravelers(
+    tx,
+    events.flatMap((event) => event.travelers),
+    trip.customerId,
+    createdById,
+    new Set(linkIds.keys()),
+  );
+  for (const travelerId of travelerIds) {
+    if (linkIds.has(travelerId)) continue;
+    const link = await tx.tripTraveler.create({
+      // A trip with no one on it yet takes its first traveller as the lead.
+      data: { tripId: trip.id, travelerId, isPrimary: linkIds.size === 0 },
+      select: { id: true },
+    });
+    linkIds.set(travelerId, link.id);
+  }
+
+  let next = 0;
+  const data = events.flatMap((event) => {
+    const ids = travelerIds.slice(next, (next += event.travelers.length));
+    return [...new Set(ids)].map((travelerId) => ({ itemId: event.itemId, tripTravelerId: linkIds.get(travelerId)! }));
+  });
+  if (data.length > 0) await tx.tripItemTraveler.createMany({ data });
 }
 
 export interface TripCreateInput {
@@ -775,12 +834,9 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
     const { trip, tripItineraryItem, tripSequence, trackingSequence } = txClients(tx);
 
     // Before the sequences, so a rejected traveller doesn't burn a reference.
-    const travelerIds = await resolveTripTravelers(
-      tx,
-      input.travelers ?? [],
-      input.customerId,
-      input.createdById,
-    );
+    const travelerIds = [
+      ...new Set(await resolveTripTravelers(tx, input.travelers ?? [], input.customerId, input.createdById)),
+    ];
 
     const tripSeq = await reserveSequence(tripSequence, year);
     const trackingSeq = await reserveSequence(trackingSequence, year);
@@ -857,6 +913,40 @@ export interface TripUpdateInput {
   endDate?: string | null;
   currency?: string;
   notes?: string | null;
+  /** Replaces who's on the trip, lead first. Someone taken off leaves its events too. */
+  travelers?: TripTravelerInput[];
+}
+
+/**
+ * Makes the trip's travellers exactly `inputs`, lead first. Anyone already on
+ * the trip may stay whoever's client they are (imported trips mix them); anyone
+ * added must be the trip's client's, or a new name created for that client.
+ */
+async function replaceTripTravelers(
+  tx: Prisma.TransactionClient,
+  trip: TripRecord,
+  inputs: TripTravelerInput[],
+  customerId: number,
+  createdById: number,
+): Promise<void> {
+  const links = new Map((trip.travelers ?? []).map((link) => [link.traveler.id, link]));
+  const travelerIds = [
+    ...new Set(await resolveTripTravelers(tx, inputs, customerId, createdById, new Set(links.keys()))),
+  ];
+  const keep = new Set(travelerIds);
+
+  const removed = [...links.values()].filter((link) => !keep.has(link.traveler.id)).map((link) => link.id);
+  if (removed.length > 0) await tx.tripTraveler.deleteMany({ where: { id: { in: removed } } });
+
+  for (const [index, travelerId] of travelerIds.entries()) {
+    const isPrimary = index === 0;
+    const link = links.get(travelerId);
+    if (!link) {
+      await tx.tripTraveler.create({ data: { tripId: trip.id, travelerId, isPrimary } });
+    } else if (link.isPrimary !== isPrimary) {
+      await tx.tripTraveler.update({ where: { id: link.id }, data: { isPrimary } });
+    }
+  }
 }
 
 export async function updateTrip(params: {
@@ -871,30 +961,42 @@ export async function updateTrip(params: {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
 
-  await tripClient.update({
-    where: { id: params.id },
-    data: {
-      customerId: params.input.customerId ?? existing.customerId,
-      ownerId: params.input.ownerId === undefined ? existing.ownerId : params.input.ownerId,
-      title: params.input.title ?? existing.title,
-      description: params.input.description === undefined ? existing.description : params.input.description,
-      status: params.input.status ?? existing.status,
-      startDate:
-        params.input.startDate === undefined
-          ? existing.startDate
-          : params.input.startDate === null
-            ? null
-            : new Date(params.input.startDate),
-      endDate:
-        params.input.endDate === undefined
-          ? existing.endDate
-          : params.input.endDate === null
-            ? null
-            : new Date(params.input.endDate),
-      currency: params.input.currency ?? existing.currency,
-      notes: params.input.notes === undefined ? existing.notes : params.input.notes,
-    },
-  });
+  const customerId = params.input.customerId ?? existing.customerId;
+  try {
+    await prisma.$transaction(async (tx) => {
+      const { trip } = txClients(tx);
+      await trip.update({
+        where: { id: params.id },
+        data: {
+          customerId,
+          ownerId: params.input.ownerId === undefined ? existing.ownerId : params.input.ownerId,
+          title: params.input.title ?? existing.title,
+          description: params.input.description === undefined ? existing.description : params.input.description,
+          status: params.input.status ?? existing.status,
+          startDate:
+            params.input.startDate === undefined
+              ? existing.startDate
+              : !params.input.startDate
+                ? null
+                : new Date(params.input.startDate),
+          endDate:
+            params.input.endDate === undefined
+              ? existing.endDate
+              : !params.input.endDate
+                ? null
+                : new Date(params.input.endDate),
+          currency: params.input.currency ?? existing.currency,
+          notes: params.input.notes === undefined ? existing.notes : params.input.notes,
+        },
+      });
+      if (params.input.travelers) {
+        await replaceTripTravelers(tx, existing, params.input.travelers, customerId, params.userId);
+      }
+    });
+  } catch (error) {
+    if (error instanceof TripTravelerError) return { error: error.message, status: 400 };
+    throw error;
+  }
 
   const refreshed = await tripClient.findUnique({ where: { id: params.id }, include: tripInclude });
   return serializeDetail(refreshed!);
@@ -936,55 +1038,68 @@ export async function addTripItems(params: {
   const crewError = await crewProblem(params.items);
   if (crewError) return { error: crewError, status: 400 };
 
-  return prisma.$transaction(async (tx) => {
-    const { trip, tripItineraryItem } = txClients(tx);
-    // One past the highest position in use, not the item count. Deleting an
-    // item leaves a gap, so counting would hand the new item a position that
-    // an existing one already holds.
-    const startPosition = existing.items.reduce(
-      (highest, item) => Math.max(highest, item.position + 1),
-      0,
-    );
-    await tripItineraryItem.createMany({
-      data: params.items.map((item, idx) => {
-        const scheduledAt = parseScheduledAt(item.scheduledAt);
-        const endsAt = parseScheduledAt(item.endsAt);
-        const reminderMinutesBefore = item.reminderMinutesBefore ?? null;
-        return {
-          tripId: params.tripId,
-          dayId: item.dayId ?? null,
-          position: startPosition + idx,
-          itemType: item.itemType ?? 'activity',
-          category: item.category ?? 'activity',
-          body: item.body ?? null,
-          timeLabel: item.timeLabel ?? null,
-          providerName: item.providerName ?? null,
-          bookingUrl: item.bookingUrl ?? null,
-          phone: item.phone ?? null,
-          placeName: item.placeName ?? null,
-          address: item.address ?? null,
-          details: item.details ?? undefined,
-          description: item.description,
-          subtitle: item.subtitle ?? null,
-          quantity: asDecimal(item.quantity),
-          unitPrice: item.unitPrice == null ? null : asDecimal(item.unitPrice),
-          sourceQuoteItemId: item.sourceQuoteItemId ?? null,
-          scheduledAt,
-          endsAt,
-          durationMinutes: item.durationMinutes ?? null,
-          reminderMinutesBefore,
-          reminderAt: computeReminderAt(scheduledAt, reminderMinutesBefore),
-          imageUrl: item.imageUrl ?? null,
-          confirmationCode: item.confirmationCode ?? null,
-          driverId: item.driverId ?? null,
-          officerId: item.officerId ?? null,
-          vehicleId: item.vehicleId ?? null,
-        };
-      }),
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const { trip, tripItineraryItem } = txClients(tx);
+      // One past the highest position in use, not the item count. Deleting an
+      // item leaves a gap, so counting would hand the new item a position that
+      // an existing one already holds.
+      const startPosition = existing.items.reduce(
+        (highest, item) => Math.max(highest, item.position + 1),
+        0,
+      );
+      const created = await tripItineraryItem.createManyAndReturn({
+        select: { id: true, position: true },
+        data: params.items.map((item, idx) => {
+          const scheduledAt = parseScheduledAt(item.scheduledAt);
+          const endsAt = parseScheduledAt(item.endsAt);
+          const reminderMinutesBefore = item.reminderMinutesBefore ?? null;
+          return {
+            tripId: params.tripId,
+            dayId: item.dayId ?? null,
+            position: startPosition + idx,
+            itemType: item.itemType ?? 'activity',
+            category: item.category ?? 'activity',
+            body: item.body ?? null,
+            timeLabel: item.timeLabel ?? null,
+            providerName: item.providerName ?? null,
+            bookingUrl: item.bookingUrl ?? null,
+            phone: item.phone ?? null,
+            placeName: item.placeName ?? null,
+            address: item.address ?? null,
+            details: item.details ?? undefined,
+            description: item.description,
+            subtitle: item.subtitle ?? null,
+            quantity: asDecimal(item.quantity),
+            unitPrice: item.unitPrice == null ? null : asDecimal(item.unitPrice),
+            sourceQuoteItemId: item.sourceQuoteItemId ?? null,
+            scheduledAt,
+            endsAt,
+            durationMinutes: item.durationMinutes ?? null,
+            reminderMinutesBefore,
+            reminderAt: computeReminderAt(scheduledAt, reminderMinutesBefore),
+            imageUrl: item.imageUrl ?? null,
+            confirmationCode: item.confirmationCode ?? null,
+            driverId: item.driverId ?? null,
+            officerId: item.officerId ?? null,
+            vehicleId: item.vehicleId ?? null,
+          };
+        }),
+      });
+      const idAt = new Map(created.map((row) => [row.position, row.id]));
+      await linkEventTravelers(
+        tx,
+        existing,
+        params.items.map((item, idx) => ({ itemId: idAt.get(startPosition + idx)!, travelers: item.travelers ?? [] })),
+        params.userId,
+      );
+      const fresh = await trip.findUnique({ where: { id: params.tripId }, include: tripInclude });
+      return serializeDetail(fresh!);
     });
-    const fresh = await trip.findUnique({ where: { id: params.tripId }, include: tripInclude });
-    return serializeDetail(fresh!);
-  });
+  } catch (error) {
+    if (error instanceof TripTravelerError) return { error: error.message, status: 400 };
+    throw error;
+  }
 }
 
 export interface TripItineraryItemUpdateInput {
@@ -1013,6 +1128,8 @@ export interface TripItineraryItemUpdateInput {
   driverId?: number | null;
   officerId?: number | null;
   vehicleId?: number | null;
+  /** Replaces the event's travellers; left out, they stay as they are. */
+  travelers?: TripTravelerInput[];
 }
 
 export async function updateTripItem(params: {
@@ -1037,72 +1154,86 @@ export async function updateTripItem(params: {
   const crewError = await crewProblem([params.input], item);
   if (crewError) return { error: crewError, status: 400 };
 
-  return prisma.$transaction(async (tx) => {
-    const { trip, tripItineraryItem } = txClients(tx);
-    const data: Record<string, unknown> = {};
-    if (params.input.dayId !== undefined) data.dayId = params.input.dayId;
-    if (params.input.itemType !== undefined) data.itemType = params.input.itemType;
-    if (params.input.category !== undefined) data.category = params.input.category;
-    if (params.input.body !== undefined) data.body = params.input.body;
-    if (params.input.timeLabel !== undefined) data.timeLabel = params.input.timeLabel;
-    if (params.input.providerName !== undefined) data.providerName = params.input.providerName;
-    if (params.input.bookingUrl !== undefined) data.bookingUrl = params.input.bookingUrl;
-    if (params.input.phone !== undefined) data.phone = params.input.phone;
-    if (params.input.placeName !== undefined) data.placeName = params.input.placeName;
-    if (params.input.address !== undefined) data.address = params.input.address;
-    if (params.input.details !== undefined) data.details = params.input.details ?? null;
-    if (params.input.description !== undefined) data.description = params.input.description;
-    if (params.input.subtitle !== undefined) data.subtitle = params.input.subtitle;
-    if (params.input.quantity !== undefined) data.quantity = asDecimal(params.input.quantity);
-    if (params.input.unitPrice !== undefined) {
-      data.unitPrice = params.input.unitPrice == null ? null : asDecimal(params.input.unitPrice);
-    }
-    if (params.input.completed !== undefined) {
-      data.completedAt = params.input.completed ? new Date() : null;
-    }
-    if (params.input.imageUrl !== undefined) data.imageUrl = params.input.imageUrl;
-    if (params.input.confirmationCode !== undefined) {
-      data.confirmationCode = params.input.confirmationCode;
-    }
-    if (params.input.driverId !== undefined) data.driverId = params.input.driverId;
-    if (params.input.officerId !== undefined) data.officerId = params.input.officerId;
-    if (params.input.vehicleId !== undefined) data.vehicleId = params.input.vehicleId;
-    if (params.input.endsAt !== undefined) {
-      data.endsAt = parseScheduledAt(params.input.endsAt);
-    }
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const { trip, tripItineraryItem } = txClients(tx);
+      const data: Record<string, unknown> = {};
+      if (params.input.dayId !== undefined) data.dayId = params.input.dayId;
+      if (params.input.itemType !== undefined) data.itemType = params.input.itemType;
+      if (params.input.category !== undefined) data.category = params.input.category;
+      if (params.input.body !== undefined) data.body = params.input.body;
+      if (params.input.timeLabel !== undefined) data.timeLabel = params.input.timeLabel;
+      if (params.input.providerName !== undefined) data.providerName = params.input.providerName;
+      if (params.input.bookingUrl !== undefined) data.bookingUrl = params.input.bookingUrl;
+      if (params.input.phone !== undefined) data.phone = params.input.phone;
+      if (params.input.placeName !== undefined) data.placeName = params.input.placeName;
+      if (params.input.address !== undefined) data.address = params.input.address;
+      if (params.input.details !== undefined) data.details = params.input.details ?? null;
+      if (params.input.description !== undefined) data.description = params.input.description;
+      if (params.input.subtitle !== undefined) data.subtitle = params.input.subtitle;
+      if (params.input.quantity !== undefined) data.quantity = asDecimal(params.input.quantity);
+      if (params.input.unitPrice !== undefined) {
+        data.unitPrice = params.input.unitPrice == null ? null : asDecimal(params.input.unitPrice);
+      }
+      if (params.input.completed !== undefined) {
+        data.completedAt = params.input.completed ? new Date() : null;
+      }
+      if (params.input.imageUrl !== undefined) data.imageUrl = params.input.imageUrl;
+      if (params.input.confirmationCode !== undefined) {
+        data.confirmationCode = params.input.confirmationCode;
+      }
+      if (params.input.driverId !== undefined) data.driverId = params.input.driverId;
+      if (params.input.officerId !== undefined) data.officerId = params.input.officerId;
+      if (params.input.vehicleId !== undefined) data.vehicleId = params.input.vehicleId;
+      if (params.input.endsAt !== undefined) {
+        data.endsAt = parseScheduledAt(params.input.endsAt);
+      }
 
-    // Schedule + reminder are coupled: any change recomputes reminderAt and clears reminderSentAt.
-    const scheduleChanged =
-      params.input.scheduledAt !== undefined ||
-      params.input.reminderMinutesBefore !== undefined;
+      // Schedule + reminder are coupled: any change recomputes reminderAt and clears reminderSentAt.
+      const scheduleChanged =
+        params.input.scheduledAt !== undefined ||
+        params.input.reminderMinutesBefore !== undefined;
 
-    const nextScheduledAt =
-      params.input.scheduledAt !== undefined
-        ? parseScheduledAt(params.input.scheduledAt)
-        : item.scheduledAt;
-    const nextReminderMinutes =
-      params.input.reminderMinutesBefore !== undefined
-        ? params.input.reminderMinutesBefore
-        : item.reminderMinutesBefore;
+      const nextScheduledAt =
+        params.input.scheduledAt !== undefined
+          ? parseScheduledAt(params.input.scheduledAt)
+          : item.scheduledAt;
+      const nextReminderMinutes =
+        params.input.reminderMinutesBefore !== undefined
+          ? params.input.reminderMinutesBefore
+          : item.reminderMinutesBefore;
 
-    if (params.input.scheduledAt !== undefined) {
-      data.scheduledAt = nextScheduledAt;
-    }
-    if (params.input.durationMinutes !== undefined) {
-      data.durationMinutes = params.input.durationMinutes;
-    }
-    if (params.input.reminderMinutesBefore !== undefined) {
-      data.reminderMinutesBefore = nextReminderMinutes;
-    }
-    if (scheduleChanged) {
-      data.reminderAt = computeReminderAt(nextScheduledAt, nextReminderMinutes);
-      data.reminderSentAt = null;
-    }
+      if (params.input.scheduledAt !== undefined) {
+        data.scheduledAt = nextScheduledAt;
+      }
+      if (params.input.durationMinutes !== undefined) {
+        data.durationMinutes = params.input.durationMinutes;
+      }
+      if (params.input.reminderMinutesBefore !== undefined) {
+        data.reminderMinutesBefore = nextReminderMinutes;
+      }
+      if (scheduleChanged) {
+        data.reminderAt = computeReminderAt(nextScheduledAt, nextReminderMinutes);
+        data.reminderSentAt = null;
+      }
 
-    await tripItineraryItem.update({ where: { id: params.itemId }, data });
-    const fresh = await trip.findUnique({ where: { id: params.tripId }, include: tripInclude });
-    return serializeDetail(fresh!);
-  });
+      await tripItineraryItem.update({ where: { id: params.itemId }, data });
+      if (params.input.travelers !== undefined) {
+        await tx.tripItemTraveler.deleteMany({ where: { itemId: params.itemId } });
+        await linkEventTravelers(
+          tx,
+          existing,
+          [{ itemId: params.itemId, travelers: params.input.travelers }],
+          params.userId,
+        );
+      }
+      const fresh = await trip.findUnique({ where: { id: params.tripId }, include: tripInclude });
+      return serializeDetail(fresh!);
+    });
+  } catch (error) {
+    if (error instanceof TripTravelerError) return { error: error.message, status: 400 };
+    throw error;
+  }
 }
 
 export async function deleteTripItem(params: {
@@ -1444,7 +1575,8 @@ export async function duplicateTripDay(params: {
     });
 
     if (params.includeEvents !== false && sourceItems.length > 0) {
-      await tripItineraryItem.createMany({
+      const copies = await tripItineraryItem.createManyAndReturn({
+        select: { id: true, position: true },
         data: sourceItems.map((item, offset) => ({
           tripId: params.tripId,
           dayId: created.id,
@@ -1479,6 +1611,14 @@ export async function duplicateTripDay(params: {
           vehicleId: item.vehicleId,
         })),
       });
+      // And the same travellers.
+      const travelers = copies.flatMap((copy) =>
+        (sourceItems[copy.position]?.travelers ?? []).map((link) => ({
+          itemId: copy.id,
+          tripTravelerId: link.tripTravelerId,
+        })),
+      );
+      if (travelers.length > 0) await tx.tripItemTraveler.createMany({ data: travelers });
     }
 
     const ordered = [...days];

@@ -82,6 +82,7 @@ function item(id: number, extra: Partial<TripItineraryItemSummary> = {}): TripIt
     driver: null,
     officer: null,
     vehicle: null,
+    travelers: [],
     ...extra,
   };
 }
@@ -181,6 +182,16 @@ describe('buildClientItinerary', () => {
     expect(withCrew!.notes).toBe('Security: Named Officer');
     // The linked driver replaces the typed-in one.
     expect(withCrew!.details.map((d) => d.label)).toEqual(['Pick-up']);
+  });
+
+  it('says who each event is for, and nothing for the whole party', () => {
+    const dinner = item(6, { travelers: [{ id: 1, name: 'Lead Person' }, { id: 2, name: 'Second Guest' }] });
+    const shown = buildClientItinerary(trip('Active', [dinner, booking]), {
+      includeCrew: false,
+      includeAttachments: true,
+    }).days[0]!.items;
+    expect(shown.find((i) => i.id === dinner.id)!.travelers).toEqual(['Lead Person', 'Second Guest']);
+    expect(shown.find((i) => i.id === booking.id)!.travelers).toEqual([]);
   });
 
   it('writes a flight’s time in its airport’s zone', () => {

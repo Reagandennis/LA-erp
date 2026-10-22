@@ -71,6 +71,7 @@ export async function PATCH(
       endDate: validation.data.endDate,
       currency: validation.data.currency,
       notes: validation.data.notes,
+      travelers: validation.data.travelers,
     },
   });
 
@@ -78,7 +79,9 @@ export async function PATCH(
     return NextResponse.json({ error: result.error }, { status: result.status ?? 400 });
   }
 
-  if (validation.data.status && previous && validation.data.status !== previous.status) {
+  const { status, ...otherChanges } = validation.data;
+  const statusChanged = Boolean(status && previous && status !== previous.status);
+  if (statusChanged) {
     await recordAuditEvent({
       action: 'trip.status.changed',
       entityType: 'trip',
@@ -87,18 +90,25 @@ export async function PATCH(
       metadata: {
         reference: result.reference,
         trackingCode: result.trackingCode,
-        from: previous.status,
-        to: validation.data.status,
+        from: previous!.status,
+        to: status,
       },
       request,
     });
-  } else {
+  }
+  // The edit form sends a status change along with other edits; log both.
+  if (!statusChanged || Object.keys(otherChanges).length > 0) {
     await recordAuditEvent({
       action: 'trip.updated',
       entityType: 'trip',
       entityId: String(id),
       actorUserId: auth.user.id,
-      metadata: { reference: result.reference, trackingCode: result.trackingCode },
+      metadata: {
+        reference: result.reference,
+        trackingCode: result.trackingCode,
+        // Ids, not names: travellers are protectees.
+        ...(otherChanges.travelers ? { travelerIds: result.travelers.map((t) => t.id) } : {}),
+      },
       request,
     });
   }

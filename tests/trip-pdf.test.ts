@@ -43,6 +43,7 @@ const itinerary: ClientItinerary = {
           // Helvetica has no arrow; the renderer swaps it for one it has.
           title: '179 Runda Drive → JW Marriott',
           subtitle: null,
+          travelers: ['Amina Otieno'],
           place: 'JKIA T1A',
           address: null,
           phone: '+254 700 000000',

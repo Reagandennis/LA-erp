@@ -56,6 +56,8 @@ export interface TripItineraryItemSummary {
   driver: { id: number; name: string; phone: string | null } | null;
   officer: { id: number; name: string; callSign: string | null; grade: string; phone: string | null } | null;
   vehicle: { id: number; registration: string; make: string | null; model: string | null; type: string } | null;
+  /** The trip's travellers this event is for, lead first. Empty means the whole party. */
+  travelers: { id: number; name: string }[];
 }
 
 /** A driver, CPO or vehicle offered by the crew pickers (see lib/trip-crew). */
@@ -150,6 +152,21 @@ export interface TravelerOption {
   id: number;
   name: string;
   customerId: number;
+}
+
+/** A client, as the trip form offers them. */
+export interface CustomerOption {
+  id: number;
+  name: string;
+  company: string | null;
+  email: string | null;
+}
+
+/** What the trip form picks from, from GET /api/trips/form-options. */
+export interface TripFormOptions {
+  customers: CustomerOption[];
+  owners: OwnerOption[];
+  travelers: TravelerOption[];
 }
 
 /** The trip list page's tabs. Close out needs the Trip Close Out grant. */

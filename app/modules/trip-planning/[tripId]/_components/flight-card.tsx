@@ -20,6 +20,7 @@ import { isValidTimeZone } from '@/lib/zoned-time';
 import type { TripItineraryItemSummary } from '../../types';
 import { AttachmentStrip } from './attachment-strip';
 import { CrewRow } from './crew-row';
+import { TravelerRow } from './event-travelers';
 
 /** How often the countdown re-reads the clock. */
 const TICK_MS = 30_000;
@@ -302,6 +303,7 @@ export default function FlightCard({
             {item.description}
           </p>
         )}
+        <TravelerRow item={item} />
         {item.body && <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{item.body}</p>}
 
         {/* Boarding-pass style detail strip */}

@@ -41,6 +41,8 @@ export interface ClientItineraryItem {
   startsAt: string | null;
   title: string;
   subtitle: string | null;
+  /** Who it's for, lead first; empty when it's the whole party. */
+  travelers: string[];
   place: string | null;
   address: string | null;
   phone: string | null;
@@ -168,6 +170,7 @@ function clientItem(item: TripItineraryItemSummary, options: ClientItineraryOpti
     startsAt: item.scheduledAt,
     title: item.description,
     subtitle: item.subtitle,
+    travelers: item.travelers.map((traveler) => traveler.name),
     place: item.placeName,
     address: item.address && item.address !== item.placeName ? item.address : null,
     phone: item.phone,

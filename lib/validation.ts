@@ -430,6 +430,15 @@ export const tripTravelerInputSchema = z.union([
   z.object({ name: z.string().trim().min(1, 'Traveller name is required').max(200) }).strict(),
 ]);
 
+/**
+ * Who an event is for; empty means the whole party. Someone not on the trip
+ * yet joins it, as when building the trip.
+ */
+const eventTravelersSchema = z
+  .array(tripTravelerInputSchema)
+  .max(50, 'An event can have at most 50 travellers')
+  .optional();
+
 export const tripCreateSchema = z.object({
   customerId: z.number().int().positive('Client is required'),
   // The first entry is the lead traveller.
@@ -460,12 +469,18 @@ export const tripUpdateSchema = z
     endDate: z.string().trim().optional().nullable(),
     currency: currencySchema.optional(),
     notes: z.string().trim().max(10000).optional().nullable(),
+    /** Replaces who's on the trip, lead first. Left out, they stay as they are. */
+    travelers: z
+      .array(tripTravelerInputSchema)
+      .min(1, 'Keep at least one traveller')
+      .max(50, 'A trip can have at most 50 travellers')
+      .optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated');
 
 export const tripItineraryItemAddSchema = z.object({
   items: z
-    .array(tripItineraryItemDraftSchema.superRefine(requireCrew))
+    .array(tripItineraryItemDraftSchema.extend({ travelers: eventTravelersSchema }).superRefine(requireCrew))
     .min(1, 'Add at least one item')
     .max(100),
 });
@@ -494,6 +509,8 @@ export const tripItineraryItemUpdateSchema = z
       .nullable(),
     imageUrl: z.string().trim().max(2048).optional().nullable(),
     confirmationCode: z.string().trim().max(100).optional().nullable(),
+    /** Replaces the event's travellers; left out, they stay as they are. */
+    travelers: eventTravelersSchema,
   })
   .refine(
     (value) => Object.keys(value).length > 0,

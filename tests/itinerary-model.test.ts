@@ -54,6 +54,7 @@ function item(
     driver: null,
     officer: null,
     vehicle: null,
+    travelers: [],
     ...extra,
   };
 }

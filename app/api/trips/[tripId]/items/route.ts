@@ -69,6 +69,7 @@ export async function POST(
       driverId: item.driverId ?? null,
       officerId: item.officerId ?? null,
       vehicleId: item.vehicleId ?? null,
+      travelers: item.travelers ?? [],
     })),
   });
 

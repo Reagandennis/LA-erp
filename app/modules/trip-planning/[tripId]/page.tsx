@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getServerAuth } from '@/lib/auth';
 import { tripForViewer } from '@/lib/trip-costs';
 import { listCrewOptions } from '@/lib/trip-crew';
-import { getTripForUser } from '@/lib/trips';
+import { getTripForUser, listTravelerOptions } from '@/lib/trips';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
 
@@ -30,12 +30,16 @@ export default async function TripItineraryPage({
 
   const trip = await getTripForUser({ id: tripId, userId: auth.user.id, isAdmin });
   if (!trip) notFound();
-  const crewOptions = await listCrewOptions(trip.id);
+  const [crewOptions, clientTravelers] = await Promise.all([
+    listCrewOptions(trip.id),
+    listTravelerOptions(trip.customer.id),
+  ]);
 
   return (
     <ItineraryPageClient
       trip={tripForViewer(trip, auth.user)}
       crewOptions={crewOptions}
+      clientTravelers={clientTravelers}
       currentUser={{ id: auth.user.id, name: auth.user.name, email: auth.user.email }}
       isAdmin={isAdmin}
     />
