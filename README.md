@@ -513,8 +513,8 @@ Tests live in `tests/` and run on Vitest.
 
 `npm run perf` drives a headless browser through the main screens of a running
 app and fails when a navigation is slower than its budget (default 1.5 s to
-content). It is what `.github/workflows/perf.yml` runs on every pull request
-against the demo data. Locally:
+content). Run it against the demo data before merging navigation changes.
+Locally:
 
 ```bash
 npm i --no-save playwright@1.58.2 && npx playwright install chromium
