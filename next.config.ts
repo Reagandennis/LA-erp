@@ -28,6 +28,10 @@ const nextConfig: NextConfig = {
   // responses, let it own that CPU work instead of Node. Read at build time.
   compress: process.env.REVERSE_PROXY_COMPRESSION !== 'true',
   experimental: {
+    // Keep the "security" upgrade policy: `next dev`/`next build` remind us
+    // when the installed version has a published security advisory, and
+    // `next upgrade --agent` defaults to the safe patch rather than the latest minor.
+    agentUpgrade: 'security',
     // Every screen is rendered on demand, so without this the client cache
     // holds a visited page for 0 s and each sidebar click waits on the server
     // again. Thirty seconds makes back-and-forth navigation instant; screens
