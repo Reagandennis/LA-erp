@@ -1,6 +1,5 @@
 'use client';
 
-import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -8,26 +7,29 @@ import { useEffect, useState } from 'react';
 import ShowMoreButton from '@/app/ui/show-more-button';
 
 import CloseoutPanel from './closeout-panel';
+import {
+  STATUS_FILTERS,
+  TRIP_SORT_OPTIONS,
+  appendTripPage,
+  applyListQuery,
+  formatTripDate,
+  listPageSearchParams,
+  listQueryKey,
+  type TripListQuery,
+} from './list-model';
 import TripBuilder from './trip-builder';
 import type {
   CloseoutTrip,
-  OwnerOption,
-  TravelerOption,
   TripCloseout,
   TripDetail,
+  TripFormOptions,
   TripPage,
+  TripSort,
   TripStatusCounts,
   TripStatusFilter,
   TripSummary,
   TripsTab,
 } from './types';
-
-interface CustomerOption {
-  id: number;
-  name: string;
-  company: string | null;
-  email: string | null;
-}
 
 interface TripsClientProps {
   currentUser: { id: number; name: string; email: string };
@@ -36,21 +38,17 @@ interface TripsClientProps {
   /** Whether the Close out tab exists for this user at all. */
   canCloseOut: boolean;
   initialTab: TripsTab;
-  /** The first page of the unfiltered list; the rest comes from /api/trips. */
+  /** The search, status and sort the page opened with, read from the URL. */
+  initialQuery: TripListQuery;
+  /** The first page of `initialQuery`; the rest comes from /api/trips. */
   initialTrips: TripSummary[];
   initialTotal: number;
-  initialPageSize: number;
   initialCounts: TripStatusCounts;
-  initialCustomers: CustomerOption[];
-  initialOwners: OwnerOption[];
-  initialTravelers: TravelerOption[];
   /** Null until the Close out tab is opened (or without the grant); then fetched on demand. */
   initialCloseoutTrips: CloseoutTrip[] | null;
   /** Completed trips awaiting close-out, for the tab badge while the list isn't loaded. */
   initialPendingCloseouts: number;
 }
-
-const STATUS_FILTERS: TripStatusFilter[] = ['All', 'Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
 
 const STATUS_STYLES: Record<string, string> = {
   Draft: 'bg-gray-100 text-gray-600',
@@ -69,24 +67,8 @@ function travelerLine(travelers: TripSummary['travelers']): string | null {
   return rest.length > 0 ? `${lead.name} +${rest.length}` : lead.name;
 }
 
-function formatDate(value: string | null) {
-  if (!value) return '—';
-  return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-/** What the list is showing: the search box (settled) and the status pill. */
-interface ListQuery {
-  q: string;
-  status: TripStatusFilter;
-}
-
-const queryKey = (query: ListQuery) => `${query.status}\u0000${query.q}`;
-
-async function fetchTripPage(query: ListQuery, page: number): Promise<TripPage> {
-  const params = new URLSearchParams({ page: String(page) });
-  if (query.q) params.set('q', query.q);
-  if (query.status !== 'All') params.set('status', query.status);
-  const r = await fetch(`/api/trips?${params}`, { credentials: 'include', cache: 'no-store' });
+async function fetchTripPage(query: TripListQuery, page: number): Promise<TripPage> {
+  const r = await fetch(`/api/trips?${listPageSearchParams(query, page)}`, { credentials: 'include', cache: 'no-store' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()) as TripPage;
 }
@@ -104,12 +86,10 @@ export default function TripsClient({
   canPlan,
   canCloseOut,
   initialTab,
+  initialQuery,
   initialTrips,
   initialTotal,
   initialCounts,
-  initialCustomers,
-  initialOwners,
-  initialTravelers,
   initialCloseoutTrips,
   initialPendingCloseouts,
 }: TripsClientProps) {
@@ -117,16 +97,23 @@ export default function TripsClient({
   const [tab, setTab] = useState<TripsTab>(initialTab);
   const [closeoutTrips, setCloseoutTrips] = useState<CloseoutTrip[] | null>(initialCloseoutTrips);
   const [closeoutError, setCloseoutError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [settledQuery, setSettledQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<TripStatusFilter>('All');
+  const [searchQuery, setSearchQuery] = useState(initialQuery.q);
+  const [settledQuery, setSettledQuery] = useState(initialQuery.q);
+  const [activeFilter, setActiveFilter] = useState<TripStatusFilter>(initialQuery.status);
+  const [sort, setSort] = useState<TripSort>(initialQuery.sort);
   const [counts, setCounts] = useState<TripStatusCounts>(initialCounts);
-  const [builderOpen, setBuilderOpen] = useState(false);
 
-  const query: ListQuery = { q: settledQuery, status: activeFilter };
-  const wantKey = queryKey(query);
+  // The New trip form's clients, owners and travellers are fetched the first
+  // time it opens and kept for the next; the form shows once they're here.
+  const [formOptions, setFormOptions] = useState<TripFormOptions | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [builderOpening, setBuilderOpening] = useState(false);
+  const [builderError, setBuilderError] = useState<string | null>(null);
+
+  const query: TripListQuery = { q: settledQuery, status: activeFilter, sort };
+  const wantKey = listQueryKey(query);
   const [loaded, setLoaded] = useState<LoadedList>({
-    key: queryKey({ q: '', status: 'All' }),
+    key: listQueryKey(initialQuery),
     trips: initialTrips,
     total: initialTotal,
     page: 1,
@@ -134,25 +121,23 @@ export default function TripsClient({
   const [listError, setListError] = useState<{ key: string; message: string } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Honour legacy ?focus=<tripId> deep links (from quote drawer, notifications) by
-  // redirecting to the dedicated itinerary page.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const focus = Number(params.get('focus'));
-    if (Number.isInteger(focus) && focus > 0) {
-      router.replace(`/modules/trip-planning/${focus}`);
-    }
-  }, [router]);
-
   // Typing settles into a query after a pause, so each keystroke isn't a request.
   useEffect(() => {
     const timer = window.setTimeout(() => setSettledQuery(searchQuery.trim()), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
 
-  // A new query (search text or status pill) fetches its first page from the
-  // server. The list keeps showing the previous rows, dimmed, until it arrives.
+  // The settled query lives in the URL (next to `tab`), so a refresh, a
+  // shared link or coming back from an itinerary lands on the same view.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const before = url.search;
+    applyListQuery(url.searchParams, { q: settledQuery, status: activeFilter, sort });
+    if (url.search !== before) window.history.replaceState(null, '', url);
+  }, [settledQuery, activeFilter, sort]);
+
+  // A new query (search text, status pill or sort) fetches its first page from
+  // the server. The list keeps showing the previous rows, dimmed, until it arrives.
   const listCurrent = loaded.key === wantKey;
   const listFailed = listError?.key === wantKey;
   useEffect(() => {
@@ -160,7 +145,7 @@ export default function TripsClient({
     let cancelled = false;
     (async () => {
       try {
-        const page = await fetchTripPage({ q: settledQuery, status: activeFilter }, 1);
+        const page = await fetchTripPage({ q: settledQuery, status: activeFilter, sort }, 1);
         if (cancelled) return;
         setLoaded({ key: wantKey, trips: page.trips, total: page.total, page: page.page });
       } catch {
@@ -170,7 +155,7 @@ export default function TripsClient({
     return () => {
       cancelled = true;
     };
-  }, [wantKey, listCurrent, listFailed, settledQuery, activeFilter]);
+  }, [wantKey, listCurrent, listFailed, settledQuery, activeFilter, sort]);
 
   const loadMore = async () => {
     if (!listCurrent || loadingMore) return;
@@ -179,13 +164,7 @@ export default function TripsClient({
       const page = await fetchTripPage(query, loaded.page + 1);
       setLoaded((current) => {
         if (current.key !== wantKey) return current;
-        const seen = new Set(current.trips.map((t) => t.id));
-        return {
-          ...current,
-          trips: [...current.trips, ...page.trips.filter((t) => !seen.has(t.id))],
-          total: page.total,
-          page: page.page,
-        };
+        return { ...current, trips: appendTripPage(current.trips, page.trips), total: page.total, page: page.page };
       });
     } catch {
       setListError({ key: wantKey, message: "More trips couldn't be loaded. Try again." });
@@ -234,6 +213,29 @@ export default function TripsClient({
 
   const openTrip = (tripId: number) => {
     router.push(`/modules/trip-planning/${tripId}`);
+  };
+
+  const openBuilder = async () => {
+    setBuilderError(null);
+    if (formOptions) {
+      setBuilderOpen(true);
+      return;
+    }
+    setBuilderOpening(true);
+    try {
+      const r = await fetch('/api/trips/form-options', { credentials: 'include' });
+      const data = (await r.json().catch(() => null)) as (TripFormOptions & { error?: string }) | null;
+      if (!r.ok || !data?.customers) {
+        setBuilderError(data?.error ?? "The trip form couldn't be opened. Try again.");
+        return;
+      }
+      setFormOptions(data);
+      setBuilderOpen(true);
+    } catch {
+      setBuilderError("The trip form couldn't be opened. Try again.");
+    } finally {
+      setBuilderOpening(false);
+    }
   };
 
   const showTab = (next: TripsTab) => {
@@ -325,17 +327,25 @@ export default function TripsClient({
               </Link>
               <button
                 type="button"
-                onClick={() => setBuilderOpen(true)}
-                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90"
+                onClick={() => void openBuilder()}
+                disabled={builderOpening}
+                aria-busy={builderOpening || undefined}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
                 </svg>
-                New trip
+                {builderOpening ? 'Opening…' : 'New trip'}
               </button>
             </div>
           )}
         </header>
+
+        {builderError && (
+          <div role="alert" className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {builderError}
+          </div>
+        )}
 
         {canPlan && canCloseOut && (
           <nav className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-label="Trip planning sections">
@@ -406,36 +416,59 @@ export default function TripsClient({
                 </svg>
                 <input
                   type="search"
+                  aria-label="Search trips"
                   placeholder="Search by reference, tracking code, title, client, or traveller…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
-              <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
-                {STATUS_FILTERS.map((status) => (
-                  <button
-                    type="button"
-                    key={status}
-                    onClick={() => setActiveFilter(status)}
-                    className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
-                      activeFilter === status ? 'bg-primary text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
-                    }`}
-                  >
-                    {status}
-                  </button>
-                ))}
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide" role="group" aria-label="Filter by status">
+                {STATUS_FILTERS.map((status) => {
+                  const active = activeFilter === status;
+                  // Counts are the viewer's trips in each status, regardless of the search.
+                  const count = status === 'All' ? counts.total : counts[status];
+                  return (
+                    <button
+                      type="button"
+                      key={status}
+                      onClick={() => setActiveFilter(status)}
+                      aria-pressed={active}
+                      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                        active ? 'bg-primary text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                      }`}
+                    >
+                      {status}
+                      <span className={`rounded-full px-1.5 text-xs tabular-nums ${active ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                        {count.toLocaleString()}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+              <label className="flex items-center gap-2 text-sm text-gray-500 lg:border-l lg:border-gray-100 lg:pl-3">
+                <span className="whitespace-nowrap">Sort</span>
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as TripSort)}
+                  className="w-full rounded-lg bg-gray-50 px-2.5 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/30 lg:w-auto"
+                >
+                  {TRIP_SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             {/* Mobile cards */}
             <div className={`space-y-3 md:hidden ${listStale ? 'opacity-60' : ''}`} aria-busy={listStale || undefined}>
               {rows.map((trip) => (
-                <button
+                <Link
                   key={trip.id}
-                  type="button"
-                  onClick={() => openTrip(trip.id)}
-                  className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left transition-colors hover:border-primary/30"
+                  href={`/modules/trip-planning/${trip.id}`}
+                  className="block w-full rounded-2xl border border-gray-100 bg-white p-4 text-left transition-colors hover:border-primary/30"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -452,15 +485,15 @@ export default function TripsClient({
                     <p className="mt-0.5 truncate text-xs text-gray-500">{travelerLine(trip.travelers)}</p>
                   )}
                   <p className="mt-2 text-xs text-gray-400">
-                    {trip.itemCount} items · {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
+                    {trip.itemCount} items · {formatTripDate(trip.startDate)} → {formatTripDate(trip.endDate)}
                   </p>
                   <div className="mt-2">
                     <ResourceBadge count={trip.assignmentCount} />
                   </div>
-                </button>
+                </Link>
               ))}
               {listCurrent && rows.length === 0 && (
-                <EmptyState filtered={hasTrips || isFiltered} onCreate={() => setBuilderOpen(true)} />
+                <EmptyState filtered={hasTrips || isFiltered} onCreate={() => void openBuilder()} />
               )}
               {listFooter}
             </div>
@@ -487,13 +520,21 @@ export default function TripsClient({
                   {rows.map((trip) => (
                     <tr
                       key={trip.id}
-                      onClick={() => openTrip(trip.id)}
+                      // The reference is the real link (keyboard, middle-click, new tab);
+                      // the rest of the row opens the trip as a convenience.
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('a')) return;
+                        openTrip(trip.id);
+                      }}
                       className="group cursor-pointer transition-colors hover:bg-gray-50/70"
                     >
                       <td className="px-6 py-4">
-                        <p className="text-sm font-semibold text-gray-900 transition-colors group-hover:text-primary">
+                        <Link
+                          href={`/modules/trip-planning/${trip.id}`}
+                          className="text-sm font-semibold text-gray-900 transition-colors group-hover:text-primary focus:outline-none focus-visible:underline"
+                        >
                           {trip.reference}
-                        </p>
+                        </Link>
                         <p className="mt-0.5 max-w-[220px] truncate text-sm text-gray-500">{trip.title}</p>
                       </td>
                       <td className="px-6 py-4">
@@ -518,8 +559,8 @@ export default function TripsClient({
                         </p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-gray-500">{formatDate(trip.startDate)}</p>
-                        <p className="text-xs text-gray-400">→ {formatDate(trip.endDate)}</p>
+                        <p className="text-sm text-gray-500">{formatTripDate(trip.startDate)}</p>
+                        <p className="text-xs text-gray-400">→ {formatTripDate(trip.endDate)}</p>
                       </td>
                       <td className="px-6 py-4">
                         <ResourceBadge count={trip.assignmentCount} />
@@ -530,6 +571,7 @@ export default function TripsClient({
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
+                          aria-hidden="true"
                         >
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
@@ -539,7 +581,7 @@ export default function TripsClient({
                 </tbody>
               </table>
               {listCurrent && rows.length === 0 && (
-                <EmptyState filtered={hasTrips || isFiltered} onCreate={() => setBuilderOpen(true)} />
+                <EmptyState filtered={hasTrips || isFiltered} onCreate={() => void openBuilder()} />
               )}
               {listFooter}
             </div>
@@ -547,11 +589,11 @@ export default function TripsClient({
         )}
       </div>
 
-      {builderOpen && (
+      {builderOpen && formOptions && (
         <TripBuilder
-          customers={initialCustomers}
-          travelers={initialTravelers}
-          owners={initialOwners}
+          customers={formOptions.customers}
+          travelers={formOptions.travelers}
+          owners={formOptions.owners}
           currentUser={currentUser}
           onClose={() => setBuilderOpen(false)}
           onSaved={(trip) => {
@@ -577,7 +619,7 @@ function ResourceBadge({ count }: { count: number }) {
   if (count > 0) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
         </svg>
         {count} allocated
@@ -591,7 +633,7 @@ function EmptyState({ filtered, onCreate }: { filtered: boolean; onCreate: () =>
   return (
     <div className="px-6 py-16 text-center sm:py-20">
       <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-50 text-gray-300">
-        <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m0 0L9 7" />
         </svg>
       </div>

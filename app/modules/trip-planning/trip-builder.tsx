@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { localDateKeyPlusDays } from './list-model';
 import type { CustomerOption, OwnerOption, TravelerOption, TripDetail, TripStatus } from './types';
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'ZAR', 'KES', 'NGN'];
@@ -22,16 +23,6 @@ interface TripBuilderProps {
   trip?: TripDetail;
   onClose: () => void;
   onSaved: (trip: TripDetail) => void;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function plusDaysIso(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 const STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active'];
@@ -66,8 +57,10 @@ export default function TripBuilder({
   const [title, setTitle] = useState(trip?.title ?? '');
   const [description, setDescription] = useState(trip?.description ?? '');
   const [status, setStatus] = useState<TripStatus>(trip?.status ?? 'Draft');
-  const [startDate, setStartDate] = useState(trip ? dateInputValue(trip.startDate) : todayIso());
-  const [endDate, setEndDate] = useState(trip ? dateInputValue(trip.endDate) : plusDaysIso(7));
+  // Defaults are the viewer's own calendar day: a UTC date would already be
+  // tomorrow in the evening east of Greenwich, and still yesterday to its west.
+  const [startDate, setStartDate] = useState(trip ? dateInputValue(trip.startDate) : localDateKeyPlusDays(0));
+  const [endDate, setEndDate] = useState(trip ? dateInputValue(trip.endDate) : localDateKeyPlusDays(7));
   const [currency, setCurrency] = useState(trip?.currency ?? 'USD');
   const [notes, setNotes] = useState(trip?.notes ?? '');
   const [error, setError] = useState<string | null>(null);

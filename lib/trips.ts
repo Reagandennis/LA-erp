@@ -595,12 +595,19 @@ export async function listTripsForUser(params: {
 export const TRIP_PAGE_SIZE = 50;
 export const TRIP_PAGE_SIZE_MAX = 200;
 
+/** How the list is ordered: most recently updated, or by start date either way. */
+export type TripSort = 'updated' | 'start-asc' | 'start-desc';
+
+export const TRIP_SORTS: TripSort[] = ['updated', 'start-asc', 'start-desc'];
+
 export interface TripSearchInput {
   userId: number;
   isAdmin: boolean;
   /** Free text over reference, tracking code, title, client and traveller names. */
   q?: string | null;
   status?: TripStatus | null;
+  /** Defaults to most recently updated first. */
+  sort?: TripSort | null;
   /** 1-based. */
   page?: number;
   pageSize?: number;
@@ -635,6 +642,22 @@ export function buildTripSearchWhere(params: Pick<TripSearchInput, 'userId' | 'i
   return { AND: and };
 }
 
+/**
+ * The list's order. Trips without dates sort last either way, so a planner
+ * looking at what starts next sees dated trips first; id breaks ties so pages
+ * never overlap.
+ */
+export function tripSearchOrderBy(sort?: TripSort | null): Prisma.TripOrderByWithRelationInput[] {
+  switch (sort) {
+    case 'start-asc':
+      return [{ startDate: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }];
+    case 'start-desc':
+      return [{ startDate: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }];
+    default:
+      return [{ updatedAt: 'desc' }, { id: 'desc' }];
+  }
+}
+
 export function normalizeTripPaging(params: Pick<TripSearchInput, 'page' | 'pageSize'>): { page: number; pageSize: number } {
   const page = Number.isInteger(params.page) && (params.page as number) > 0 ? (params.page as number) : 1;
   const requested = Number.isInteger(params.pageSize) && (params.pageSize as number) > 0 ? (params.pageSize as number) : TRIP_PAGE_SIZE;
@@ -654,7 +677,7 @@ export async function searchTrips(params: TripSearchInput): Promise<TripPage> {
       where,
       include: tripListInclude,
       omit: tripListOmit,
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      orderBy: tripSearchOrderBy(params.sort),
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

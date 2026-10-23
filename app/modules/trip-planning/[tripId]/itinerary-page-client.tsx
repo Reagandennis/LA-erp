@@ -2,7 +2,8 @@
 
 import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   REMINDER_OPTIONS,
@@ -426,6 +427,27 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
   };
 }
 
+/**
+ * The Trips list is served from the client router cache for a while after a
+ * visit (experimental.staleTimes in next.config.ts), so a status change or
+ * edit made here would still show the old row there. Once the trip has
+ * changed, leaving this page (the Back link or the browser's back button)
+ * refreshes the router so the list is fetched again.
+ */
+function useRefreshListAfterEdits(trip: TripDetail, initialTrip: TripDetail) {
+  const router = useRouter();
+  const changed = useRef(false);
+  useEffect(() => {
+    if (trip !== initialTrip) changed.current = true;
+  }, [trip, initialTrip]);
+  useEffect(
+    () => () => {
+      if (changed.current) router.refresh();
+    },
+    [router],
+  );
+}
+
 export default function ItineraryPageClient({
   trip: initialTrip,
   crewOptions,
@@ -434,6 +456,7 @@ export default function ItineraryPageClient({
   isAdmin,
 }: ItineraryPageClientProps) {
   const [trip, setTrip] = useState<TripDetail>(initialTrip);
+  useRefreshListAfterEdits(trip, initialTrip);
   // Follows the trip's client, which the edit form can change.
   const [clientTravelers, setClientTravelers] = useState(initialClientTravelers);
   const [pending, setPending] = useState<string | null>(null);

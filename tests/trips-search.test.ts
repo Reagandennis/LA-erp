@@ -13,6 +13,7 @@ import {
   countTripsByStatus,
   normalizeTripPaging,
   searchTrips,
+  tripSearchOrderBy,
 } from '../lib/trips';
 
 function row(id: number) {
@@ -79,6 +80,22 @@ describe('trip search query', () => {
     expect(normalizeTripPaging({})).toEqual({ page: 1, pageSize: TRIP_PAGE_SIZE });
     expect(normalizeTripPaging({ page: 0, pageSize: -5 })).toEqual({ page: 1, pageSize: TRIP_PAGE_SIZE });
     expect(normalizeTripPaging({ page: 3, pageSize: 10_000 })).toEqual({ page: 3, pageSize: TRIP_PAGE_SIZE_MAX });
+  });
+
+  it('orders by last update unless a start-date sort is asked for, dateless trips last', () => {
+    expect(tripSearchOrderBy()).toEqual([{ updatedAt: 'desc' }, { id: 'desc' }]);
+    expect(tripSearchOrderBy('updated')).toEqual([{ updatedAt: 'desc' }, { id: 'desc' }]);
+    expect(tripSearchOrderBy('start-asc')).toEqual([{ startDate: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }]);
+    expect(tripSearchOrderBy('start-desc')).toEqual([{ startDate: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }]);
+  });
+
+  it('sorts the page as asked', async () => {
+    findMany.mockResolvedValue([row(1)]);
+    count.mockResolvedValue(1);
+
+    await searchTrips({ userId: 1, isAdmin: true, sort: 'start-asc' });
+
+    expect(findMany.mock.calls[0][0].orderBy).toEqual([{ startDate: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }]);
   });
 
   it('fetches one page with its total and never the long text fields', async () => {

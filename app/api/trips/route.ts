@@ -6,7 +6,17 @@ import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
 import { canSeeTripCosts, tripForViewer } from '@/lib/trip-costs';
-import { TRIP_PAGE_SIZE_MAX, TRIP_STATUSES, TripTravelerError, createTrip, listTripsForUser, searchTrips, type TripStatus } from '@/lib/trips';
+import {
+  TRIP_PAGE_SIZE_MAX,
+  TRIP_SORTS,
+  TRIP_STATUSES,
+  TripTravelerError,
+  createTrip,
+  listTripsForUser,
+  searchTrips,
+  type TripSort,
+  type TripStatus,
+} from '@/lib/trips';
 import { userHasRole } from '@/lib/user';
 import { tripCreateSchema } from '@/lib/validation';
 import { z } from 'zod';
@@ -14,17 +24,18 @@ import { z } from 'zod';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const SEARCH_PARAMS = ['q', 'status', 'page', 'pageSize'] as const;
+const SEARCH_PARAMS = ['q', 'status', 'sort', 'page', 'pageSize'] as const;
 
 const tripSearchQuerySchema = z.object({
   q: z.string().trim().max(200).optional(),
   status: z.enum(TRIP_STATUSES as [TripStatus, ...TripStatus[]]).optional(),
+  sort: z.enum(TRIP_SORTS as [TripSort, ...TripSort[]]).optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(TRIP_PAGE_SIZE_MAX).optional(),
 });
 
 /**
- * With `q`, `status`, `page` or `pageSize` the response is one page
+ * With `q`, `status`, `sort`, `page` or `pageSize` the response is one page
  * (`{ trips, total, page, pageSize }`); with none it is the whole list
  * (`{ trips }`), which other screens still read.
  */

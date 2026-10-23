@@ -30,6 +30,7 @@ vi.mock('../lib/trips', () => ({
   createTrip,
   TripTravelerError,
   TRIP_STATUSES: ['Draft', 'Planned', 'Active', 'Completed', 'Cancelled'],
+  TRIP_SORTS: ['updated', 'start-asc', 'start-desc'],
   TRIP_PAGE_SIZE_MAX: 200,
 }));
 vi.mock('../lib/trip-costs', () => ({
@@ -95,6 +96,18 @@ describe('trips collection route', () => {
     expect(listTripsForUser).not.toHaveBeenCalled();
   });
 
+  it('passes the sort through', async () => {
+    requireRequestAuth.mockResolvedValue({
+      auth: { user: { id: 5, roles: [] } },
+      response: null,
+    });
+    searchTrips.mockResolvedValue({ trips: [], total: 0, page: 1, pageSize: 50 });
+
+    const r = await GET(new NextRequest('http://localhost/api/trips?sort=start-asc'));
+    expect(r.status).toBe(200);
+    expect(searchTrips).toHaveBeenCalledWith({ userId: 5, isAdmin: false, sort: 'start-asc' });
+  });
+
   it('rejects an unknown status or a bad page with 400', async () => {
     requireRequestAuth.mockResolvedValue({
       auth: { user: { id: 5, roles: [] } },
@@ -104,6 +117,7 @@ describe('trips collection route', () => {
     expect((await GET(new NextRequest('http://localhost/api/trips?status=Lost'))).status).toBe(400);
     expect((await GET(new NextRequest('http://localhost/api/trips?page=0'))).status).toBe(400);
     expect((await GET(new NextRequest('http://localhost/api/trips?pageSize=999'))).status).toBe(400);
+    expect((await GET(new NextRequest('http://localhost/api/trips?sort=title'))).status).toBe(400);
     expect(searchTrips).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,13 @@
 export type TripStatus = 'Draft' | 'Planned' | 'Active' | 'Completed' | 'Cancelled';
 
+export const TRIP_STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
+
 export type TripStatusFilter = 'All' | TripStatus;
+
+/** How the list is ordered (mirrors lib/trips.ts): recently updated, or by start date. */
+export type TripSort = 'updated' | 'start-asc' | 'start-desc';
+
+export const TRIP_SORTS: TripSort[] = ['updated', 'start-asc', 'start-desc'];
 
 export type TripItemType = 'flight' | 'car' | 'hotel' | 'location' | 'activity';
 
@@ -124,7 +131,7 @@ export interface TripSummary {
   logCount: number;
 }
 
-/** One page of the list from GET /api/trips?q=&status=&page= (mirrors lib/trips.ts). */
+/** One page of the list from GET /api/trips?q=&status=&sort=&page= (mirrors lib/trips.ts). */
 export interface TripPage {
   trips: TripSummary[];
   total: number;
