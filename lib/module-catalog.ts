@@ -7,6 +7,14 @@ export interface SeedModuleDefinition {
 }
 
 export const DEFAULT_MODULES: SeedModuleDefinition[] = [
+  // The ops team's live board; the sidebar pins it under Dashboard.
+  {
+    slug: 'ops-dashboard',
+    name: 'Ops Dashboard',
+    description: 'Monitor ongoing trips, flights, WhatsApp, tasks, fuel and maintenance, and act on them in one place.',
+    category: 'Operations',
+    sortOrder: 54,
+  },
   {
     slug: 'todo-personal',
     name: 'Tasks',

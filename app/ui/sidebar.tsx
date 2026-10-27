@@ -54,6 +54,9 @@ function subscribeRecent(listener: () => void) {
 /** Only worth a "Recent" group once the list is long enough to scroll. */
 const RECENT_FROM_MODULES = 8;
 
+/** Sits straight under Dashboard instead of in its category group. */
+const PINNED_SLUG = 'ops-dashboard';
+
 /** Below this width the sidebar starts collapsed and overlays the page when opened. */
 const SMALL_SCREEN = '(max-width: 1023px)';
 const isSmallScreen = () => typeof window !== 'undefined' && window.matchMedia(SMALL_SCREEN).matches;
@@ -121,9 +124,13 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
       ? recentSlugs.map((slug) => modules.find((m) => m.slug === slug)).filter((m): m is Module => Boolean(m))
       : [];
 
+  const pinned = shown.find((m) => m.slug === PINNED_SLUG);
+  const showDashboard = !needle || 'dashboard'.includes(needle);
+
   // Group modules by category
   const groupedModules: Record<string, Module[]> = {};
   for (const m of shown) {
+    if (m === pinned) continue;
     const cat = m.category || 'Other';
     if (!groupedModules[cat]) {
       groupedModules[cat] = [];
@@ -281,8 +288,9 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
           </div>
         )}
 
-        {(!needle || 'dashboard'.includes(needle)) && (
+        {(showDashboard || pinned) && (
         <div className="space-y-1">
+          {showDashboard && (
            <Link
             href="/dashboard"
             title={isCollapsed ? "Dashboard" : ""}
@@ -301,6 +309,8 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
             </div>
             {!isCollapsed && <span className="whitespace-nowrap truncate text-sm">Dashboard</span>}
           </Link>
+          )}
+          {pinned && renderModule(pinned)}
         </div>
         )}
 

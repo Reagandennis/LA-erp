@@ -33,6 +33,8 @@ export const API_ACCESS = {
   /** Driver licences: their own module, and the people directory's driver profiles. */
   licences: ['drivers-license-expiry', ...PEOPLE_MODULE_SLUGS],
   notes: ['notes'],
+  /** The board itself; each panel on it is gated by its own module as well. */
+  opsDashboard: ['ops-dashboard'],
   quotes: ['quotes'],
   /** Shared by the quote and invoice builders' customer picker, and the CRM. */
   quoteCustomers: ['quotes', 'invoices-review', 'customers'],

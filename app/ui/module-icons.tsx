@@ -165,6 +165,13 @@ export const MODULE_ICONS: Record<string, ReactNode> = {
       <path strokeLinecap="round" strokeWidth={2} d="M8.4 15.4a3 3 0 015.2 0" />
     </svg>
   ),
+  // A monitor showing a pulse line: the live ops board.
+  'ops-dashboard': (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 4h14a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2zm4 17h6m-3-4v4" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6.5 11h2.5l1.5-3 3 6 1.5-3h2.5" />
+    </svg>
+  ),
   handover: (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
