@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { tx, transaction } = vi.hoisted(() => {
+const { tx, $queryRaw, transaction } = vi.hoisted(() => {
   const tx = {
     traveler: { count: vi.fn(), create: vi.fn() },
     tripTraveler: { createMany: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
-    tripSequence: { upsert: vi.fn() },
     trackingSequence: { upsert: vi.fn() },
-    trip: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    trip: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+    customer: { findUnique: vi.fn() },
     tripItineraryItem: { createMany: vi.fn(), createManyAndReturn: vi.fn(), update: vi.fn() },
     tripItemTraveler: { createMany: vi.fn(), deleteMany: vi.fn() },
   };
-  return { tx, transaction: vi.fn((fn: (client: typeof tx) => unknown) => fn(tx)) };
+  // The running reference number is reserved with raw SQL.
+  const $queryRaw = vi.fn();
+  return { tx, $queryRaw, transaction: vi.fn((fn: (client: typeof tx) => unknown) => fn({ ...tx, $queryRaw } as typeof tx)) };
 });
 
 vi.mock('server-only', () => ({}));
@@ -57,9 +59,16 @@ function baseInput() {
     endDate: null,
     currency: 'USD',
     notes: null,
+    country: 'Kenya' as const,
     items: [],
     createdById: 1,
   };
+}
+
+/** The highest number on a reference so far, then the one the sequence hands out. */
+function numbersFrom(highest: number, next: number) {
+  $queryRaw.mockReset();
+  $queryRaw.mockResolvedValueOnce([{ n: highest }]).mockResolvedValueOnce([{ lastNumber: next }]);
 }
 
 describe('createTrip travellers', () => {
@@ -67,7 +76,9 @@ describe('createTrip travellers', () => {
     for (const delegate of Object.values(tx)) {
       for (const fn of Object.values(delegate)) fn.mockReset();
     }
-    tx.tripSequence.upsert.mockResolvedValue({ year: 2026, lastNumber: 1 });
+    numbersFrom(2660, 2661);
+    tx.trip.findMany.mockResolvedValue([]);
+    tx.customer.findUnique.mockResolvedValue({ name: 'Acme Logistics' });
     tx.trackingSequence.upsert.mockResolvedValue({ year: 2026, lastNumber: 1 });
     tx.trip.create.mockResolvedValue(tripRecord);
     tx.trip.findUnique.mockResolvedValue(tripRecord);
@@ -113,7 +124,7 @@ describe('createTrip travellers', () => {
       createTrip({ ...baseInput(), travelers: [{ travelerId: 11 }, { travelerId: 99 }] }),
     ).rejects.toBeInstanceOf(TripTravelerError);
 
-    expect(tx.tripSequence.upsert).not.toHaveBeenCalled();
+    expect($queryRaw).not.toHaveBeenCalled();
     expect(tx.trip.create).not.toHaveBeenCalled();
     expect(tx.tripTraveler.createMany).not.toHaveBeenCalled();
   });
@@ -124,6 +135,59 @@ describe('createTrip travellers', () => {
     expect(tx.traveler.count).not.toHaveBeenCalled();
     expect(tx.tripTraveler.createMany).not.toHaveBeenCalled();
     expect(tx.trip.create).toHaveBeenCalled();
+  });
+});
+
+describe('createTrip references', () => {
+  beforeEach(() => {
+    for (const delegate of Object.values(tx)) {
+      for (const fn of Object.values(delegate)) fn.mockReset();
+    }
+    numbersFrom(2660, 2661);
+    tx.trackingSequence.upsert.mockResolvedValue({ year: 2026, lastNumber: 1 });
+    tx.trip.create.mockResolvedValue(tripRecord);
+    tx.trip.findUnique.mockResolvedValue(tripRecord);
+  });
+
+  const created = () => tx.trip.create.mock.calls[0]![0].data as { reference: string; country: string };
+
+  it("uses the client's usual code, the country, the start month and the next number", async () => {
+    tx.trip.findMany.mockResolvedValue([
+      { customerId: 3, reference: 'MCF-ETH-SEP-2650' },
+      { customerId: 3, reference: 'MCF-KEN-AUG-2600' },
+      { customerId: 3, reference: 'MCF-KEN-JUL-2500' },
+    ]);
+
+    await createTrip({ ...baseInput(), country: 'Ethiopia', startDate: '2026-11-03' });
+
+    expect(created()).toMatchObject({ reference: 'MCF-ETH-NOV-2661', country: 'Ethiopia' });
+    expect(tx.trip.findMany.mock.calls[0]![0].where).toEqual({ customerId: 3 });
+  });
+
+  it('takes the client code the planner gave', async () => {
+    await createTrip({ ...baseInput(), clientCode: 'tkgm', startDate: '2026-02-10' });
+
+    expect(created().reference).toBe('TKGM-KEN-FEB-2661');
+    expect(tx.trip.findMany).not.toHaveBeenCalled();
+  });
+
+  it("starts a new client's code from their initials", async () => {
+    tx.trip.findMany.mockResolvedValue([]);
+    tx.customer.findUnique.mockResolvedValue({ name: 'Mastercard Foundation' });
+
+    await createTrip({ ...baseInput(), country: 'Uganda', startDate: '2026-12-01' });
+
+    expect(created().reference).toBe('MF-UGA-DEC-2661');
+  });
+
+  it('never hands out a number below one already on a reference', async () => {
+    numbersFrom(2660, 2661);
+    tx.trip.findMany.mockResolvedValue([{ customerId: 3, reference: 'ACME-KEN-OCT-2001' }]);
+
+    await createTrip({ ...baseInput(), startDate: '2026-10-27' });
+
+    // INSERT … VALUES (row 0, highest + 1) ON CONFLICT … GREATEST(lastNumber, highest) + 1
+    expect($queryRaw.mock.calls[1]!.slice(1)).toEqual([0, 2661, 2660]);
   });
 });
 

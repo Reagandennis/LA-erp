@@ -201,9 +201,9 @@ export function CrewFields({
           onChange={(id) => onChange({ vehicleId: id })}
         />
         <ResourcePicker
-          label="CPO"
+          label="Close Protection Officer"
           required={false}
-          placeholder="No CPO"
+          placeholder="None"
           options={options.officers}
           value={officerId}
           onChange={(id) => onChange({ officerId: id })}

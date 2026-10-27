@@ -139,6 +139,8 @@ function safeUrl(url: string | null): string | null {
 function hiddenDetail(key: string, item: TripItineraryItemSummary, includeCrew: boolean): boolean {
   // Already part of `when`.
   if (key === 'timezone') return true;
+  // Ours alone, like the service code (the catalog's internal SKU).
+  if (categoryMeta(item.category).fields.some((field) => field.key === key && field.internal)) return true;
   if (!CREW_DETAIL_KEYS.has(key)) return false;
   // Once linked, the crew register's driver and vehicle replace the typed-in ones.
   return !includeCrew || Boolean(key === 'vehicle' ? item.vehicle : item.driver);
@@ -153,7 +155,7 @@ function clientItem(item: TripItineraryItemSummary, options: ClientItineraryOpti
   if (includeCrew && item.driver) crew.push({ role: 'Driver', name: item.driver.name, phone: item.driver.phone });
   if (includeCrew && item.officer) {
     const name = item.officer.callSign ? `${item.officer.name} (${item.officer.callSign})` : item.officer.name;
-    crew.push({ role: 'Close protection', name, phone: item.officer.phone });
+    crew.push({ role: 'Close Protection Officer', name, phone: item.officer.phone });
   }
   const vehicle =
     includeCrew && item.vehicle

@@ -31,7 +31,7 @@ import { POST } from '../app/api/quotes/[quoteId]/trip/route';
 function makeRequest(body: object = {}) {
   return new NextRequest('http://localhost/api/quotes/42/trip', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ country: 'Kenya', ...body }),
   });
 }
 

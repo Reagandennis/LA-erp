@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
+import { SERVICE_COUNTRIES, SERVICE_COUNTRY_CODES } from '@/lib/service-catalog';
+import { isServiceCountry, normalizeClientCode, referenceMonth, referenceNumber } from '@/lib/trip-reference';
+
 import { localDateKeyPlusDays } from './list-model';
 import type { CustomerOption, OwnerOption, TravelerOption, TripDetail, TripStatus } from './types';
 
@@ -19,6 +22,8 @@ interface TripBuilderProps {
   travelers: TravelerOption[];
   owners: OwnerOption[];
   currentUser: { id: number; name: string; email: string };
+  /** What a new trip's reference will end with, for the preview. */
+  nextReferenceNumber?: number;
   /** Edit this trip instead of creating one. */
   trip?: TripDetail;
   onClose: () => void;
@@ -44,6 +49,7 @@ export default function TripBuilder({
   travelers,
   owners,
   currentUser,
+  nextReferenceNumber,
   trip,
   onClose,
   onSaved,
@@ -54,6 +60,10 @@ export default function TripBuilder({
   const [customerId, setCustomerId] = useState(trip ? String(trip.customer.id) : '');
   const [pickedTravelers, setPickedTravelers] = useState<PickedTraveler[]>(originalTravelers);
   const [ownerId, setOwnerId] = useState(trip ? String(trip.owner?.id ?? '') : String(currentUser.id));
+  const [country, setCountry] = useState(trip?.country ?? '');
+  // Picking a client fills in their usual country until someone chooses one.
+  const [countryChosen, setCountryChosen] = useState(Boolean(trip));
+  const [clientCode, setClientCode] = useState('');
   const [title, setTitle] = useState(trip?.title ?? '');
   const [description, setDescription] = useState(trip?.description ?? '');
   const [status, setStatus] = useState<TripStatus>(trip?.status ?? 'Draft');
@@ -89,6 +99,14 @@ export default function TripBuilder({
       setError(trip ? 'Keep at least one traveller' : 'Add at least one traveller');
       return;
     }
+    if (!trip && !isServiceCountry(country)) {
+      setError('Pick the country');
+      return;
+    }
+    if (!trip && !clientCode) {
+      setError('Add the client code for the reference');
+      return;
+    }
     if (!title.trim()) {
       setError('Title is required');
       return;
@@ -96,6 +114,7 @@ export default function TripBuilder({
 
     const fields = {
       customerId: cId,
+      country: country || null,
       ownerId: ownerId ? Number(ownerId) : null,
       title: title.trim(),
       description: description.trim() || null,
@@ -113,6 +132,7 @@ export default function TripBuilder({
       // Only what changed: a status change and an edit are logged as what they are.
       const before: Record<string, unknown> = {
         customerId: trip.customer.id,
+        country: trip.country ?? null,
         ownerId: trip.owner?.id ?? null,
         title: trip.title,
         description: trip.description || null,
@@ -145,7 +165,7 @@ export default function TripBuilder({
         return;
       }
     } else {
-      body = { ...fields, travelers, items: [] };
+      body = { ...fields, clientCode, travelers, items: [] };
     }
 
     setPending(true);
@@ -219,6 +239,9 @@ export default function TripBuilder({
                     setCustomerId(e.target.value);
                     // Travellers belong to one client; going back to the trip's own puts its travellers back.
                     setPickedTravelers(trip && e.target.value === String(trip.customer.id) ? originalTravelers : []);
+                    const picked = customers.find((c) => String(c.id) === e.target.value);
+                    if (!trip) setClientCode(picked?.referenceCode ?? '');
+                    if (!countryChosen && picked?.usualCountry) setCountry(picked.usualCountry);
                   }}
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 >
@@ -256,6 +279,46 @@ export default function TripBuilder({
                   ))}
                 </select>
               </Field>
+              <Field label="Country">
+                <select
+                  value={country}
+                  onChange={(e) => {
+                    setCountry(e.target.value);
+                    setCountryChosen(true);
+                  }}
+                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">{trip ? 'Not set' : 'Select a country…'}</option>
+                  {country && !isServiceCountry(country) && <option value={country}>{country}</option>}
+                  {SERVICE_COUNTRIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c} ({SERVICE_COUNTRY_CODES[c]})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {!trip && (
+                <Field label="Reference">
+                  <div className="flex items-center gap-1 px-3 py-2 bg-gray-50 rounded-2xl font-mono text-sm font-bold text-gray-700">
+                    <input
+                      type="text"
+                      aria-label="Client code"
+                      value={clientCode}
+                      onChange={(e) => setClientCode(normalizeClientCode(e.target.value))}
+                      placeholder="CLIENT"
+                      className="w-24 min-w-0 px-2 py-1 bg-white rounded-lg uppercase focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <span className="truncate">
+                      -{isServiceCountry(country) ? SERVICE_COUNTRY_CODES[country] : '···'}-
+                      {referenceMonth(startDate, localDateKeyPlusDays(0))}-
+                      {nextReferenceNumber ? referenceNumber(nextReferenceNumber) : '####'}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-[11px] font-medium text-gray-400">
+                    Client code, country, start month and the next number. The number is confirmed when you save.
+                  </p>
+                </Field>
+              )}
               <Field label="Travellers" wide>
                 {selectedCustomer ? (
                   <TravelerPicker

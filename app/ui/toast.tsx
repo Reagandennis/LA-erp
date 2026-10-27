@@ -8,13 +8,14 @@ import {
   ChatHistoryIcon,
   ClipboardCheckIcon,
   CloseIcon,
+  CogIcon,
   DocumentIcon,
   type IconComponent,
   InboxIcon,
   TruckIcon,
 } from './icons';
 
-export type ToastSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar';
+export type ToastSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance';
 
 const SOURCE_META: Record<
   ToastSource,
@@ -31,6 +32,7 @@ const SOURCE_META: Record<
   },
   file: { Icon: InboxIcon, label: 'File', accent: 'bg-emerald-100 text-emerald-600' },
   calendar: { Icon: CalendarIcon, label: 'Calendar', accent: 'bg-rose-100 text-rose-600' },
+  maintenance: { Icon: CogIcon, label: 'Maintenance', accent: 'bg-orange-100 text-orange-600' },
 };
 
 /** Short relative time — "just now", "4m", "2h", "3d". */

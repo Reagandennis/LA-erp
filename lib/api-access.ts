@@ -24,6 +24,9 @@ export const API_ACCESS = {
   crm: ['customers'],
   feedback: ['feedback'],
   files: ['file-upload'],
+  /** The Fleet modules beside Vehicles: each is its own grant. */
+  fleetFuel: ['car-fuel'],
+  fleetMaintenance: ['car-maintenance'],
   /** Flight lookups call a paid outside service; the tracker and trip flight cards use them. */
   flights: ['flight-tracker', 'trip-planning'],
   intel: ['intel'],

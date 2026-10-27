@@ -79,7 +79,7 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
     if (!draft) return;
     setError(null);
     if (!draft.name.trim()) {
-      setError('Product name is required');
+      setError('Service name is required');
       return;
     }
     const price = Number(draft.defaultUnitPrice);
@@ -183,7 +183,7 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
                   )}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {product.sku ? `SKU ${product.sku} • ` : ''}
+                  {product.sku ? `${product.sku} • ` : ''}
                   {formatMoney(product.defaultUnitPrice, product.currency)}{' '}
                   {product.taxable ? '• taxable' : '• non-taxable'}
                 </p>
@@ -261,9 +261,9 @@ export default function CatalogClient({ initialProducts }: CatalogClientProps) {
               <div className="grid grid-cols-2 gap-3">
                 <input
                   type="text"
-                  placeholder="SKU"
+                  placeholder="Service code, e.g. KEN-TRF-SUV-EXE-NBO"
                   value={draft.sku}
-                  onChange={(event) => setDraft({ ...draft, sku: event.target.value })}
+                  onChange={(event) => setDraft({ ...draft, sku: event.target.value.toUpperCase() })}
                   className="px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
                 <select

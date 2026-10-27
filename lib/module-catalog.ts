@@ -177,6 +177,21 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     category: 'Fleet',
     sortOrder: 18,
   },
+  // Fleet submodules, listed after Vehicles (sortOrder is compared within a category).
+  {
+    slug: 'car-fuel',
+    name: 'Car Fuel',
+    description: 'Log fill-ups per vehicle and track fuel spend and consumption.',
+    category: 'Fleet',
+    sortOrder: 52,
+  },
+  {
+    slug: 'car-maintenance',
+    name: 'Car Maintenance',
+    description: 'Schedule services and repairs and keep each vehicle’s maintenance history.',
+    category: 'Fleet',
+    sortOrder: 53,
+  },
   {
     slug: 'contact-list',
     name: 'Contact List',

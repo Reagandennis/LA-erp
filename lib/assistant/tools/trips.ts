@@ -1,6 +1,8 @@
 import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit';
+import { SERVICE_COUNTRIES } from '@/lib/service-catalog';
+import { isServiceCountry } from '@/lib/trip-reference';
 import { createTrip, deleteTrip, listTripsForUser, updateTrip, type TripStatus, type TripUpdateInput } from '@/lib/trips';
 
 import { asInt, asNullableString, asString, type ToolDefinition } from '../types';
@@ -35,27 +37,32 @@ const createTripTool: ToolDefinition = {
   requiredModule: MODULE,
   functionDeclaration: {
     name: 'create_trip',
-    description: 'Create a trip for a client. Find the client ID with list_customers. Dates are YYYY-MM-DD (optional).',
+    description:
+      'Create a trip for a client. Find the client ID with list_customers. Dates are YYYY-MM-DD (optional). ' +
+      "The reference is made from the client's code, the country, the start month and the next number.",
     parameters: {
       type: 'object',
       properties: {
         customerId: { type: 'integer' },
+        country: { type: 'string', enum: [...SERVICE_COUNTRIES], description: 'Where the trip is' },
         title: { type: 'string' },
         description: { type: 'string' },
         startDate: { type: 'string', description: 'YYYY-MM-DD' },
         endDate: { type: 'string', description: 'YYYY-MM-DD' },
         currency: { type: 'string', description: '3-letter code, default USD' },
       },
-      required: ['customerId', 'title'],
+      required: ['customerId', 'country', 'title'],
     },
   },
   async handler(args, ctx) {
     const customerId = asInt(args.customerId);
     const title = asString(args.title);
     if (!customerId) return { error: 'A valid customerId is required (use list_customers).' };
+    if (!isServiceCountry(args.country)) return { error: `Which country is the trip in? One of: ${SERVICE_COUNTRIES.join(', ')}.` };
     if (!title) return { error: 'A trip title is required.' };
     const trip = await createTrip({
       customerId,
+      country: args.country,
       ownerId: ctx.userId,
       title,
       description: asNullableString(args.description),

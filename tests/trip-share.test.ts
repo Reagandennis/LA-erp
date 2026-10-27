@@ -95,6 +95,7 @@ function trip(status: string, items: TripItineraryItemSummary[]): TripDetail {
     title: 'Nairobi visit',
     description: 'Internal description',
     status: status as TripDetail['status'],
+    country: 'Kenya',
     currency: 'USD',
     startDate: '2026-10-20T00:00:00.000Z',
     endDate: '2026-10-22T00:00:00.000Z',
@@ -172,11 +173,30 @@ describe('buildClientItinerary', () => {
     expect(off!.attachments).toEqual([]);
   });
 
+  it('names the service sold but keeps its code in-house', () => {
+    const sold = item(5, {
+      category: 'transportation',
+      timeLabel: 'PICK-UP',
+      details: {
+        service: 'Airport Transfer - SUV Executive - Nairobi (NBO)',
+        serviceCode: 'KEN-TRF-SUV-EXE-NBO',
+        mode: 'Airport Transfer',
+      },
+    });
+    const [shared] = buildClientItinerary(trip('Active', [sold]), { includeCrew: true, includeAttachments: false })
+      .days[0]!.items;
+    expect(shared!.details).toEqual([
+      { key: 'service', label: 'Service', value: 'Airport Transfer - SUV Executive - Nairobi (NBO)' },
+      { key: 'mode', label: 'Type', value: 'Airport Transfer' },
+    ]);
+    expect(JSON.stringify(shared)).not.toContain('KEN-TRF');
+  });
+
   it('shares the linked crew when the planner includes them', () => {
     const [withCrew] = buildClientItinerary(trip('Active', [transfer]), { includeCrew: true, includeAttachments: true }).days[0]!.items;
     expect(withCrew!.crew).toEqual([
       { role: 'Driver', name: 'Linked Driver', phone: '+254711111111' },
-      { role: 'Close protection', name: 'Officer One (Alpha)', phone: '+254722222222' },
+      { role: 'Close Protection Officer', name: 'Officer One (Alpha)', phone: '+254722222222' },
     ]);
     expect(withCrew!.vehicle).toBe('Toyota Land Cruiser KDA 123X');
     expect(withCrew!.notes).toBe('Security: Named Officer');

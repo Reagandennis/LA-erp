@@ -36,6 +36,7 @@ import { EventTravelerFields, TravelerRow, type TravelerChoices } from './_compo
 import { ShareDialog } from './_components/share-dialog';
 import FlightCard from './_components/flight-card';
 import FlightFields from './_components/flight-fields';
+import ServicePicker from './_components/service-picker';
 import TransportFields from './_components/transport-fields';
 import type { EditorState } from './editor-state';
 import { EMPTY_RUN, emptyRunFor, emptyRunTitle, isEmptyRun } from './empty-run';
@@ -411,8 +412,11 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
     placeName: editor.placeName.trim() || null,
     address: editor.address.trim() || null,
     // Drop anything the category doesn't declare, so switching category can't
-    // smuggle a stale flight number onto a hotel.
-    details: pruneDetails(editor.category, editor.details),
+    // smuggle a stale flight number onto a hotel. An empty run sells no service.
+    details: pruneDetails(
+      editor.category,
+      emptyRun ? { ...editor.details, service: '', serviceCode: '' } : editor.details,
+    ),
     scheduledAt,
     endsAt,
     durationMinutes,
@@ -1260,6 +1264,7 @@ export default function ItineraryPageClient({
                   crewOptions={crewOptions}
                   travelerChoices={travelerChoices}
                   showCost={!trip.costsHidden}
+                  tripCountry={trip.country}
                   canEdit={canEdit}
                   registerEvent={registerEvent}
                   onPointerDownItem={onEventPointerDown}
@@ -1356,6 +1361,8 @@ interface ItemListProps {
   crewOptions: CrewOptions;
   travelerChoices: TravelerChoices;
   showCost: boolean;
+  /** The service picker opens on it. */
+  tripCountry: string | null;
   registerEvent: (id: number) => (el: HTMLElement | null) => (() => void) | undefined;
   onPointerDownItem: (event: React.PointerEvent<HTMLElement>, itemId: number) => void;
   dragItemId: number | null;
@@ -1385,6 +1392,7 @@ function ItemList({
   crewOptions,
   travelerChoices,
   showCost,
+  tripCountry,
   registerEvent,
   onPointerDownItem,
   dragItemId,
@@ -1418,6 +1426,7 @@ function ItemList({
             submitting={pendingItemId === item.id}
             submitLabel="Save"
             showCost={showCost}
+            tripCountry={tripCountry}
             days={days}
             crewOptions={crewOptions}
             travelerChoices={travelerChoices}
@@ -1504,6 +1513,7 @@ function ItemList({
           submitting={pending === 'add'}
           submitLabel="Add"
           showCost={showCost}
+          tripCountry={tripCountry}
           days={days}
           crewOptions={crewOptions}
           travelerChoices={travelerChoices}
@@ -1535,7 +1545,7 @@ function DetailChips({ item }: { item: TripItineraryItemSummary }) {
     ...(item.vehicle ? ['vehicle'] : []),
   ]);
   const chips = meta.fields
-    .filter((field) => !linked.has(field.key))
+    .filter((field) => !field.internal && !linked.has(field.key))
     .map((field) => ({ label: field.label, value: details[field.key] }))
     .filter((chip): chip is { label: string; value: string } => Boolean(chip.value))
     .slice(0, 6);
@@ -1919,12 +1929,14 @@ function ItemEditor({
   submitting,
   submitLabel,
   showCost,
+  tripCountry,
   days,
   crewOptions,
   travelerChoices,
 }: {
   /** Costs are quote prices; hidden from people without access to quotes. */
   showCost: boolean;
+  tripCountry: string | null;
   days: TripDaySummary[];
   crewOptions: CrewOptions;
   travelerChoices: TravelerChoices;
@@ -1949,6 +1961,8 @@ function ItemEditor({
 
   const setDetail = (key: string, value: string) =>
     patch({ details: { ...editor.details, [key]: value } });
+  const typedFields = meta.fields.filter((field) => field.kind !== 'service');
+  const sellsService = meta.fields.some((field) => field.key === 'service');
 
   return (
     <div className="space-y-4 rounded-2xl border border-primary/20 bg-white p-4 shadow-sm sm:p-5">
@@ -1979,9 +1993,23 @@ function ItemEditor({
       </div>
 
       {editor.category === 'flight' ? (
-        <FlightFields editor={editor} patch={patch} days={days} crewOptions={crewOptions} showCost={showCost} />
+        <FlightFields
+          editor={editor}
+          patch={patch}
+          days={days}
+          crewOptions={crewOptions}
+          showCost={showCost}
+          tripCountry={tripCountry}
+        />
       ) : editor.category === 'transportation' ? (
-        <TransportFields editor={editor} patch={patch} days={days} crewOptions={crewOptions} showCost={showCost} />
+        <TransportFields
+          editor={editor}
+          patch={patch}
+          days={days}
+          crewOptions={crewOptions}
+          showCost={showCost}
+          tripCountry={tripCountry}
+        />
       ) : (
         <>
           <label className="block">
@@ -1994,6 +2022,8 @@ function ItemEditor({
               className="mt-1 w-full rounded-lg bg-gray-50 px-4 py-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </label>
+
+          {sellsService && <ServicePicker editor={editor} patch={patch} showCost={showCost} tripCountry={tripCountry} />}
 
           {meta.providerLabel && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -2071,13 +2101,13 @@ function ItemEditor({
           )}
 
           {/* ── The fields that make this category itself ──────────────── */}
-          {meta.fields.length > 0 && (
+          {typedFields.length > 0 && (
             <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                 {meta.label} details
               </p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {meta.fields.map((field) => (
+                {typedFields.map((field) => (
                   <label key={field.key} className={`block ${spanClass[field.span ?? 2]}`}>
                     <span className={labelClass}>{field.label}</span>
                     {field.kind === 'select' ? (

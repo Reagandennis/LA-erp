@@ -3,6 +3,7 @@ import 'server-only';
 import { listCalendarNotifications, materializeDueCalendarReminders } from './calendar';
 import { listMessageNotifications } from './communication';
 import { listFileNotifications } from './files';
+import { listMaintenanceNotifications, materializeMaintenanceReminders } from './fleet-reminders';
 import { listInvoiceNotifications } from './invoices';
 import { prisma } from './prisma';
 import { listQuoteNotifications } from './quotes';
@@ -61,8 +62,8 @@ async function settle<T>(source: string, work: Promise<T[]>): Promise<T[]> {
  * separate round-trips (each re-authenticating) with a single request whose
  * queries run concurrently on the server.
  */
-export async function loadNotificationFeed(userId: number) {
-  const [todo, quote, invoice, trip, message, file, calendar] = await Promise.all([
+export async function loadNotificationFeed(userId: number, access: { maintenance?: boolean } = {}) {
+  const [todo, quote, invoice, trip, message, file, calendar, maintenance] = await Promise.all([
     settle('todo', listPersonalTodoNotifications(userId)),
     settle('quote', listQuoteNotifications(userId)),
     settle('invoice', listInvoiceNotifications(userId)),
@@ -76,9 +77,16 @@ export async function loadNotificationFeed(userId: number) {
       'calendar',
       materializeDueCalendarReminders(userId).then(() => listCalendarNotifications(userId)),
     ),
+    // Only for those who can open Car Maintenance: losing it hides what was sent before.
+    access.maintenance
+      ? settle(
+          'maintenance',
+          materializeMaintenanceReminders(userId).then(() => listMaintenanceNotifications(userId)),
+        )
+      : Promise.resolve([]),
   ]);
 
-  return { todo, quote, invoice, trip, message, file, calendar };
+  return { todo, quote, invoice, trip, message, file, calendar, maintenance };
 }
 
 export type NotificationFeed = Awaited<ReturnType<typeof loadNotificationFeed>>;

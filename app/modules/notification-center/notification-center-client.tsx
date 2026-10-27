@@ -16,6 +16,7 @@ const SOURCE_FILTERS: Array<{ key: DueSource | 'all'; label: string }> = [
   { key: 'sop', label: 'SOP reviews' },
   { key: 'trip', label: 'Trips' },
   { key: 'calendar', label: 'Calendar' },
+  { key: 'maintenance', label: 'Maintenance' },
 ];
 
 function formatDate(iso: string) {
@@ -95,7 +96,7 @@ export default function NotificationCenterClient({ initialItems, initialBuckets 
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-gray-900">Notification Center</h1>
           <p className="text-gray-500 mt-1 text-sm">
-            Deadlines from across the platform — invoices, quotes, licenses, contracts, SOP reviews, trips, and calendar.
+            Deadlines from across the platform — invoices, quotes, licenses, contracts, SOP reviews, trips, calendar, and vehicle maintenance.
           </p>
         </div>
 

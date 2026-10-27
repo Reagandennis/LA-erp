@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
-import { deleteProduct, getProductById, updateProduct } from '@/lib/products';
+import { SERVICE_DETAIL_KEYS, deleteProduct, findProductWithSku, getProductById, updateProduct } from '@/lib/products';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
 import { productUpdateSchema } from '@/lib/validation';
@@ -53,14 +53,23 @@ export async function PATCH(
   const existing = await getProductById(id);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+  const { data } = validation;
+  const sku = data.sku === undefined ? undefined : data.sku || null;
+  const clash = sku ? await findProductWithSku(sku, id) : null;
+  if (clash) {
+    return NextResponse.json({ error: `Service code ${sku} is already used by “${clash.name}”.` }, { status: 409 });
+  }
+
+  // A field left out of the request stays as it is; null clears it.
   const product = await updateProduct(id, {
-    name: validation.data.name,
-    description: validation.data.description ?? null,
-    sku: validation.data.sku ?? null,
-    defaultUnitPrice: validation.data.defaultUnitPrice,
-    currency: validation.data.currency,
-    taxable: validation.data.taxable,
-    archived: validation.data.archived,
+    name: data.name,
+    description: data.description,
+    sku,
+    defaultUnitPrice: data.defaultUnitPrice,
+    currency: data.currency,
+    taxable: data.taxable,
+    archived: data.archived,
+    ...Object.fromEntries(SERVICE_DETAIL_KEYS.map((key) => [key, data[key]])),
   });
 
   await recordAuditEvent({

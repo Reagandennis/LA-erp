@@ -9,8 +9,9 @@ import type { EditorState } from '../editor-state';
 import { EMPTY_RUN, emptyRunTitle } from '../empty-run';
 import { dayLabel } from '../itinerary-model';
 import { CrewFields } from './crew-fields';
+import ServicePicker from './service-picker';
 
-const MODES = CATEGORY_META.transportation.fields.find((field) => field.key === 'mode')?.options ?? [];
+const TYPES = CATEGORY_META.transportation.fields.find((field) => field.key === 'mode')?.options ?? [];
 
 type Kind = 'PICK-UP' | 'DROP-OFF' | typeof EMPTY_RUN;
 
@@ -28,8 +29,9 @@ function arrivalHint(date: string, time: string, minutes: number): string | null
 
 /**
  * The transport form. Pick-up, drop-off or empty run is chosen first, and
- * the place and time fields take their meaning from it; then the crew from
- * Task Assignment. An empty run is the vehicle moving with no passenger.
+ * the place and time fields take their meaning from it; then the service it
+ * sells, from Products & Services, and the crew from Task Assignment. An
+ * empty run is the vehicle moving with no passenger, so it sells nothing.
  */
 export default function TransportFields({
   editor,
@@ -37,12 +39,15 @@ export default function TransportFields({
   days,
   crewOptions,
   showCost,
+  tripCountry,
 }: {
   editor: EditorState;
   patch: (next: Partial<EditorState>) => void;
   days: TripDaySummary[];
   crewOptions: CrewOptions;
   showCost: boolean;
+  /** The service picker opens on it. */
+  tripCountry: string | null;
 }) {
   const dropOff = editor.timeLabel === 'DROP-OFF';
   const emptyRun = editor.timeLabel === EMPTY_RUN;
@@ -110,6 +115,26 @@ export default function TransportFields({
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
           No passengers: the driver and vehicle repositioning, out to a pick-up or back after a drop-off.
         </p>
+      )}
+
+      {!emptyRun && (
+        <div className="space-y-2">
+          <ServicePicker editor={editor} patch={patch} showCost={showCost} tripCountry={tripCountry} />
+          <label className="block sm:w-1/2">
+            <span className={labelClass}>Type</span>
+            <select value={editor.details.mode ?? ''} onChange={(e) => setDetail('mode', e.target.value)} className={fieldClass}>
+              <option value="">—</option>
+              {editor.details.mode && !TYPES.includes(editor.details.mode) && (
+                <option value={editor.details.mode}>{editor.details.mode}</option>
+              )}
+              {TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
 
       <label className="block">
@@ -308,20 +333,9 @@ export default function TransportFields({
 
       <details className="rounded-xl border border-gray-100 px-3 py-2">
         <summary className="cursor-pointer text-xs font-medium text-gray-500">
-          More — mode, company, contact, confirmation{showCost ? ', cost' : ''}, reminder
+          More — company, contact, confirmation{showCost ? ', cost' : ''}, reminder
         </summary>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="block">
-            <span className={labelClass}>Mode</span>
-            <select value={editor.details.mode ?? ''} onChange={(e) => setDetail('mode', e.target.value)} className={fieldClass}>
-              <option value="">—</option>
-              {MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {mode}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="block">
             <span className={labelClass}>Company</span>
             <input

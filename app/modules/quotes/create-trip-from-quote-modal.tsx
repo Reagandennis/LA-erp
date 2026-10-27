@@ -1,6 +1,7 @@
 'use client';
 
 import { APP_LOCALE } from '@/lib/locale';
+import { SERVICE_COUNTRIES, SERVICE_COUNTRY_CODES } from '@/lib/service-catalog';
 import { useEffect, useState } from 'react';
 
 import type { ApproverOption, QuoteDetail, QuoteTripSummary } from './types';
@@ -29,6 +30,7 @@ export default function CreateTripFromQuoteModal({
   onCreated,
 }: CreateTripFromQuoteModalProps) {
   const [title, setTitle] = useState(quote.subject);
+  const [country, setCountry] = useState('');
   const [ownerId, setOwnerId] = useState(String(currentUser.id));
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(quote.expiryDate.slice(0, 10));
@@ -50,6 +52,10 @@ export default function CreateTripFromQuoteModal({
       setError('Title is required');
       return;
     }
+    if (!country) {
+      setError('Pick the country');
+      return;
+    }
     setPending(true);
     try {
       const r = await fetch(`/api/quotes/${quote.id}/trip`, {
@@ -58,6 +64,7 @@ export default function CreateTripFromQuoteModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(),
+          country,
           ownerId: ownerId ? Number(ownerId) : null,
           startDate,
           endDate,
@@ -145,6 +152,24 @@ export default function CreateTripFromQuoteModal({
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
               />
+            </Field>
+
+            <Field label="Country">
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
+              >
+                <option value="">Select a country…</option>
+                {SERVICE_COUNTRIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c} ({SERVICE_COUNTRY_CODES[c]})
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-[11px] font-medium text-gray-400">
+                The reference is made from the client&apos;s code, the country, the start month and the next number.
+              </p>
             </Field>
 
             <Field label="Owner">

@@ -1,8 +1,10 @@
 import 'server-only';
 
+import { isOpenMaintenance, outstandingNextDue } from '@/lib/fleet';
+import { listMaintenance } from '@/lib/fleet-server';
 import { prisma } from '@/lib/prisma';
 
-export type DueSource = 'invoice' | 'quote' | 'license' | 'contract' | 'sop' | 'trip' | 'calendar';
+export type DueSource = 'invoice' | 'quote' | 'license' | 'contract' | 'sop' | 'trip' | 'calendar' | 'maintenance';
 
 export type DueDateItem = {
   id: string; // stable composite key, e.g. "invoice-12"
@@ -56,7 +58,7 @@ function windowBounds(): { floor: Date; ceil: Date } {
 export async function listUpcomingDueDates(userId: number): Promise<DueDateItem[]> {
   const { floor, ceil } = windowBounds();
 
-  const [invoices, quotes, licenses, contracts, sops, trips, events] = await Promise.all([
+  const [invoices, quotes, licenses, contracts, sops, trips, events, maintenance] = await Promise.all([
     prisma.invoice.findMany({
       where: { status: { in: ['Sent', 'Partial'] }, dueDate: { gte: floor, lte: ceil } },
       select: { id: true, number: true, dueDate: true, total: true, currency: true, customer: { select: { name: true } } },
@@ -85,6 +87,7 @@ export async function listUpcomingDueDates(userId: number): Promise<DueDateItem[
       where: { userId, startsAt: { gte: floor, lte: ceil } },
       select: { id: true, title: true, startsAt: true },
     }),
+    listMaintenance(),
   ]);
 
   const items: DueDateItem[] = [];
@@ -194,6 +197,35 @@ export async function listUpcomingDueDates(userId: number): Promise<DueDateItem[
       currency: null,
       href: '/modules/calendar',
     });
+  }
+
+  // Fleet: open work by its planned date, finished work by when it is due again.
+  const inWindow = (date: Date) => date >= floor && date <= ceil;
+  const fleetItem = (id: string, title: string, subtitle: string, key: string) => {
+    const date = new Date(`${key}T00:00:00Z`);
+    if (!inWindow(date)) return;
+    items.push({
+      id,
+      source: 'maintenance',
+      sourceLabel: 'Maintenance',
+      title,
+      subtitle,
+      date: date.toISOString(),
+      daysRemaining: daysUntil(new Date(`${key}T00:00:00`)),
+      amount: null,
+      currency: null,
+      href: '/modules/car-maintenance',
+    });
+  };
+  for (const m of maintenance) {
+    if (isOpenMaintenance(m) && m.scheduledFor) {
+      fleetItem(`maintenance-${m.id}`, `${m.category}: ${m.vehicle.registration}`, m.title, m.scheduledFor);
+    }
+  }
+  for (const m of outstandingNextDue(maintenance)) {
+    if (m.nextDueAt) {
+      fleetItem(`maintenance-next-${m.id}`, `${m.category} due: ${m.vehicle.registration}`, m.title, m.nextDueAt);
+    }
   }
 
   items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());

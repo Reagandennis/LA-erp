@@ -4,7 +4,7 @@ import { getServerAuth } from '@/lib/auth';
 import { listBrandProfiles } from '@/lib/brand-profiles';
 import { listCustomers } from '@/lib/customers';
 import { getOrganizationSettings } from '@/lib/organization';
-import { listProducts } from '@/lib/products';
+import { listProductOptions } from '@/lib/products';
 import {
   getQuoteForUser,
   listApproverCandidates,
@@ -41,7 +41,7 @@ export default async function EditQuotePage({ params }: EditPageProps) {
     await Promise.all([
       listCustomers(),
       listApproverCandidates(auth.user.id),
-      listProducts(),
+      listProductOptions(),
       listTemplates(),
       getOrganizationSettings(),
       listBrandProfiles({ includeArchived: false }),

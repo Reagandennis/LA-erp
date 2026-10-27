@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   listFileNotifications: vi.fn(),
   listCalendarNotifications: vi.fn(),
   materializeDueCalendarReminders: vi.fn(),
+  listMaintenanceNotifications: vi.fn(),
+  materializeMaintenanceReminders: vi.fn(),
 }));
 
 vi.mock('../lib/prisma', () => ({ prisma: { $queryRaw: mocks.queryRaw } }));
@@ -28,6 +30,11 @@ vi.mock('../lib/calendar', () => ({
   materializeDueCalendarReminders: mocks.materializeDueCalendarReminders,
 }));
 
+vi.mock('../lib/fleet-reminders', () => ({
+  listMaintenanceNotifications: mocks.listMaintenanceNotifications,
+  materializeMaintenanceReminders: mocks.materializeMaintenanceReminders,
+}));
+
 import { listPersonalTodoNotifications, loadNotificationFeed } from '../lib/notification-feed';
 
 describe('notification feed', () => {
@@ -42,6 +49,16 @@ describe('notification feed', () => {
     mocks.listFileNotifications.mockResolvedValue([{ id: 5 }]);
     mocks.listCalendarNotifications.mockResolvedValue([{ id: 6 }]);
     mocks.materializeDueCalendarReminders.mockResolvedValue(0);
+    mocks.listMaintenanceNotifications.mockResolvedValue([{ id: 8 }]);
+    mocks.materializeMaintenanceReminders.mockResolvedValue(0);
+  });
+
+  it('adds maintenance reminders only for those who can open Car Maintenance', async () => {
+    expect((await loadNotificationFeed(42)).maintenance).toEqual([]);
+    expect(mocks.materializeMaintenanceReminders).not.toHaveBeenCalled();
+
+    expect((await loadNotificationFeed(42, { maintenance: true })).maintenance).toEqual([{ id: 8 }]);
+    expect(mocks.materializeMaintenanceReminders).toHaveBeenCalledWith(42);
   });
 
   it('serialises personal todo notifications with ISO timestamps', async () => {
@@ -79,6 +96,7 @@ describe('notification feed', () => {
       message: [{ id: 4 }],
       file: [{ id: 5 }],
       calendar: [{ id: 6 }],
+      maintenance: [],
     });
     for (const fn of [
       mocks.listQuoteNotifications,

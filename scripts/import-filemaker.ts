@@ -33,6 +33,7 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { syncPersonnelResources } from '@/lib/personnel-sync';
+import { transportTypeForRoute } from '@/lib/service-catalog';
 
 type Row = Record<string, string>;
 
@@ -839,7 +840,8 @@ async function importAll(adminId: number) {
           6000,
         ),
         details: {
-          mode: 'Private transfer',
+          // The Standardized Naming Master's names, as the 2026-10-27 migration relabelled them.
+          mode: transportTypeForRoute([oneLine(j.pickupLocation), oneLine(j.dropoffLocation)]),
           ...(vehicle ? { vehicle: clip(vehicle, 200) } : {}),
           ...(j.pickupLocation ? { pickupLocation: clip(oneLine(j.pickupLocation)!, 200) } : {}),
           ...(j.dropoffLocation ? { dropoffLocation: clip(oneLine(j.dropoffLocation)!, 200) } : {}),

@@ -66,6 +66,7 @@ export async function POST(
     quoteId,
     actorUserId: auth.user.id,
     ownerId: validation.data.ownerId ?? null,
+    country: validation.data.country,
     title: validation.data.title ?? undefined,
     description: validation.data.description ?? null,
     startDate: validation.data.startDate ?? null,

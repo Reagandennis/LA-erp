@@ -44,6 +44,9 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
     tripItemTraveler?: unknown;
     tripCloseout?: unknown;
     tripShareLink?: unknown;
+    vehicleFuelLog?: unknown;
+    vehicleMaintenance?: unknown;
+    vehicleMaintenanceNotification?: unknown;
   };
   return Boolean(
     candidate.quote &&
@@ -75,7 +78,10 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
       candidate.tripItemAttachment &&
       candidate.tripItemTraveler &&
       candidate.tripCloseout &&
-      candidate.tripShareLink,
+      candidate.tripShareLink &&
+      candidate.vehicleFuelLog &&
+      candidate.vehicleMaintenance &&
+      candidate.vehicleMaintenanceNotification,
   );
 }
 

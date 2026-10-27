@@ -11,7 +11,7 @@ import { subscribeServerEvents } from './messaging-alerts-store';
 import { dismissPushedToast, Toast, ToastStack, usePushedToasts } from './toast';
 import { useIsClient } from './use-client';
 
-type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar';
+type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance';
 
 type RawTodoNotification = {
   id: number;
@@ -77,6 +77,15 @@ type RawCalendarNotification = {
   readAt: string | null;
 };
 
+type RawMaintenanceNotification = {
+  id: number;
+  maintenanceId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
 type NotificationItem = {
   source: NotificationSource;
   id: number;
@@ -102,6 +111,7 @@ type NotificationFeed = {
   message?: RawMessageNotification[];
   file?: RawFileNotification[];
   calendar?: RawCalendarNotification[];
+  maintenance?: RawMaintenanceNotification[];
 };
 
 const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
@@ -112,6 +122,7 @@ const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   message: '/api/communication/notifications',
   file: '/api/files/notifications',
   calendar: '/api/calendar/notifications',
+  maintenance: '/api/fleet/maintenance/notifications',
 };
 
 function compositeKey(item: { source: NotificationSource; id: number }): string {
@@ -144,6 +155,9 @@ function buildToastTitle(source: NotificationSource, type: string): string {
   if (source === 'calendar') {
     return 'Event reminder';
   }
+  if (source === 'maintenance') {
+    return type === 'fleet.maintenance.overdue' ? 'Maintenance overdue' : 'Maintenance reminder';
+  }
   return 'Shared with you';
 }
 
@@ -165,6 +179,9 @@ function buildHref(item: { source: NotificationSource; entityId: number }): stri
   }
   if (item.source === 'calendar') {
     return '/modules/calendar';
+  }
+  if (item.source === 'maintenance') {
+    return '/modules/car-maintenance';
   }
   return '/modules/todo-personal';
 }
@@ -291,6 +308,20 @@ export default function NotificationsBell() {
             readAt: item.readAt,
             href: buildHref({ source: 'calendar', entityId: item.eventId }),
             toastTitle: buildToastTitle('calendar', item.type),
+          });
+        }
+
+        for (const item of feed?.maintenance ?? []) {
+          merged.push({
+            source: 'maintenance',
+            id: item.id,
+            entityId: item.maintenanceId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'maintenance', entityId: item.maintenanceId }),
+            toastTitle: buildToastTitle('maintenance', item.type),
           });
         }
 
@@ -501,7 +532,7 @@ export default function NotificationsBell() {
                         ? 'border-gray-200 bg-gray-50'
                         : notification.source === 'quote'
                           ? 'border-blue-200 bg-blue-50'
-                          : notification.source === 'trip'
+                          : notification.source === 'trip' || notification.source === 'maintenance'
                             ? 'border-amber-200 bg-amber-50'
                             : 'border-emerald-200 bg-emerald-50'
                     }`}

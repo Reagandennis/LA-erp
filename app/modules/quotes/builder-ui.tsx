@@ -444,6 +444,9 @@ export function ItemDescriptionInput({
   );
 }
 
+/** The standardized catalog runs to hundreds of services; search narrows it. */
+const PICKER_LIMIT = 80;
+
 export function CatalogPicker({
   products,
   onPick,
@@ -456,7 +459,7 @@ export function CatalogPicker({
   const matches = q
     ? products.filter(
         (product) =>
-          product.name.toLowerCase().includes(q) || (product.sku?.toLowerCase().includes(q) ?? false),
+          [product.name, product.sku, product.country].some((value) => value?.toLowerCase().includes(q)),
       )
     : products;
 
@@ -473,7 +476,7 @@ export function CatalogPicker({
         />
       </div>
       <ul className="max-h-56 divide-y divide-gray-50 overflow-y-auto">
-        {matches.map((product) => (
+        {matches.slice(0, PICKER_LIMIT).map((product) => (
           <li key={product.id}>
             <button
               type="button"
@@ -482,9 +485,9 @@ export function CatalogPicker({
             >
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium text-gray-900">{product.name}</span>
-                {(product.sku || !product.taxable) && (
+                {(product.sku || product.unitOfMeasure || !product.taxable) && (
                   <span className="block text-xs text-gray-500">
-                    {[product.sku ? `SKU ${product.sku}` : null, product.taxable ? null : 'Non-taxable']
+                    {[product.sku, product.country, product.unitOfMeasure, product.taxable ? null : 'Non-taxable']
                       .filter(Boolean)
                       .join(' • ')}
                   </span>
@@ -498,6 +501,11 @@ export function CatalogPicker({
         ))}
         {matches.length === 0 && (
           <li className="px-3 py-4 text-center text-sm text-gray-500">No products match “{query.trim()}”.</li>
+        )}
+        {matches.length > PICKER_LIMIT && (
+          <li className="px-3 py-2 text-center text-xs text-gray-400">
+            Showing {PICKER_LIMIT} of {matches.length}. Search by name, service code or country.
+          </li>
         )}
       </ul>
     </div>

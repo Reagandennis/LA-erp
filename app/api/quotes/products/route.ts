@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { recordAuditEvent } from '@/lib/audit';
-import { createProduct, listProducts } from '@/lib/products';
+import { SERVICE_DETAIL_KEYS, createProduct, findProductWithSku, listProducts } from '@/lib/products';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
@@ -45,13 +45,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const sku = validation.data.sku || null;
+  const clash = sku ? await findProductWithSku(sku) : null;
+  if (clash) {
+    return NextResponse.json({ error: `Service code ${sku} is already used by “${clash.name}”.` }, { status: 409 });
+  }
+
   const product = await createProduct({
     name: validation.data.name,
     description: validation.data.description ?? null,
-    sku: validation.data.sku ?? null,
+    sku,
     defaultUnitPrice: validation.data.defaultUnitPrice,
     currency: validation.data.currency,
     taxable: validation.data.taxable,
+    ...Object.fromEntries(SERVICE_DETAIL_KEYS.map((key) => [key, validation.data[key] ?? null])),
     createdById: auth.user.id,
   });
 

@@ -9,6 +9,7 @@ import { REMINDER_OPTIONS, type CrewOptions, type TripDaySummary } from '../../t
 import type { EditorState } from '../editor-state';
 import { dayLabel } from '../itinerary-model';
 import { CrewFields } from './crew-fields';
+import ServicePicker from './service-picker';
 
 /** Zones offered above the full list: this office's, then the usual hubs. */
 const COMMON_ZONES = [
@@ -42,12 +43,15 @@ export default function FlightFields({
   days,
   crewOptions,
   showCost,
+  tripCountry,
 }: {
   editor: EditorState;
   patch: (next: Partial<EditorState>) => void;
   days: TripDaySummary[];
   crewOptions: CrewOptions;
   showCost: boolean;
+  /** The service picker opens on it. */
+  tripCountry: string | null;
 }) {
   const arrival = editor.timeLabel === 'ARRIVAL';
   const labelClass = 'text-xs font-medium text-gray-500';
@@ -189,6 +193,9 @@ export default function FlightFields({
           Leave blank to use “{arrival ? 'Arrival' : 'Departure'}{editor.details.flightNumber ? ` · ${editor.details.flightNumber}` : ''}”.
         </span>
       </label>
+
+      {/* Airport arrival or departure assistance, lounge access… */}
+      <ServicePicker editor={editor} patch={patch} showCost={showCost} tripCountry={tripCountry} />
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <label className="block">

@@ -5,6 +5,14 @@ import { Prisma } from '@prisma/client';
 import { isPreviewableImage } from './attachment-types';
 import { addDays, dateKey, parseDateKey } from './date-grid';
 import { prisma } from './prisma';
+import type { ServiceCountry } from './service-catalog';
+import {
+  buildTripReference,
+  normalizeClientCode,
+  referenceDefaults,
+  referenceMonth,
+  suggestClientCode,
+} from './trip-reference';
 
 export type TripStatus = 'Draft' | 'Planned' | 'Active' | 'Completed' | 'Cancelled';
 
@@ -109,6 +117,8 @@ export interface TripSummary {
   /** Null in list responses: the long text is only loaded with a trip's detail. */
   description: string | null;
   status: TripStatus;
+  /** One of the Standardized Naming Master's markets; null on older trips without one. */
+  country: string | null;
   currency: string;
   startDate: string | null;
   endDate: string | null;
@@ -158,6 +168,7 @@ interface TripRecord {
   title: string;
   description: string | null;
   status: string;
+  country?: string | null;
   startDate: Date | null;
   endDate: Date | null;
   currency: string;
@@ -518,6 +529,7 @@ function serializeSummary(record: TripRecord | TripListRecord): TripSummary {
     title: record.title,
     description: record.description ?? null,
     status: record.status as TripStatus,
+    country: record.country ?? null,
     currency: record.currency,
     startDate: record.startDate?.toISOString() ?? null,
     endDate: record.endDate?.toISOString() ?? null,
@@ -567,6 +579,74 @@ async function reserveSequence(
     update: { lastNumber: { increment: 1 } },
   });
   return next.lastNumber;
+}
+
+/**
+ * The running number every trip reference ends with: one counter for all
+ * trips, kept in TripSequence's row 0 (the other rows are years). It never
+ * falls behind the highest number already on a reference, so it carries on
+ * from FileMaker's numbering and survives a later import.
+ */
+const RUNNING_NUMBER_KEY = 0;
+
+type RawQueryClient = Pick<Prisma.TransactionClient, '$queryRaw'>;
+
+async function highestReferenceNumber(db: RawQueryClient): Promise<number> {
+  const [row] = await db.$queryRaw<Array<{ n: number }>>`
+    SELECT COALESCE(MAX((regexp_match("reference", '-([0-9]{1,7})$'))[1]::int), 0)::int AS n FROM "Trip"`;
+  return row?.n ?? 0;
+}
+
+async function reserveReferenceNumber(db: RawQueryClient): Promise<number> {
+  const floor = await highestReferenceNumber(db);
+  // The row lock on conflict makes concurrent trips take turns.
+  const [row] = await db.$queryRaw<Array<{ lastNumber: number }>>`
+    INSERT INTO "TripSequence" ("year", "lastNumber") VALUES (${RUNNING_NUMBER_KEY}::int, ${floor + 1}::int)
+    ON CONFLICT ("year") DO UPDATE SET "lastNumber" = GREATEST("TripSequence"."lastNumber", ${floor}::int) + 1
+    RETURNING "lastNumber"`;
+  return row!.lastNumber;
+}
+
+/** What the next reference will end with, for the trip form's preview. Not reserved. */
+export async function peekNextReferenceNumber(): Promise<number> {
+  const [floor, sequence] = await Promise.all([
+    highestReferenceNumber(prisma),
+    prisma.tripSequence.findUnique({ where: { year: RUNNING_NUMBER_KEY } }),
+  ]);
+  return Math.max(floor, sequence?.lastNumber ?? 0) + 1;
+}
+
+/** Every client's usual reference code and country, from their trips so far. */
+export async function listReferenceDefaults() {
+  const rows = await prisma.trip.findMany({ select: { customerId: true, reference: true }, orderBy: { id: 'desc' } });
+  return referenceDefaults(rows);
+}
+
+/** "MCF-KEN-OCT-2661": the client's code (theirs as given, else their usual one), country, start month, next number. */
+async function nextTripReference(
+  tx: Prisma.TransactionClient,
+  params: { customerId: number; country: ServiceCountry; clientCode?: string | null; startDate?: string | null },
+): Promise<string> {
+  let clientCode = normalizeClientCode(params.clientCode ?? '');
+  if (!clientCode) {
+    const rows = await tx.trip.findMany({
+      where: { customerId: params.customerId },
+      select: { customerId: true, reference: true },
+      orderBy: { id: 'desc' },
+    });
+    clientCode = referenceDefaults(rows).get(params.customerId)?.clientCode ?? '';
+  }
+  if (!clientCode) {
+    const customer = await tx.customer.findUnique({ where: { id: params.customerId }, select: { name: true } });
+    clientCode = suggestClientCode(customer?.name ?? '');
+  }
+  const number = await reserveReferenceNumber(tx);
+  return buildTripReference({
+    clientCode,
+    country: params.country,
+    month: referenceMonth(params.startDate, dateKey(new Date())),
+    number,
+  });
 }
 
 function pad4(n: number): string {
@@ -844,6 +924,10 @@ export interface TripCreateInput {
   endDate: string | null;
   currency: string;
   notes: string | null;
+  /** One of the master's markets; its code goes in the reference. */
+  country: ServiceCountry;
+  /** The client's code for the reference; left out, their usual one. */
+  clientCode?: string | null;
   items: TripItineraryItemDraft[];
   createdById: number;
 }
@@ -854,16 +938,20 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
     : new Date().getUTCFullYear();
 
   return prisma.$transaction(async (tx) => {
-    const { trip, tripItineraryItem, tripSequence, trackingSequence } = txClients(tx);
+    const { trip, tripItineraryItem, trackingSequence } = txClients(tx);
 
     // Before the sequences, so a rejected traveller doesn't burn a reference.
     const travelerIds = [
       ...new Set(await resolveTripTravelers(tx, input.travelers ?? [], input.customerId, input.createdById)),
     ];
 
-    const tripSeq = await reserveSequence(tripSequence, year);
+    const reference = await nextTripReference(tx, {
+      customerId: input.customerId,
+      country: input.country,
+      clientCode: input.clientCode,
+      startDate: input.startDate,
+    });
     const trackingSeq = await reserveSequence(trackingSequence, year);
-    const reference = `TR-${year}-${pad4(tripSeq)}`;
     const trackingCode = `LA-${year}-${pad4(trackingSeq)}`;
 
     const created = await trip.create({
@@ -876,6 +964,7 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
         title: input.title,
         description: input.description,
         status: input.status ?? 'Draft',
+        country: input.country,
         startDate: input.startDate ? new Date(input.startDate) : null,
         endDate: input.endDate ? new Date(input.endDate) : null,
         currency: input.currency,
@@ -936,6 +1025,8 @@ export interface TripUpdateInput {
   endDate?: string | null;
   currency?: string;
   notes?: string | null;
+  /** The reference keeps the country it was made with; this is what the trip is now. */
+  country?: ServiceCountry | null;
   /** Replaces who's on the trip, lead first. Someone taken off leaves its events too. */
   travelers?: TripTravelerInput[];
 }
@@ -996,6 +1087,7 @@ export async function updateTrip(params: {
           title: params.input.title ?? existing.title,
           description: params.input.description === undefined ? existing.description : params.input.description,
           status: params.input.status ?? existing.status,
+          country: params.input.country === undefined ? (existing.country ?? null) : params.input.country,
           startDate:
             params.input.startDate === undefined
               ? existing.startDate
@@ -1290,6 +1382,8 @@ export interface CreateTripFromQuoteInput {
   startDate?: string | null;
   endDate?: string | null;
   notes?: string | null;
+  /** One of the master's markets; its code goes in the reference. */
+  country: ServiceCountry;
 }
 
 export async function createTripFromQuote(input: CreateTripFromQuoteInput): Promise<
@@ -1298,7 +1392,7 @@ export async function createTripFromQuote(input: CreateTripFromQuoteInput): Prom
 > {
   // Outer transaction: re-read the quote inside the tx, then build the trip.
   const result = await prisma.$transaction(async (tx) => {
-    const { quote, trip, tripItineraryItem, tripSequence, trackingSequence } = txClients(tx);
+    const { quote, trip, tripItineraryItem, trackingSequence } = txClients(tx);
 
     const quoteRecord = await quote.findUnique({
       where: { id: input.quoteId },
@@ -1327,8 +1421,11 @@ export async function createTripFromQuote(input: CreateTripFromQuoteInput): Prom
       await quote.update({ where: { id: quoteRecord.id }, data: { trackingCode } });
     }
 
-    const tripSeq = await reserveSequence(tripSequence, year);
-    const reference = `TR-${year}-${pad4(tripSeq)}`;
+    const reference = await nextTripReference(tx, {
+      customerId: quoteRecord.customerId,
+      country: input.country,
+      startDate: input.startDate,
+    });
 
     const startDate = input.startDate ? new Date(input.startDate) : new Date();
     const endDate = input.endDate
@@ -1346,6 +1443,7 @@ export async function createTripFromQuote(input: CreateTripFromQuoteInput): Prom
         title: input.title?.trim() || quoteRecord.subject,
         description: input.description ?? null,
         status: 'Planned',
+        country: input.country,
         startDate,
         endDate,
         currency: quoteRecord.currency,

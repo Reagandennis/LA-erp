@@ -113,6 +113,8 @@ export interface TripSummary {
   title: string;
   description: string | null;
   status: TripStatus;
+  /** One of the Standardized Naming Master's markets; null on older trips without one. */
+  country: string | null;
   currency: string;
   startDate: string | null;
   endDate: string | null;
@@ -167,6 +169,10 @@ export interface CustomerOption {
   name: string;
   company: string | null;
   email: string | null;
+  /** The first part of their trip references: the one their trips use, or initials for a new client. */
+  referenceCode: string;
+  /** The country their trips are usually in. */
+  usualCountry: string | null;
 }
 
 /** What the trip form picks from, from GET /api/trips/form-options. */
@@ -174,6 +180,8 @@ export interface TripFormOptions {
   customers: CustomerOption[];
   owners: OwnerOption[];
   travelers: TravelerOption[];
+  /** What the next reference will end with; confirmed when the trip saves. */
+  nextReferenceNumber: number;
 }
 
 /** The trip list page's tabs. Close out needs the Trip Close Out grant. */

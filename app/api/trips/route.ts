@@ -93,6 +93,8 @@ export async function POST(request: NextRequest) {
   try {
     trip = await createTrip({
       customerId: validation.data.customerId,
+      country: validation.data.country,
+      clientCode: validation.data.clientCode ?? null,
       travelers: validation.data.travelers,
       ownerId: validation.data.ownerId ?? null,
       title: validation.data.title,

@@ -1,6 +1,6 @@
 import type { TripItineraryItemSummary } from '../../types';
 
-/** Driver, vehicle and CPO on a card, each with what you'd need on the day. */
+/** Driver, vehicle and Close Protection Officer on a card, each with what you'd need on the day. */
 export function CrewRow({ item }: { item: TripItineraryItemSummary }) {
   const { driver, vehicle, officer } = item;
   if (!driver && !vehicle && !officer) return null;
@@ -25,7 +25,7 @@ export function CrewRow({ item }: { item: TripItineraryItemSummary }) {
       {vehicle &&
         cell('Vehicle', vehicle.registration, [vehicle.make, vehicle.model].filter(Boolean).join(' ') || vehicle.type)}
       {officer &&
-        cell('CPO', officer.name, [officer.grade, officer.callSign].filter(Boolean).join(' · '), officer.phone)}
+        cell('Close Protection Officer', officer.name, [officer.grade, officer.callSign].filter(Boolean).join(' · '), officer.phone)}
     </div>
   );
 }

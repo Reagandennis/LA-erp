@@ -11,6 +11,8 @@
  * go into the `details` Json column.
  */
 
+import { TRANSPORT_TYPES } from '@/lib/service-catalog';
+
 export type TripItemCategory =
   | 'flight'
   | 'transportation'
@@ -31,7 +33,8 @@ export const TRIP_ITEM_CATEGORIES: TripItemCategory[] = [
   'information',
 ];
 
-export type DetailFieldKind = 'text' | 'time' | 'number' | 'select';
+/** `service` is filled by the service picker, not typed. */
+export type DetailFieldKind = 'text' | 'time' | 'number' | 'select' | 'service';
 
 export interface DetailField {
   key: string;
@@ -41,7 +44,19 @@ export interface DetailField {
   options?: string[];
   /** Grid width in a 4-column form row. */
   span?: 1 | 2 | 3 | 4;
+  /** Ours alone: never shown on a card or sent to the client. */
+  internal?: boolean;
 }
+
+/**
+ * The standardized service the event sells, picked from Products & Services.
+ * The code is the catalog's internal SKU, so it stays off cards and the
+ * client's itinerary; the name is a copy, so the event keeps it as it was sold.
+ */
+const SERVICE_FIELDS: DetailField[] = [
+  { key: 'service', label: 'Service', kind: 'service', span: 4 },
+  { key: 'serviceCode', label: 'Service code', kind: 'service', span: 2, internal: true },
+];
 
 export interface CategoryMeta {
   label: string;
@@ -68,6 +83,7 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
     chip: 'bg-sky-100 text-sky-600',
     dot: 'bg-sky-500',
     fields: [
+      ...SERVICE_FIELDS,
       { key: 'flightNumber', label: 'Flight number', kind: 'text', placeholder: 'KQ 762', span: 1 },
       { key: 'cabin', label: 'Cabin', kind: 'select', options: ['Economy', 'Premium economy', 'Business', 'First'], span: 1 },
       { key: 'departAirport', label: 'From (airport)', kind: 'text', placeholder: 'NBO', span: 1 },
@@ -89,6 +105,7 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
     chip: 'bg-violet-100 text-violet-600',
     dot: 'bg-violet-500',
     fields: [
+      ...SERVICE_FIELDS,
       { key: 'roomType', label: 'Room type', kind: 'text', placeholder: 'Deluxe double', span: 2 },
       { key: 'nights', label: 'Nights', kind: 'number', span: 1 },
       { key: 'guests', label: 'Guests', kind: 'number', span: 1 },
@@ -107,7 +124,8 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
     chip: 'bg-primary/10 text-primary',
     dot: 'bg-primary',
     fields: [
-      { key: 'mode', label: 'Mode', kind: 'select', options: ['Car rental', 'Private transfer', 'Taxi', 'Train', 'Bus', 'Ferry', 'Other'], span: 2 },
+      ...SERVICE_FIELDS,
+      { key: 'mode', label: 'Type', kind: 'select', options: [...TRANSPORT_TYPES], span: 2 },
       { key: 'vehicle', label: 'Vehicle', kind: 'text', placeholder: 'Land Cruiser', span: 2 },
       { key: 'pickupLocation', label: 'Pick-up', kind: 'text', span: 2 },
       { key: 'dropoffLocation', label: 'Drop-off', kind: 'text', span: 2 },
@@ -117,14 +135,15 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
     ],
   },
   tour: {
-    label: 'Tour',
-    titleLabel: 'Tour',
+    label: 'Excursion & Safari',
+    titleLabel: 'Excursion',
     titlePlaceholder: 'Masai Mara game drive',
     providerLabel: 'Operator',
     timeLabels: ['START', 'MEET', 'END'],
     chip: 'bg-emerald-100 text-emerald-600',
     dot: 'bg-emerald-500',
     fields: [
+      ...SERVICE_FIELDS,
       { key: 'meetingPoint', label: 'Meeting point', kind: 'text', span: 4 },
       { key: 'durationText', label: 'Duration', kind: 'text', placeholder: 'Half day', span: 2 },
       { key: 'groupSize', label: 'Group size', kind: 'number', span: 1 },
@@ -142,6 +161,7 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
     chip: 'bg-amber-100 text-amber-600',
     dot: 'bg-amber-500',
     fields: [
+      ...SERVICE_FIELDS,
       { key: 'bookingRef', label: 'Booking reference', kind: 'text', span: 2 },
       { key: 'ticketType', label: 'Ticket type', kind: 'text', span: 2 },
       { key: 'partySize', label: 'Party size', kind: 'number', span: 1 },
@@ -157,6 +177,7 @@ export const CATEGORY_META: Record<TripItemCategory, CategoryMeta> = {
     chip: 'bg-teal-100 text-teal-600',
     dot: 'bg-teal-500',
     fields: [
+      ...SERVICE_FIELDS,
       { key: 'durationText', label: 'Duration', kind: 'text', placeholder: '2 hours', span: 2 },
       { key: 'whatToBring', label: 'What to bring', kind: 'text', span: 2 },
     ],

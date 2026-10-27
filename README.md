@@ -215,7 +215,7 @@ npm install
 npm run db:generate
 npm run db:migrate -- --name init
 
-# 5. Seed RBAC baseline, modules, and the bootstrap admin
+# 5. Seed RBAC baseline, modules, the bootstrap admin and the standard service catalog
 npm run db:seed
 
 # 6. Run
@@ -296,7 +296,7 @@ Common commands:
 ```bash
 npm run db:generate              # regenerate the Prisma client
 npm run db:migrate -- --name x   # create & apply a migration in dev
-npm run db:seed                  # seed roles, permissions, modules, admin
+npm run db:seed                  # seed roles, permissions, modules, admin, standard services
 ```
 
 ---
@@ -486,7 +486,7 @@ npm run lint         # ESLint
 npm run test         # Vitest with coverage
 npm run db:generate  # prisma generate
 npm run db:migrate   # prisma migrate dev
-npm run db:seed      # seed RBAC, modules, and bootstrap admin
+npm run db:seed      # seed RBAC, modules, bootstrap admin, standard services
 ```
 
 `npm run dev` uses webpack because the Turbopack dev server in Next.js 16.4

@@ -64,6 +64,7 @@ export async function PATCH(
     input: {
       customerId: validation.data.customerId,
       ownerId: validation.data.ownerId,
+      country: validation.data.country,
       title: validation.data.title,
       description: validation.data.description,
       status: validation.data.status,

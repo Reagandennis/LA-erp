@@ -135,6 +135,8 @@ describe('trips collection route', () => {
 
     const body = {
       customerId: 1,
+      country: 'Kenya',
+      clientCode: 'ACME',
       travelers: [{ travelerId: 4 }, { name: 'Guest' }],
       title: 'Site visit',
       startDate: '2026-06-01',
@@ -152,6 +154,8 @@ describe('trips collection route', () => {
     expect(createTrip).toHaveBeenCalledWith(
       expect.objectContaining({
         customerId: 1,
+        country: 'Kenya',
+        clientCode: 'ACME',
         createdById: 12,
         title: 'Site visit',
         travelers: [{ travelerId: 4 }, { name: 'Guest' }],
@@ -189,7 +193,7 @@ describe('trips collection route', () => {
 
     const req = new NextRequest('http://localhost/api/trips', {
       method: 'POST',
-      body: JSON.stringify({ customerId: 1, travelers: [], title: 'X', items: [] }),
+      body: JSON.stringify({ customerId: 1, country: 'Kenya', travelers: [], title: 'X', items: [] }),
     });
     const r = await POST(req);
     expect(r.status).toBe(400);
@@ -206,7 +210,7 @@ describe('trips collection route', () => {
 
     const req = new NextRequest('http://localhost/api/trips', {
       method: 'POST',
-      body: JSON.stringify({ customerId: 1, travelers: [{ travelerId: 99 }], title: 'X', items: [] }),
+      body: JSON.stringify({ customerId: 1, country: 'Kenya', travelers: [{ travelerId: 99 }], title: 'X', items: [] }),
     });
     const r = await POST(req);
     expect(r.status).toBe(400);

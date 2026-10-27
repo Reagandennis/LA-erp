@@ -4,7 +4,7 @@ import { getServerAuth } from '@/lib/auth';
 import { listBrandProfiles } from '@/lib/brand-profiles';
 import { listCustomers } from '@/lib/customers';
 import { getOrganizationSettings } from '@/lib/organization';
-import { listProducts } from '@/lib/products';
+import { listProductOptions } from '@/lib/products';
 import { listApproverCandidates } from '@/lib/quotes';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { listTemplates } from '@/lib/templates';
@@ -27,7 +27,7 @@ export default async function NewQuotePage() {
     await Promise.all([
       listCustomers(),
       listApproverCandidates(auth.user.id),
-      listProducts(),
+      listProductOptions(),
       listTemplates(),
       getOrganizationSettings(),
       listBrandProfiles({ includeArchived: false }),

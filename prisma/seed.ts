@@ -7,6 +7,7 @@ import {
   DEFAULT_ROLE_PERMISSION_NAMES,
   DEFAULT_ROLES,
 } from '../lib/rbac';
+import { seedStandardServices } from './seed-services';
 
 const prisma = new PrismaClient();
 
@@ -150,12 +151,14 @@ async function seedBootstrapAdmin() {
       roleId: adminRole.id,
     },
   });
+  return user.id;
 }
 
 async function main() {
   await seedRbac();
   await seedModules();
-  await seedBootstrapAdmin();
+  const adminId = await seedBootstrapAdmin();
+  await seedStandardServices(prisma, adminId);
 }
 
 main()

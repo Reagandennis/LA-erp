@@ -32,12 +32,16 @@ export interface ApproverOption {
 export interface ProductOption {
   id: number;
   name: string;
-  description: string | null;
+  /** Left out where only the line-item pickers need the catalog. */
+  description?: string | null;
+  /** The Service Code. */
   sku: string | null;
   defaultUnitPrice: number;
   currency: string;
   taxable: boolean;
   archived: boolean;
+  unitOfMeasure?: string | null;
+  country?: string | null;
 }
 
 export interface TemplateOption {

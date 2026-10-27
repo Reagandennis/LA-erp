@@ -114,7 +114,7 @@ describe('trip routes', () => {
     const res = await POST(
       new NextRequest('http://x/api/trips', {
         method: 'POST',
-        body: JSON.stringify({ customerId: 1, travelers: [{ travelerId: 4 }], title: 'Visit', currency: 'USD', items: [{ description: 'Hotel', quantity: 1, unitPrice: 200 }] }),
+        body: JSON.stringify({ customerId: 1, country: 'Kenya', travelers: [{ travelerId: 4 }], title: 'Visit', currency: 'USD', items: [{ description: 'Hotel', quantity: 1, unitPrice: 200 }] }),
       }),
     );
     expect(res.status).toBe(201);

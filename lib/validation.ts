@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+import {
+  FUEL_TYPES,
+  MAINTENANCE_CATEGORIES,
+  MAINTENANCE_KINDS,
+  MAINTENANCE_STATUSES,
+  REMINDER_DAY_OPTIONS,
+  isDateKey,
+} from './fleet';
+import { SERVICE_COUNTRIES } from './service-catalog';
 import { CLOSEOUT_CHECK_KEYS } from './trip-closeout-checks';
 
 export const userStatusSchema = z.enum(['active', 'inactive', 'suspended']);
@@ -259,8 +268,20 @@ export const invoiceDecisionSchema = z.object({
   note: z.string().trim().max(1000).optional().nullable(),
 });
 
-export const productCreateSchema = z.object({
-  name: z.string().trim().min(1, 'Product name is required').max(160),
+/** A Standardized Naming Master column: blank clears it. */
+const serviceText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .transform((value) => value || null)
+    .optional()
+    .nullable();
+
+// Defaults live on the create schema only: zod applies them even inside
+// .partial(), which would reset a field an update left out.
+const productFields = {
+  name: z.string().trim().min(1, 'Service name is required').max(160),
   description: z.string().trim().max(2000).optional().nullable(),
   sku: z.string().trim().max(80).optional().nullable(),
   defaultUnitPrice: z
@@ -268,11 +289,30 @@ export const productCreateSchema = z.object({
     .finite()
     .gte(0, 'Unit price cannot be negative')
     .max(100_000_000),
+  currency: currencySchema,
+  taxable: z.boolean(),
+  quickbooksName: serviceText(200),
+  category: serviceText(80),
+  subCategory: serviceText(80),
+  serviceClass: serviceText(120),
+  tier: serviceText(40),
+  country: serviceText(80),
+  location: serviceText(120),
+  airportCode: serviceText(10),
+  coverageScope: serviceText(120),
+  vehicleExamples: serviceText(200),
+  unitOfMeasure: serviceText(60),
+  terms: serviceText(2000),
+  notes: serviceText(2000),
+};
+
+export const productCreateSchema = z.object({
+  ...productFields,
   currency: currencySchema.default('USD'),
   taxable: z.boolean().default(true),
 });
 
-export const productUpdateSchema = productCreateSchema.partial().extend({
+export const productUpdateSchema = z.object(productFields).partial().extend({
   archived: z.boolean().optional(),
 });
 
@@ -321,25 +361,33 @@ export const tripItemCategorySchema = z.enum([
  * a Json column would otherwise lose, recovered at the only boundary that
  * matters. `.strict()` rejects unknown keys outright.
  */
+// The standardized service an event sells: its name and Service Code, copied
+// from Products & Services when picked.
+const serviceKeys = { service: true, serviceCode: true } as const;
+
 const detailShapes = {
   flight: {
+    ...serviceKeys,
     flightNumber: true, cabin: true, departAirport: true, arriveAirport: true,
     terminal: true, gate: true, seat: true, baggage: true, timezone: true,
   },
   lodging: {
+    ...serviceKeys,
     roomType: true, nights: true, guests: true, checkInTime: true,
     checkOutTime: true, boardBasis: true,
   },
   transportation: {
+    ...serviceKeys,
     mode: true, vehicle: true, pickupLocation: true, dropoffLocation: true,
     driverName: true, driverPhone: true, distanceKm: true,
   },
   tour: {
+    ...serviceKeys,
     meetingPoint: true, durationText: true, groupSize: true, languages: true,
     guideName: true, inclusions: true,
   },
-  booking: { bookingRef: true, ticketType: true, partySize: true, dressCode: true },
-  activity: { durationText: true, whatToBring: true },
+  booking: { ...serviceKeys, bookingRef: true, ticketType: true, partySize: true, dressCode: true },
+  activity: { ...serviceKeys, durationText: true, whatToBring: true },
   information: {},
 } as const;
 
@@ -439,8 +487,19 @@ const eventTravelersSchema = z
   .max(50, 'An event can have at most 50 travellers')
   .optional();
 
+/** The Standardized Naming Master's markets; the reference carries the country's code. */
+const tripCountrySchema = z.enum(SERVICE_COUNTRIES, { message: 'Pick the country' });
+
 export const tripCreateSchema = z.object({
   customerId: z.number().int().positive('Client is required'),
+  country: tripCountrySchema,
+  /** The reference's first part; left out, the client's usual code. */
+  clientCode: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9]{1,12}$/, 'The client code is letters and digits, up to 12')
+    .optional()
+    .nullable(),
   // The first entry is the lead traveller.
   travelers: z
     .array(tripTravelerInputSchema)
@@ -462,6 +521,7 @@ export const tripUpdateSchema = z
   .object({
     customerId: z.number().int().positive().optional(),
     ownerId: z.number().int().positive().optional().nullable(),
+    country: tripCountrySchema.optional().nullable(),
     title: z.string().trim().min(1).max(200).optional(),
     description: z.string().trim().max(10000).optional().nullable(),
     status: tripStatusSchema.optional(),
@@ -578,6 +638,7 @@ export const tripItemReorderSchema = z.object({
 });
 
 export const tripFromQuoteSchema = z.object({
+  country: tripCountrySchema,
   ownerId: z.number().int().positive().optional().nullable(),
   title: z.string().trim().max(200).optional().nullable(),
   description: z.string().trim().max(2000).optional().nullable(),
@@ -875,3 +936,99 @@ export const aiSettingsUpdateSchema = z.object({
       'Alert emails must be addresses separated by commas',
     ),
 });
+
+// --- Fleet: Car Fuel and Car Maintenance (lib/fleet.ts) ---------------------
+// Each field once, without defaults, so the update schemas can be partial: a
+// default inside .partial() would still fill in, and overwrite on every PATCH.
+
+const fleetDateKeySchema = z.string().trim().refine(isDateKey, 'Use a YYYY-MM-DD date');
+const fleetCommonFields = {
+  vehicleId: z.number({ error: 'Pick a vehicle' }).int().positive('Pick a vehicle'),
+  odometerKm: z
+    .number({ error: 'Odometer must be a number' })
+    .int('Odometer is in whole kilometres')
+    .gte(0, 'Odometer cannot be negative')
+    .max(10_000_000)
+    .nullable(),
+  cost: z.number({ error: 'Cost must be a number' }).finite().gte(0, 'Cost cannot be negative').max(100_000_000).nullable(),
+  currency: currencySchema,
+  notes: z.string().trim().max(2000).nullable(),
+};
+const atLeastOneField = (value: object) => Object.keys(value).length > 0;
+
+const fuelLogFields = {
+  ...fleetCommonFields,
+  filledAt: isoDateSchema,
+  litres: z
+    .number({ error: 'Litres must be a number' })
+    .finite()
+    .gt(0, 'Litres must be more than 0')
+    .max(10_000, 'That is more than a tank holds'),
+  fuelType: z.enum(FUEL_TYPES, { error: 'Pick a fuel type' }),
+  fullTank: z.boolean(),
+  station: z.string().trim().max(200).nullable(),
+  filledBy: z.string().trim().max(120).nullable(),
+};
+
+export const fuelLogCreateSchema = z.object({
+  ...fuelLogFields,
+  odometerKm: fuelLogFields.odometerKm.optional(),
+  cost: fuelLogFields.cost.optional(),
+  currency: fuelLogFields.currency.default('USD'),
+  notes: fuelLogFields.notes.optional(),
+  fuelType: fuelLogFields.fuelType.default('Petrol'),
+  fullTank: fuelLogFields.fullTank.default(true),
+  station: fuelLogFields.station.optional(),
+  filledBy: fuelLogFields.filledBy.optional(),
+});
+
+export const fuelLogUpdateSchema = z
+  .object(fuelLogFields)
+  .partial()
+  .refine(atLeastOneField, 'At least one field must be updated');
+
+const maintenanceFields = {
+  ...fleetCommonFields,
+  kind: z.enum(MAINTENANCE_KINDS, { error: 'Pick scheduled or unscheduled' }),
+  category: z.enum(MAINTENANCE_CATEGORIES, { error: 'Pick a category' }),
+  title: z.string().trim().min(1, 'Describe the work').max(200),
+  status: z.enum(MAINTENANCE_STATUSES, { error: 'Pick a status' }),
+  scheduledFor: fleetDateKeySchema.nullable(),
+  completedAt: fleetDateKeySchema.nullable(),
+  provider: z.string().trim().max(200).nullable(),
+  nextDueAt: fleetDateKeySchema.nullable(),
+  nextDueKm: z
+    .number({ error: 'Next due odometer must be a number' })
+    .int('Next due odometer is in whole kilometres')
+    .gte(0)
+    .max(10_000_000)
+    .nullable(),
+  reminderDays: z
+    .number({ error: 'Pick when to be reminded' })
+    .int()
+    .refine((v) => (REMINDER_DAY_OPTIONS as readonly number[]).includes(v), 'Pick when to be reminded')
+    .nullable(),
+};
+
+export const maintenanceCreateSchema = z.object({
+  ...maintenanceFields,
+  odometerKm: maintenanceFields.odometerKm.optional(),
+  cost: maintenanceFields.cost.optional(),
+  currency: maintenanceFields.currency.default('USD'),
+  notes: maintenanceFields.notes.optional(),
+  kind: maintenanceFields.kind.default('Scheduled'),
+  category: maintenanceFields.category.default('Service'),
+  status: maintenanceFields.status.default('Planned'),
+  scheduledFor: maintenanceFields.scheduledFor.optional(),
+  completedAt: maintenanceFields.completedAt.optional(),
+  provider: maintenanceFields.provider.optional(),
+  nextDueAt: maintenanceFields.nextDueAt.optional(),
+  nextDueKm: maintenanceFields.nextDueKm.optional(),
+  // Left out, it follows the category (lib/fleet.ts defaultReminderDays).
+  reminderDays: maintenanceFields.reminderDays.optional(),
+});
+
+export const maintenanceUpdateSchema = z
+  .object(maintenanceFields)
+  .partial()
+  .refine(atLeastOneField, 'At least one field must be updated');

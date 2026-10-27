@@ -181,6 +181,7 @@ export default function TripsClient({
       title: trip.title,
       description: trip.description,
       status: trip.status,
+      country: trip.country,
       currency: trip.currency,
       startDate: trip.startDate,
       endDate: trip.endDate,
@@ -595,6 +596,7 @@ export default function TripsClient({
           travelers={formOptions.travelers}
           owners={formOptions.owners}
           currentUser={currentUser}
+          nextReferenceNumber={formOptions.nextReferenceNumber}
           onClose={() => setBuilderOpen(false)}
           onSaved={(trip) => {
             upsertTrip(trip);

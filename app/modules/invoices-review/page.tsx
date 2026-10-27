@@ -7,7 +7,7 @@ import { listInvoiceApproverCandidates, listInvoiceableQuotes, listInvoices } fr
 import { getOrganizationSettings } from '@/lib/organization';
 import { getQuickBooksStatus } from '@/lib/quickbooks';
 import { getWaveStatus } from '@/lib/wave';
-import { listProducts } from '@/lib/products';
+import { listProductOptions } from '@/lib/products';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
 
@@ -36,7 +36,7 @@ export default async function InvoicesReviewPage({
     await Promise.all([
       listInvoices(),
       listCustomers(),
-      listProducts(),
+      listProductOptions(),
       listBrandProfiles({ includeArchived: false }),
       getOrganizationSettings(),
       listInvoiceableQuotes(),

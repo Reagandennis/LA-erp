@@ -8,16 +8,16 @@ datasource db {
 }
 
 model User {
-  id                             Int                             @id @default(autoincrement())
-  email                          String                          @unique
+  id                             Int                              @id @default(autoincrement())
+  email                          String                           @unique
   name                           String
   passwordHash                   String
-  status                         String                          @default("active")
-  sessionVersion                 Int                             @default(1)
-  dashboardHighlights            String[]                        @default([])
-  worldClockZones                String[]                        @default([])
-  createdAt                      DateTime                        @default(now())
-  updatedAt                      DateTime                        @updatedAt
+  status                         String                           @default("active")
+  sessionVersion                 Int                              @default(1)
+  dashboardHighlights            String[]                         @default([])
+  worldClockZones                String[]                         @default([])
+  createdAt                      DateTime                         @default(now())
+  updatedAt                      DateTime                         @updatedAt
   userRoles                      UserRole[]
   userModules                    UserModule[]
   personalTodos                  PersonalTodo[]
@@ -27,76 +27,79 @@ model User {
   personalTodoNotifications      PersonalTodoNotification[]
   personalTodoComments           PersonalTodoComment[]
   sessions                       Session[]
-  auditLogs                      AuditLog[]                      @relation("AuditActor")
-  auditTargets                   AuditLog[]                      @relation("AuditTarget")
-  createdCustomers               Customer[]                      @relation("CustomerCreatedBy")
-  createdDeals                   Deal[]                          @relation("DealCreatedBy")
-  createdCrmActivities           CrmActivity[]                   @relation("CrmActivityCreatedBy")
-  quickbooksConnections          QuickBooksConnection[]          @relation("QuickBooksConnectedBy")
-  waveConnections                WaveConnection[]                @relation("WaveConnectedBy")
-  messagingAccounts              MessagingAccount[]              @relation("MessagingAccountOwner")
-  shiftTemplatesCreated          ShiftTemplate[]                 @relation("ShiftTemplateCreatedBy")
-  shiftTemplateMemberships       ShiftTemplateMember[]           @relation("ShiftTemplateMemberUser")
-  teamsCreated                   Team[]                          @relation("TeamCreatedBy")
-  teamMemberships                TeamMember[]                    @relation("TeamMemberUser")
-  leaveRequests                  LeaveRequest[]                  @relation("LeaveRequestUser")
-  leaveDecisions                 LeaveRequest[]                  @relation("LeaveRequestDecidedBy")
-  publicHolidaysCreated          PublicHoliday[]                 @relation("PublicHolidayCreatedBy")
-  createdQuotes                  Quote[]                         @relation("QuoteCreatedBy")
-  approvableQuotes               Quote[]                         @relation("QuoteApprover")
+  auditLogs                      AuditLog[]                       @relation("AuditActor")
+  auditTargets                   AuditLog[]                       @relation("AuditTarget")
+  createdCustomers               Customer[]                       @relation("CustomerCreatedBy")
+  createdDeals                   Deal[]                           @relation("DealCreatedBy")
+  createdCrmActivities           CrmActivity[]                    @relation("CrmActivityCreatedBy")
+  quickbooksConnections          QuickBooksConnection[]           @relation("QuickBooksConnectedBy")
+  waveConnections                WaveConnection[]                 @relation("WaveConnectedBy")
+  messagingAccounts              MessagingAccount[]               @relation("MessagingAccountOwner")
+  shiftTemplatesCreated          ShiftTemplate[]                  @relation("ShiftTemplateCreatedBy")
+  shiftTemplateMemberships       ShiftTemplateMember[]            @relation("ShiftTemplateMemberUser")
+  teamsCreated                   Team[]                           @relation("TeamCreatedBy")
+  teamMemberships                TeamMember[]                     @relation("TeamMemberUser")
+  leaveRequests                  LeaveRequest[]                   @relation("LeaveRequestUser")
+  leaveDecisions                 LeaveRequest[]                   @relation("LeaveRequestDecidedBy")
+  publicHolidaysCreated          PublicHoliday[]                  @relation("PublicHolidayCreatedBy")
+  createdQuotes                  Quote[]                          @relation("QuoteCreatedBy")
+  approvableQuotes               Quote[]                          @relation("QuoteApprover")
   quoteNotifications             QuoteNotification[]
-  createdProducts                Product[]                       @relation("ProductCreatedBy")
-  createdQuoteTemplates          QuoteTemplate[]                 @relation("QuoteTemplateCreatedBy")
-  createdBrandProfiles           BrandProfile[]                  @relation("BrandProfileCreatedBy")
-  createdInvoices                Invoice[]                       @relation("InvoiceCreatedBy")
-  approvableInvoices             Invoice[]                       @relation("InvoiceApprover")
+  createdProducts                Product[]                        @relation("ProductCreatedBy")
+  createdQuoteTemplates          QuoteTemplate[]                  @relation("QuoteTemplateCreatedBy")
+  createdBrandProfiles           BrandProfile[]                   @relation("BrandProfileCreatedBy")
+  createdInvoices                Invoice[]                        @relation("InvoiceCreatedBy")
+  approvableInvoices             Invoice[]                        @relation("InvoiceApprover")
   invoiceNotifications           InvoiceNotification[]
-  recordedInvoicePayments        InvoicePayment[]                @relation("InvoicePaymentCreatedBy")
-  organizationUpdates            OrganizationSettings[]          @relation("OrganizationUpdatedBy")
-  createdTrips                   Trip[]                          @relation("TripCreatedBy")
-  tripLogEntries                 TripLogEntry[]                  @relation("TripLogEntryCreatedBy")
-  closedOutTrips                 TripCloseout[]                  @relation("TripCloseoutClosedBy")
-  editedTripCloseouts            TripCloseout[]                  @relation("TripCloseoutUpdatedBy")
-  tripShareLinks                 TripShareLink[]                 @relation("TripShareLinkCreatedBy")
-  ownedTrips                     Trip[]                          @relation("TripOwner")
+  recordedInvoicePayments        InvoicePayment[]                 @relation("InvoicePaymentCreatedBy")
+  organizationUpdates            OrganizationSettings[]           @relation("OrganizationUpdatedBy")
+  createdTrips                   Trip[]                           @relation("TripCreatedBy")
+  tripLogEntries                 TripLogEntry[]                   @relation("TripLogEntryCreatedBy")
+  closedOutTrips                 TripCloseout[]                   @relation("TripCloseoutClosedBy")
+  editedTripCloseouts            TripCloseout[]                   @relation("TripCloseoutUpdatedBy")
+  tripShareLinks                 TripShareLink[]                  @relation("TripShareLinkCreatedBy")
+  ownedTrips                     Trip[]                           @relation("TripOwner")
   tripItineraryItemNotifications TripItineraryItemNotification[]
-  createdConversations           Conversation[]                  @relation("ConversationCreatedBy")
+  createdConversations           Conversation[]                   @relation("ConversationCreatedBy")
   conversationMembers            ConversationMember[]
-  sentMessages                   Message[]                       @relation("MessageSender")
+  sentMessages                   Message[]                        @relation("MessageSender")
   messageNotifications           MessageNotification[]
-  feedback                       Feedback[]                      @relation("FeedbackAuthor")
+  feedback                       Feedback[]                       @relation("FeedbackAuthor")
   feedbackUpvotes                FeedbackUpvote[]
   feedbackComments               FeedbackComment[]
-  createdDriverLicenses          DriverLicense[]                 @relation("DriverLicenseCreatedBy")
-  uploadedFiles                  StoredFile[]                    @relation("StoredFileUploadedBy")
-  tripItemAttachments            TripItemAttachment[]            @relation("TripItemAttachmentUploadedBy")
+  createdDriverLicenses          DriverLicense[]                  @relation("DriverLicenseCreatedBy")
+  uploadedFiles                  StoredFile[]                     @relation("StoredFileUploadedBy")
+  tripItemAttachments            TripItemAttachment[]             @relation("TripItemAttachmentUploadedBy")
   receivedFileShares             StoredFileShare[]
   fileNotifications              FileNotification[]
   calendarEvents                 CalendarEvent[]
   calendarEventNotifications     CalendarEventNotification[]
-  scheduleShifts                 ScheduleShift[]                 @relation("ScheduleEmployee")
-  createdScheduleShifts          ScheduleShift[]                 @relation("ScheduleCreatedBy")
-  zelloActivities                ZelloActivity[]                 @relation("ZelloActivityRecordedBy")
-  whatsAppMessages               WhatsAppMessage[]               @relation("WhatsAppMessageRecordedBy")
-  createdVehicles                Vehicle[]                       @relation("VehicleCreatedBy")
-  createdDrivers                 Driver[]                        @relation("DriverCreatedBy")
-  createdOfficers                Officer[]                       @relation("OfficerCreatedBy")
-  createdTripAssignments         TripAssignment[]                @relation("TripAssignmentCreatedBy")
-  createdIntelAssessments        IntelAssessment[]               @relation("IntelAssessmentCreatedBy")
-  createdHandovers               HandoverEntry[]                 @relation("HandoverCreatedBy")
-  acknowledgedHandovers          HandoverEntry[]                 @relation("HandoverAcknowledgedBy")
-  createdContacts                Contact[]                       @relation("ContactCreatedBy")
-  createdSops                    Sop[]                           @relation("SopCreatedBy")
+  scheduleShifts                 ScheduleShift[]                  @relation("ScheduleEmployee")
+  createdScheduleShifts          ScheduleShift[]                  @relation("ScheduleCreatedBy")
+  zelloActivities                ZelloActivity[]                  @relation("ZelloActivityRecordedBy")
+  whatsAppMessages               WhatsAppMessage[]                @relation("WhatsAppMessageRecordedBy")
+  createdVehicles                Vehicle[]                        @relation("VehicleCreatedBy")
+  createdVehicleFuelLogs         VehicleFuelLog[]                 @relation("VehicleFuelLogCreatedBy")
+  createdVehicleMaintenance      VehicleMaintenance[]             @relation("VehicleMaintenanceCreatedBy")
+  maintenanceNotifications       VehicleMaintenanceNotification[]
+  createdDrivers                 Driver[]                         @relation("DriverCreatedBy")
+  createdOfficers                Officer[]                        @relation("OfficerCreatedBy")
+  createdTripAssignments         TripAssignment[]                 @relation("TripAssignmentCreatedBy")
+  createdIntelAssessments        IntelAssessment[]                @relation("IntelAssessmentCreatedBy")
+  createdHandovers               HandoverEntry[]                  @relation("HandoverCreatedBy")
+  acknowledgedHandovers          HandoverEntry[]                  @relation("HandoverAcknowledgedBy")
+  createdContacts                Contact[]                        @relation("ContactCreatedBy")
+  createdSops                    Sop[]                            @relation("SopCreatedBy")
   sopAcknowledgements            SopAcknowledgement[]
-  sopRevisions                   SopRevision[]                   @relation("SopRevisionChangedBy")
-  createdContracts               Contract[]                      @relation("ContractCreatedBy")
-  notes                          Note[]                          @relation("NoteOwner")
-  createdPersonnel               Personnel[]                     @relation("PersonnelCreatedBy")
-  createdTravelers               Traveler[]                      @relation("TravelerCreatedBy")
-  personnelRecord                Personnel?                      @relation("PersonnelUser")
-  createdMapCategories           MapCategory[]                   @relation("MapCategoryCreatedBy")
-  createdMapLayers               MapLayer[]                      @relation("MapLayerCreatedBy")
-  createdMapGeofences            MapGeofence[]                   @relation("MapGeofenceCreatedBy")
+  sopRevisions                   SopRevision[]                    @relation("SopRevisionChangedBy")
+  createdContracts               Contract[]                       @relation("ContractCreatedBy")
+  notes                          Note[]                           @relation("NoteOwner")
+  createdPersonnel               Personnel[]                      @relation("PersonnelCreatedBy")
+  createdTravelers               Traveler[]                       @relation("TravelerCreatedBy")
+  personnelRecord                Personnel?                       @relation("PersonnelUser")
+  createdMapCategories           MapCategory[]                    @relation("MapCategoryCreatedBy")
+  createdMapLayers               MapLayer[]                       @relation("MapLayerCreatedBy")
+  createdMapGeofences            MapGeofence[]                    @relation("MapGeofenceCreatedBy")
 }
 
 model PersonalTodo {
@@ -520,6 +523,9 @@ model QuoteNotification {
   @@index([quoteId])
 }
 
+/// A product or service. The standardized services (prisma/data/standard-services.json)
+/// follow the Standardized Naming Master: `name` is the Standardized Service Name
+/// and `sku` the Service Code, unique and never reused.
 model Product {
   id               Int           @id @default(autoincrement())
   name             String
@@ -529,6 +535,23 @@ model Product {
   currency         String        @default("USD")
   taxable          Boolean       @default(true)
   archived         Boolean       @default(false)
+  quickbooksName   String?
+  /// Airport Services, Transfers, Vehicle Hire, Personnel, …
+  category         String?
+  subCategory      String?
+  /// Asset / Personnel Class: Sedan, SUV, Close Protection Officer, …
+  serviceClass     String?
+  /// Standard / Executive / Luxury, or Level 1-3 for personnel.
+  tier             String?
+  country          String?
+  location         String?
+  airportCode      String?
+  coverageScope    String?
+  vehicleExamples  String?
+  unitOfMeasure    String?
+  terms            String?
+  /// Notes / open items.
+  notes            String?
   createdById      Int
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -538,6 +561,15 @@ model Product {
 
   @@index([archived, name])
   @@index([createdById])
+  @@index([sku])
+}
+
+/// Each version of the standardized service catalog the seed has loaded. A
+/// version loads once, so a service deleted afterwards stays deleted.
+model ServiceCatalogImport {
+  version   String   @id
+  created   Int
+  createdAt DateTime @default(now())
 }
 
 model QuoteTemplate {
@@ -855,6 +887,8 @@ model Trip {
   title         String
   description   String?
   status        String              @default("Draft")
+  /// One of the Standardized Naming Master's markets; its code is in the reference.
+  country       String?
   startDate     DateTime?
   endDate       DateTime?
   currency      String              @default("USD")
@@ -1086,12 +1120,12 @@ model TripShareLink {
 // --- Task assignment: fleet & protection resources allocated to trips ---
 
 model Vehicle {
-  id             Int                 @id @default(autoincrement())
-  registration   String              @unique
+  id             Int                  @id @default(autoincrement())
+  registration   String               @unique
   make           String?
   model          String?
-  type           String              @default("Sedan")
-  status         String              @default("Available")
+  type           String               @default("Sedan")
+  status         String               @default("Available")
   capacity       Int?
   notes          String?
   photoName      String?
@@ -1099,14 +1133,97 @@ model Vehicle {
   photoSize      Int?
   photoContent   Bytes?
   createdById    Int
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  createdBy      User                @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  createdBy      User                 @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   assignments    TripAssignment[]
   itineraryItems TripItineraryItem[]
+  fuelLogs       VehicleFuelLog[]
+  maintenance    VehicleMaintenance[]
 
   @@index([status])
   @@index([registration])
+}
+
+/// A fill-up for a fleet vehicle (lib/fleet-server.ts). History goes with the
+/// vehicle; the author is only a label and survives as null if they are deleted.
+model VehicleFuelLog {
+  id          Int      @id @default(autoincrement())
+  vehicleId   Int
+  filledAt    DateTime
+  litres      Decimal  @db.Decimal(10, 2)
+  /// Total paid for the fill-up.
+  cost        Decimal? @db.Decimal(14, 2)
+  currency    String   @default("USD")
+  odometerKm  Int?
+  fuelType    String   @default("Petrol")
+  /// The tank was filled to the top, so the distance since the last fill-up gives the consumption.
+  fullTank    Boolean  @default(true)
+  station     String?
+  filledBy    String?
+  notes       String?
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation("VehicleFuelLogCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId, filledAt])
+  @@index([filledAt])
+  @@index([createdById])
+}
+
+/// A service, repair, or inspection for a fleet vehicle (lib/fleet-server.ts).
+model VehicleMaintenance {
+  id            Int                              @id @default(autoincrement())
+  vehicleId     Int
+  /// Scheduled (planned upkeep: services, inspections) | Unscheduled (breakdowns, accidents, faults)
+  kind          String                           @default("Scheduled")
+  category      String                           @default("Service")
+  title         String
+  /// Planned | In progress | Completed | Cancelled
+  status        String                           @default("Planned")
+  scheduledFor  DateTime?
+  completedAt   DateTime?
+  odometerKm    Int?
+  cost          Decimal?                         @db.Decimal(14, 2)
+  currency      String                           @default("USD")
+  provider      String?
+  nextDueAt     DateTime?
+  nextDueKm     Int?
+  /// Days before the planned or next-due date to remind Car Maintenance users; null for none (lib/fleet-reminders.ts).
+  reminderDays  Int?
+  notes         String?
+  createdById   Int?
+  createdAt     DateTime                         @default(now())
+  updatedAt     DateTime                         @updatedAt
+  vehicle       Vehicle                          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  createdBy     User?                            @relation("VehicleMaintenanceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  notifications VehicleMaintenanceNotification[]
+
+  @@index([vehicleId, status])
+  @@index([status, scheduledFor])
+  @@index([createdById])
+}
+
+/// A maintenance reminder in one user's bell (lib/fleet-reminders.ts). The key
+/// names the reminder and its due date or km, so each one reaches each user once
+/// and a rescheduled job reminds again.
+model VehicleMaintenanceNotification {
+  id            Int                @id @default(autoincrement())
+  userId        Int
+  maintenanceId Int
+  reminderKey   String
+  type          String
+  message       String
+  createdAt     DateTime           @default(now())
+  readAt        DateTime?
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  maintenance   VehicleMaintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reminderKey])
+  @@index([userId, createdAt])
+  @@index([maintenanceId])
 }
 
 model Driver {
