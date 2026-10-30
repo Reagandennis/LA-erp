@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import type { OpsTripEvent } from '@/lib/ops-dashboard';
 
 import { type MovementState, overdueLabel } from './ops-model';
-import { Check, clock } from './ops-ui';
+import { Check, Pill, type Tone, clock, mono, rowClass, subClass } from './ops-ui';
 
 /** Outline icons for the itinerary categories (trip-planning's categories.ts). */
 export const CATEGORY_ICON: Record<string, string> = {
@@ -20,12 +20,8 @@ export const CATEGORY_ICON: Record<string, string> = {
   information: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
 };
 
-export const STATE_STYLE: Record<MovementState, { row: string; chip: string; dot: string }> = {
-  done: { row: 'opacity-55', chip: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
-  late: { row: 'bg-rose-50/60', chip: 'bg-rose-100 text-rose-700', dot: 'bg-rose-500' },
-  now: { row: 'bg-amber-50/70', chip: 'bg-amber-100 text-amber-800', dot: 'bg-amber-400' },
-  upcoming: { row: '', chip: 'bg-gray-100 text-gray-500', dot: 'bg-gray-300' },
-};
+/** The pill colour for how a movement stands. */
+export const STATE_TONE: Record<MovementState, Tone> = { done: 'good', late: 'danger', now: 'warn', upcoming: 'neutral' };
 
 export function stateLabel(state: MovementState, at: string, now: number): string {
   const ms = new Date(at).getTime() - now;
@@ -56,39 +52,39 @@ export function EventRow({
   onToggle: () => void;
   trip?: { id: number; reference: string; customer: string };
 }>) {
-  const style = STATE_STYLE[state];
   const subline: ReactNode = trip ? (
-    <Link href={`/modules/trip-planning/${trip.id}`} className="block truncate text-[11px] text-gray-500 hover:text-primary">
-      <span className="font-mono">{trip.reference}</span> · {trip.customer}
+    <Link href={`/modules/trip-planning/${trip.id}`} className={`${subClass} hover:text-primary`}>
+      <span className={mono}>{trip.reference}</span> · {trip.customer}
       {event.crew && ` · ${event.crew}`}
     </Link>
   ) : event.crew ? (
-    <p className="truncate text-[11px] text-gray-500">{event.crew}</p>
+    <span className={subClass}>{event.crew}</span>
   ) : null;
 
   return (
-    <li className={`flex items-start gap-3 rounded-xl px-3 py-2 ${style.row}`}>
-      <Check checked={event.completed} disabled={!canEdit || pending} label={event.completed ? 'Mark not done' : 'Mark done'} onChange={onToggle} />
+    <li className={`${rowClass} items-start ${state === 'done' ? 'opacity-60' : ''}`}>
+      <span className="pt-0.5">
+        <Check checked={event.completed} disabled={!canEdit || pending} label={event.completed ? 'Mark not done' : 'Mark done'} onChange={onToggle} />
+      </span>
       {/* Local time: the server's zone may not be the viewer's. */}
-      <span suppressHydrationWarning className="w-11 shrink-0 pt-0.5 text-xs font-bold tabular-nums text-primary">
+      <span
+        suppressHydrationWarning
+        className={`${mono} w-11 shrink-0 text-xs font-semibold tabular-nums ${state === 'late' ? 'text-rose-600' : state === 'now' ? 'text-amber-600' : 'text-gray-500'}`}
+      >
         {clock(event.scheduledAt)}
       </span>
-      <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label={event.category}>
+      <svg className="mt-px h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label={event.category}>
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={CATEGORY_ICON[event.category] ?? CATEGORY_ICON.activity} />
       </svg>
       <div className="min-w-0 flex-1">
-        <p className={`truncate text-sm font-semibold ${event.completed ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
-          {event.flightNumber && <span className="mr-1 font-mono">{event.flightNumber}</span>}
+        <p className={`truncate text-sm font-medium ${event.completed ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+          {event.flightNumber && <span className={`${mono} mr-1`}>{event.flightNumber}</span>}
           {event.description}
           {event.placeName && <span className="font-normal text-gray-400"> · {event.placeName}</span>}
         </p>
         {subline}
       </div>
-      {now !== null && (
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${style.chip}`}>
-          {stateLabel(state, event.scheduledAt, now)}
-        </span>
-      )}
+      {now !== null && <Pill tone={STATE_TONE[state]}>{stateLabel(state, event.scheduledAt, now)}</Pill>}
     </li>
   );
 }

@@ -48,7 +48,7 @@ import {
   loadOpsReference,
   summarizeMaintenance,
 } from '../lib/ops-dashboard';
-import { parsePanels } from '../lib/ops-panels';
+import { OPS_PANELS, parsePanels } from '../lib/ops-panels';
 import type { AccessUser } from '../lib/user';
 
 const person = (modules: string[], opts: { admin?: boolean; id?: number } = {}): AccessUser => ({
@@ -167,7 +167,7 @@ describe('loadOpsDashboard', () => {
     const board = await loadOpsDashboard(person(['ops-dashboard', 'todo-personal', 'trip-planning']), ['tasks', 'fuel']);
 
     expect(Object.keys(board.sections)).toEqual(['tasks']);
-    expect(board.allowed).toEqual(['trips', 'movements', 'flights', 'tasks']);
+    expect(board.allowed).toEqual(['trips', 'flights', 'tasks', 'movements']);
     expect(db.trip.findMany).not.toHaveBeenCalled();
     expect(db.tripItineraryItem.findMany).not.toHaveBeenCalled();
   });
@@ -464,6 +464,7 @@ describe('buildAttention', () => {
             startDate: '2026-10-25T00:00:00.000Z',
             endDate: null,
             crew: null,
+            vehicle: null,
             controller: 'Ops',
             mine: true,
             canEdit: true,
@@ -569,7 +570,7 @@ describe('resizing panels', () => {
     );
     expect(layout.sizes).toEqual({ trips: { cols: 3, height: 500 }, fuel: { cols: 3 } });
     expect(layout.order.slice(0, 2)).toEqual(['fuel', 'trips']);
-    expect(layout.order).toHaveLength(8);
+    expect(layout.order).toHaveLength(OPS_PANELS.length);
     expect(parseLayout('not json')).toBe(DEFAULT_LAYOUT);
   });
 });
@@ -586,6 +587,7 @@ describe('trip health on the board', () => {
       startDate: '2026-10-27T00:00:00.000Z',
       endDate: '2026-10-30T00:00:00.000Z',
       crew: null,
+      vehicle: null,
       controller: 'Ops',
       mine: true,
       canEdit: true,

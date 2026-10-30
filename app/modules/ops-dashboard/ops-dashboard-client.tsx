@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { formatNumber, formatTotals } from '@/app/modules/_components/fleet-ui';
 import { subscribeServerEvents } from '@/app/ui/messaging-alerts-store';
 import { moduleIcon } from '@/app/ui/module-icons';
 import { useNow } from '@/app/ui/use-client';
@@ -16,11 +15,14 @@ import { DEFAULT_LAYOUT, type OpsLayout, updateLayout, useIsFullscreen, useOpsLa
 import { FuelPanel, MaintenancePanel } from './fleet-panels';
 import FlightsPanel from './flights-panel';
 import HandoverPanel from './handover-panel';
+import MapPanel from './map-panel';
 import MovementsPanel from './movements-panel';
-import { byCountry, countriesIn, movementState } from './ops-model';
-import type { PanelFrame } from './ops-ui';
+import { byCountry, countriesIn, trackerTally } from './ops-model';
+import { type PanelFrame, mono } from './ops-ui';
 import TasksPanel from './tasks-panel';
+import TrackersPanel from './trackers-panel';
 import TripsPanel from './trips-panel';
+import VehiclesPanel from './vehicles-panel';
 import WhatsappPanel from './whatsapp-panel';
 
 /** The panels on screen re-read this often while the tab is visible. */
@@ -30,12 +32,15 @@ const MESSAGE_SETTLE_MS = 3_000;
 
 /** What a change made on one panel can alter elsewhere, so only those reload. */
 const TOUCHES: Record<OpsPanelKey, OpsPanelKey[]> = {
-  movements: ['movements', 'trips', 'flights'],
+  map: ['map', 'trackers'],
   trips: ['trips', 'movements', 'flights'],
   flights: ['flights', 'movements', 'trips'],
-  whatsapp: ['whatsapp'],
   handover: ['handover'],
   tasks: ['tasks'],
+  trackers: ['trackers', 'map'],
+  vehicles: ['vehicles'],
+  movements: ['movements', 'trips', 'flights'],
+  whatsapp: ['whatsapp'],
   maintenance: ['maintenance'],
   fuel: ['fuel'],
 };
@@ -50,7 +55,7 @@ function LiveClock() {
   const now = useNow(1000);
   return (
     <div className="text-right" aria-live="off">
-      <p className="font-mono text-2xl font-bold tabular-nums leading-none text-primary">
+      <p className={`${mono} text-2xl font-bold tabular-nums leading-none text-primary`}>
         {now === null ? '--:--:--' : new Date(now).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
       </p>
       <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
@@ -60,16 +65,25 @@ function LiveClock() {
   );
 }
 
+/** Green while the board refreshes on time; amber once a refresh has failed. */
+function LivePill({ failed }: Readonly<{ failed: boolean }>) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+        failed ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${failed ? 'bg-amber-400' : 'animate-pulse bg-emerald-500'}`} aria-hidden="true" />
+      {failed ? 'Stale' : 'Live'}
+    </span>
+  );
+}
+
 function UpdatedAgo({ at, failed }: Readonly<{ at: string; failed: boolean }>) {
   const now = useNow(5000);
   const seconds = now === null ? 0 : Math.max(0, Math.round((now - new Date(at).getTime()) / 1000));
   const since = seconds < 60 ? `${seconds}s ago` : `${Math.floor(seconds / 60)} min ago`;
-  return (
-    <span className="flex items-center gap-1.5 text-xs text-gray-500">
-      <span className={`h-2 w-2 rounded-full ${failed ? 'bg-amber-400' : 'animate-pulse bg-emerald-500'}`} aria-hidden="true" />
-      {now === null ? 'Live' : failed ? `Couldn’t refresh · data from ${since}` : `Live · updated ${since}`}
-    </span>
-  );
+  return <span className="text-xs text-gray-500">{now === null ? '' : failed ? `Couldn’t refresh · data from ${since}` : `Updated ${since}`}</span>;
 }
 
 const toolButton =
@@ -102,6 +116,8 @@ function CustomizeMenu({
     if (showing) onShow([key]);
   };
 
+  const arrow = 'rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary disabled:opacity-30';
+
   return (
     <div className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className={toolButton}>
@@ -125,13 +141,7 @@ function CustomizeMenu({
                       <span className="text-primary [&_svg]:h-4 [&_svg]:w-4">{moduleIcon(PANEL_ICON[key])}</span>
                       <span className="truncate">{PANEL_TITLE[key]}</span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => move(key, -1)}
-                      disabled={i === 0}
-                      aria-label={`Move ${PANEL_TITLE[key]} up`}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary disabled:opacity-30"
-                    >
+                    <button type="button" onClick={() => move(key, -1)} disabled={i === 0} aria-label={`Move ${PANEL_TITLE[key]} up`} className={arrow}>
                       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
                       </svg>
@@ -141,7 +151,7 @@ function CustomizeMenu({
                       onClick={() => move(key, 1)}
                       disabled={i === panels.length - 1}
                       aria-label={`Move ${PANEL_TITLE[key]} down`}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary disabled:opacity-30"
+                      className={arrow}
                     >
                       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
@@ -189,54 +199,72 @@ function CustomizeMenu({
   );
 }
 
-// ---------------------------------------------------------------- summary tiles
+// ---------------------------------------------------------------- the KPI strip
 
-type Tile = { key: OpsPanelKey; label: string; value: string; hint?: string; alert?: boolean };
+type Kpi = { key: OpsPanelKey; label: string; value: string; of?: string; hint?: string; alert?: boolean };
 
-function SummaryTiles({ sections, visible }: Readonly<{ sections: Partial<OpsSections>; visible: OpsPanelKey[] }>) {
+const sameDay = (iso: string, now: number) => new Date(iso).toDateString() === new Date(now).toDateString();
+
+/**
+ * The five numbers across the top: trackers online, trips under way, vehicles
+ * moving, flights today and open tasks. Each links to its panel, and only
+ * shows for panels on screen.
+ */
+function KpiStrip({ sections }: Readonly<{ sections: Partial<OpsSections> }>) {
   const now = useNow(30_000);
-  const { movements, trips, flights, whatsapp, handover, tasks, maintenance, fuel } = sections;
-  const late = now === null ? 0 : (movements ?? []).filter((m) => movementState(m, now) === 'late').length;
+  const { trips, flights, tasks } = sections;
+  const trackers = sections.trackers ?? sections.map;
+  const trackersKey: OpsPanelKey = sections.trackers ? 'trackers' : 'map';
+  const tally = trackers && now !== null ? trackerTally(trackers.devices, now) : null;
 
-  const tiles: Record<OpsPanelKey, Tile | null> = {
-    movements: movements
-      ? { key: 'movements', label: 'Movements open', value: String(movements.filter((m) => !m.completed).length), hint: `${late} late`, alert: late > 0 }
-      : null,
-    trips: trips ? { key: 'trips', label: 'Trips active', value: String(trips.active), hint: `${trips.startingSoon} starting soon` } : null,
-    flights: flights ? { key: 'flights', label: 'Flights · 36h', value: String(flights.filter((f) => !f.completed).length) } : null,
-    whatsapp: whatsapp ? { key: 'whatsapp', label: 'Unread chats', value: String(whatsapp.unreadChats), alert: whatsapp.unreadChats > 0 } : null,
-    handover: handover ? { key: 'handover', label: 'Handovers', value: String(handover.awaiting), hint: 'to acknowledge' } : null,
-    tasks: tasks ? { key: 'tasks', label: 'Open tasks', value: String(tasks.open), hint: `${tasks.overdue} overdue`, alert: tasks.overdue > 0 } : null,
-    maintenance: maintenance
-      ? {
-          key: 'maintenance',
-          label: 'Maintenance due',
-          value: String(maintenance.overdue + maintenance.dueSoon),
-          hint: `${maintenance.overdue} overdue`,
-          alert: maintenance.overdue > 0,
-        }
-      : null,
-    fuel: fuel ? { key: 'fuel', label: 'Fuel · month', value: formatTotals(fuel.month.spend), hint: `${formatNumber(fuel.month.litres, 1)} L` } : null,
-  };
-  const shown = visible.map((key) => tiles[key]).filter((t): t is Tile => t !== null);
-  if (shown.length === 0) return null;
+  const kpis: Kpi[] = [];
+  if (trackers) {
+    kpis.push({
+      key: trackersKey,
+      label: 'Trackers online',
+      value: tally ? String(tally.online) : '–',
+      of: String(trackers.devices.length),
+      hint: tally && tally.offline > 0 ? `${tally.offline} offline` : undefined,
+      alert: (tally?.offline ?? 0) > 0,
+    });
+  }
+  if (trips) kpis.push({ key: 'trips', label: 'Active trips', value: String(trips.active), hint: `${trips.startingSoon} starting soon` });
+  if (trackers) {
+    kpis.push({
+      key: trackersKey,
+      label: 'Vehicles moving',
+      value: tally ? String(tally.moving) : '–',
+      of: String(trackers.devices.length),
+      hint: 'of the trackers reporting',
+    });
+  }
+  if (flights) {
+    kpis.push({
+      key: 'flights',
+      label: 'Flights today',
+      value: now === null ? '–' : String(flights.filter((f) => f.scheduledAt && sameDay(f.scheduledAt, now)).length),
+      hint: `${flights.filter((f) => !f.completed).length} in the next 36h`,
+    });
+  }
+  if (tasks) {
+    kpis.push({ key: 'tasks', label: 'Open tasks', value: String(tasks.open), hint: tasks.overdue > 0 ? `${tasks.overdue} overdue` : undefined, alert: tasks.overdue > 0 });
+  }
+  if (kpis.length === 0) return null;
 
   return (
-    <nav aria-label="Summary" className="grid grid-cols-2 gap-3 sm:grid-cols-4 2xl:grid-cols-8">
-      {shown.map((tile) => (
+    <nav aria-label="Summary" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+      {kpis.map((kpi) => (
         <a
-          key={tile.key}
-          href={`#ops-${tile.key}`}
-          className="group min-w-0 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm transition-colors hover:border-secondary"
+          key={kpi.label}
+          href={`#ops-${kpi.key}`}
+          className="min-w-0 rounded-2xl border border-gray-200 bg-white px-4 py-3.5 shadow-sm transition-colors hover:border-primary/40"
         >
-          <p className="flex items-center gap-1.5 truncate text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
-            <span className="shrink-0 text-gray-300 group-hover:text-primary [&_svg]:h-3.5 [&_svg]:w-3.5">{moduleIcon(PANEL_ICON[tile.key])}</span>
-            {tile.label}
+          <p className="truncate text-sm text-gray-500">{kpi.label}</p>
+          <p className={`mt-1 truncate text-2xl font-bold tabular-nums ${kpi.alert ? 'text-rose-600' : 'text-gray-900'}`}>
+            {kpi.value}
+            {kpi.of && <span className="text-base font-semibold text-gray-400">/{kpi.of}</span>}
           </p>
-          <p className={`mt-1 truncate text-2xl font-bold tabular-nums ${tile.alert ? 'text-rose-600' : 'text-primary'}`} title={tile.value}>
-            {tile.value}
-          </p>
-          {tile.hint && <p className="truncate text-xs text-gray-500">{tile.hint}</p>}
+          {kpi.hint && <p className="truncate text-xs text-gray-400">{kpi.hint}</p>}
         </a>
       ))}
     </nav>
@@ -352,7 +380,7 @@ export default function OpsDashboardClient({
   const countries = countriesIn(sections);
   if (layout.country && !countries.includes(layout.country)) countries.push(layout.country);
   const shown = byCountry(sections, layout.country);
-  // The attention bar and tiles only speak for panels on screen: hidden ones aren't kept fresh.
+  // The attention bar and the strip only speak for panels on screen: hidden ones aren't kept fresh.
   const onScreen = Object.fromEntries(visible.map((key) => [key, shown[key]])) as Partial<OpsSections>;
 
   const frame = (key: OpsPanelKey): PanelFrame => ({
@@ -372,8 +400,8 @@ export default function OpsDashboardClient({
 
   const panel = (key: OpsPanelKey) => {
     switch (key) {
-      case 'movements':
-        return shown.movements && <MovementsPanel key={key} movements={shown.movements} frame={frame(key)} onChanged={changed(key)} />;
+      case 'map':
+        return shown.map && <MapPanel key={key} data={shown.map} frame={frame(key)} />;
       case 'trips':
         return shown.trips && <TripsPanel key={key} data={shown.trips} flights={shown.flights ?? []} frame={frame(key)} onChanged={changed(key)} />;
       case 'flights':
@@ -382,18 +410,26 @@ export default function OpsDashboardClient({
             <FlightsPanel key={key} flights={shown.flights} canOpenFlightTracker={initial.canOpenFlightTracker} frame={frame(key)} onChanged={changed(key)} />
           )
         );
-      case 'whatsapp':
-        return shown.whatsapp && <WhatsappPanel key={key} data={shown.whatsapp} version={messagingVersion} frame={frame(key)} onChanged={changed(key)} />;
       case 'handover':
         return shown.handover && <HandoverPanel key={key} data={shown.handover} frame={frame(key)} onChanged={changed(key)} />;
       case 'tasks':
         return shown.tasks && <TasksPanel key={key} data={shown.tasks} frame={frame(key)} onChanged={changed(key)} />;
+      case 'trackers':
+        return shown.trackers && <TrackersPanel key={key} data={shown.trackers} frame={frame(key)} />;
+      case 'vehicles':
+        return shown.vehicles && <VehiclesPanel key={key} data={shown.vehicles} frame={frame(key)} />;
+      case 'movements':
+        return shown.movements && <MovementsPanel key={key} movements={shown.movements} frame={frame(key)} onChanged={changed(key)} />;
+      case 'whatsapp':
+        return shown.whatsapp && <WhatsappPanel key={key} data={shown.whatsapp} version={messagingVersion} frame={frame(key)} onChanged={changed(key)} />;
       case 'maintenance':
         return shown.maintenance && reference && <MaintenancePanel key={key} data={shown.maintenance} reference={reference} frame={frame(key)} onChanged={changed(key)} />;
       case 'fuel':
         return shown.fuel && reference && <FuelPanel key={key} data={shown.fuel} reference={reference} frame={frame(key)} onChanged={changed(key)} />;
     }
   };
+
+  const notice = 'rounded-3xl border-2 border-dashed border-gray-200 bg-white p-12 text-center';
 
   return (
     <main
@@ -402,13 +438,15 @@ export default function OpsDashboardClient({
     >
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight text-primary">Ops dashboard</h1>
-          <p className="mt-1 max-w-2xl text-sm text-gray-500">
-            The day&apos;s movements, trips, flights, messages, handovers, tasks and fleet. Act here, or expand a panel to open its module.
-          </p>
-          <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-primary">Ops dashboard</h1>
+            <LivePill failed={failed} />
             <UpdatedAgo at={updatedAt} failed={failed} />
           </div>
+          <p className="mt-1 max-w-2xl text-sm text-gray-500">
+            The live map and its trackers, the trips under way and their flights, handovers, tasks, the fleet, today&apos;s movements and the
+            desk&apos;s WhatsApp. Act here, or open a panel&apos;s module from its corner.
+          </p>
         </div>
         <div className="flex flex-col items-end gap-3">
           <LiveClock />
@@ -456,21 +494,22 @@ export default function OpsDashboardClient({
       </header>
 
       {allowed.length === 0 ? (
-        <div className="rounded-3xl border-2 border-dashed border-gray-200 bg-white p-12 text-center">
+        <div className={notice}>
           <h2 className="text-lg font-bold text-primary">Nothing to show yet</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Panels appear for the modules you hold: Trip Planning, WhatsApp, Handover, Tasks, Car Fuel and Car Maintenance. Ask your administrator for access.
+            Panels appear for the modules you hold: Map, Trip Planning, Handover, Tasks, Vehicles, WhatsApp, Car Fuel and Car Maintenance. Ask your
+            administrator for access.
           </p>
         </div>
       ) : visible.length === 0 ? (
-        <div className="rounded-3xl border-2 border-dashed border-gray-200 bg-white p-12 text-center">
+        <div className={notice}>
           <h2 className="text-lg font-bold text-primary">Every panel is hidden</h2>
           <p className="mt-1 text-sm text-gray-500">Use Customize to choose the panels you want on this screen.</p>
         </div>
       ) : (
         <>
+          <KpiStrip sections={onScreen} />
           <AttentionBar sections={onScreen} />
-          <SummaryTiles sections={onScreen} visible={visible} />
           <div className="grid grid-flow-row-dense grid-cols-1 items-start gap-5 xl:grid-cols-2 2xl:grid-cols-3">{visible.map(panel)}</div>
         </>
       )}

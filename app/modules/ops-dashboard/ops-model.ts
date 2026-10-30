@@ -1,4 +1,5 @@
 import { SERVICE_COUNTRIES } from '@/lib/service-catalog';
+import type { TrackedDevice } from '@/lib/map-types';
 import type { OpsFlight, OpsMovement, OpsSections, OpsTrip, OpsTripEvent } from '@/lib/ops-dashboard';
 import type { OpsPanelKey } from '@/lib/ops-panels';
 
@@ -20,6 +21,51 @@ export function movementState(m: Pick<OpsMovement | OpsTripEvent, 'scheduledAt' 
   if (delta < -LATE_AFTER_MS) return m.category === 'information' ? 'done' : 'late';
   if (delta <= LATE_AFTER_MS) return 'now';
   return 'upcoming';
+}
+
+// --- Trackers ------------------------------------------------------------------
+
+/** A fix older than this is stale; older than OFFLINE_AFTER_MS, the tracker is offline. */
+export const STALE_AFTER_MS = 5 * 60_000;
+export const OFFLINE_AFTER_MS = 60 * 60_000;
+export const LOW_BATTERY_PCT = 20;
+/** Slower than this is parked (or GPS drift). */
+export const MOVING_KPH = 5;
+
+export type TrackerState = 'offline' | 'stale' | 'low' | 'online';
+
+/**
+ * How a tracker stands: off the air (Traccar says so, or no fix for an hour),
+ * quiet for a few minutes, running low on battery, or online.
+ */
+export function trackerState(device: Pick<TrackedDevice, 'at' | 'online' | 'batteryPct'>, now: number): TrackerState {
+  const age = now - device.at;
+  if (device.online === false || age > OFFLINE_AFTER_MS) return 'offline';
+  if (age > STALE_AFTER_MS) return 'stale';
+  if (device.batteryPct !== undefined && device.batteryPct < LOW_BATTERY_PCT) return 'low';
+  return 'online';
+}
+
+/** Under way right now: a fresh fix at road speed. */
+export function isMoving(device: Pick<TrackedDevice, 'at' | 'online' | 'batteryPct' | 'speedKph'>, now: number): boolean {
+  const state = trackerState(device, now);
+  return state !== 'offline' && state !== 'stale' && (device.speedKph ?? 0) >= MOVING_KPH;
+}
+
+/** The counts the strip and the panels quote. */
+export function trackerTally(devices: TrackedDevice[], now: number): { total: number; online: number; offline: number; moving: number; attention: number } {
+  let online = 0;
+  let offline = 0;
+  let attention = 0;
+  let moving = 0;
+  for (const device of devices) {
+    const state = trackerState(device, now);
+    if (state === 'offline') offline += 1;
+    else online += 1;
+    if (state !== 'online') attention += 1;
+    if (isMoving(device, now)) moving += 1;
+  }
+  return { total: devices.length, online, offline, moving, attention };
 }
 
 // --- Country filter -------------------------------------------------------------
@@ -268,6 +314,19 @@ export function buildAttention(
       title: `${overdueWork} maintenance ${overdueWork === 1 ? 'job' : 'jobs'} overdue`,
       detail: null,
       href: '#ops-maintenance',
+    });
+  }
+
+  const trackers = sections.trackers ?? sections.map;
+  const offline = trackers ? trackerTally(trackers.devices, now).offline : 0;
+  if (offline > 0) {
+    items.push({
+      key: 'trackers',
+      tone: 'warn',
+      panel: 'trackers',
+      title: `${offline} ${offline === 1 ? 'tracker' : 'trackers'} offline`,
+      detail: 'No signal for an hour or more',
+      href: sections.trackers ? '#ops-trackers' : '#ops-map',
     });
   }
 

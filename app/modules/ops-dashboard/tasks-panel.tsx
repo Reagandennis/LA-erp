@@ -2,15 +2,30 @@
 
 import { useState } from 'react';
 
+import { useNow } from '@/app/ui/use-client';
+import { APP_LOCALE } from '@/lib/locale';
 import type { OpsTasks } from '@/lib/ops-dashboard';
 
-import { Check, Empty, HeaderButton, Panel, type PanelFrame, Pill, fieldClass, relativeDays, send } from './ops-ui';
+import { Check, Empty, HeaderButton, Panel, type PanelFrame, Pill, type Tone, fieldClass, formClass, primaryButton, rowClass, send, subClass } from './ops-ui';
 
-const PRIORITY_DOT: Record<string, string> = {
-  high: 'bg-rose-500',
-  medium: 'bg-amber-400',
-  low: 'bg-gray-300',
+/** Priorities worth a pill; a low one says nothing. */
+const PRIORITY: Record<string, { label: string; tone: Tone }> = {
+  high: { label: 'High', tone: 'danger' },
+  medium: { label: 'Medium', tone: 'warn' },
 };
+
+/** When a task is due: days overdue, Today, Tomorrow, the weekday inside a week, then the days ahead. */
+function due(days: number, now: number | null): { label: string; tone: Tone } {
+  if (days < 0) return { label: `${-days}d overdue`, tone: 'danger' };
+  if (days === 0) return { label: 'Today', tone: 'warn' };
+  if (days === 1) return { label: 'Tomorrow', tone: 'warn' };
+  if (now !== null && days <= 6) {
+    const date = new Date(now);
+    date.setDate(date.getDate() + days);
+    return { label: date.toLocaleDateString(APP_LOCALE, { weekday: 'short' }), tone: 'info' };
+  }
+  return { label: `In ${days}d`, tone: 'info' };
+}
 
 /** The viewer's open tasks (and ones shared with them): add one, tick one off. */
 export default function TasksPanel({
@@ -18,6 +33,7 @@ export default function TasksPanel({
   frame,
   onChanged,
 }: Readonly<{ data: OpsTasks; frame: PanelFrame; onChanged: () => Promise<void> }>) {
+  const now = useNow(60_000);
   const [busy, setBusy] = useState<number | 'new' | null>(null);
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState('');
@@ -52,10 +68,18 @@ export default function TasksPanel({
   return (
     <Panel
       id="ops-tasks"
-      icon="todo-personal"
       title="Tasks"
-      count={data.open}
-      tone={data.overdue > 0 ? 'danger' : 'neutral'}
+      summary={
+        <>
+          {data.open} open
+          {data.overdue > 0 && (
+            <>
+              {' · '}
+              <span className="text-rose-600">{data.overdue} overdue</span>
+            </>
+          )}
+        </>
+      }
       href="/modules/todo-personal"
       moduleName="Tasks"
       frame={frame}
@@ -67,7 +91,7 @@ export default function TasksPanel({
     >
       {adding && (
         <form
-          className="mb-2 space-y-2 rounded-xl bg-gray-50 p-3"
+          className={`${formClass} space-y-2`}
           onSubmit={(e) => {
             e.preventDefault();
             void add();
@@ -89,48 +113,40 @@ export default function TasksPanel({
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </select>
-            <button
-              type="submit"
-              disabled={busy === 'new' || !title.trim()}
-              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-bold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
+            <button type="submit" disabled={busy === 'new' || !title.trim()} className={`${primaryButton} shrink-0`}>
               Add
             </button>
           </div>
         </form>
       )}
 
-      {data.overdue > 0 && (
-        <p className="px-3 pb-1 pt-1 text-xs font-semibold text-rose-600">
-          {data.overdue} overdue
-        </p>
-      )}
-
       {data.tasks.length === 0 ? (
         <Empty>No open tasks.</Empty>
       ) : (
-        <ul className="space-y-0.5">
-          {data.tasks.map((task) => (
-            <li key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-gray-50">
-              <Check
-                checked={false}
-                disabled={task.shared || busy === task.id}
-                label={task.shared ? 'Only its owner can complete a shared task' : 'Mark done'}
-                onChange={() => void complete(task.id)}
-              />
-              <span className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[task.priority] ?? PRIORITY_DOT.low}`} title={`${task.priority} priority`} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-gray-900">{task.title}</span>
-                <span className="block truncate text-[11px] text-gray-400">
-                  {task.status}
-                  {task.shared && ' · shared with you'}
+        <ul>
+          {data.tasks.map((task) => {
+            const when = task.days === null ? null : due(task.days, now);
+            const level = PRIORITY[task.priority];
+            return (
+              <li key={task.id} className={rowClass}>
+                <Check
+                  checked={false}
+                  disabled={task.shared || busy === task.id}
+                  label={task.shared ? 'Only its owner can complete a shared task' : 'Mark done'}
+                  onChange={() => void complete(task.id)}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-gray-900">{task.title}</span>
+                  <span className={subClass}>
+                    {task.status}
+                    {task.shared && ' · shared with you'}
+                  </span>
                 </span>
-              </span>
-              {task.days !== null && (
-                <Pill tone={task.days < 0 ? 'danger' : task.days <= 1 ? 'warn' : 'neutral'}>{relativeDays(task.days)}</Pill>
-              )}
-            </li>
-          ))}
+                {when && <Pill tone={when.tone}>{when.label}</Pill>}
+                {level && <Pill tone={level.tone}>{level.label}</Pill>}
+              </li>
+            );
+          })}
         </ul>
       )}
     </Panel>

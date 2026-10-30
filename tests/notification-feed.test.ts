@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   materializeDueCalendarReminders: vi.fn(),
   listMaintenanceNotifications: vi.fn(),
   materializeMaintenanceReminders: vi.fn(),
+  listTripEscalationNotifications: vi.fn(),
 }));
 
 vi.mock('../lib/prisma', () => ({ prisma: { $queryRaw: mocks.queryRaw } }));
@@ -34,6 +35,7 @@ vi.mock('../lib/fleet-reminders', () => ({
   listMaintenanceNotifications: mocks.listMaintenanceNotifications,
   materializeMaintenanceReminders: mocks.materializeMaintenanceReminders,
 }));
+vi.mock('../lib/trip-escalations', () => ({ listTripEscalationNotifications: mocks.listTripEscalationNotifications }));
 
 import { listPersonalTodoNotifications, loadNotificationFeed } from '../lib/notification-feed';
 
@@ -50,6 +52,7 @@ describe('notification feed', () => {
     mocks.listCalendarNotifications.mockResolvedValue([{ id: 6 }]);
     mocks.materializeDueCalendarReminders.mockResolvedValue(0);
     mocks.listMaintenanceNotifications.mockResolvedValue([{ id: 8 }]);
+    mocks.listTripEscalationNotifications.mockResolvedValue([]);
     mocks.materializeMaintenanceReminders.mockResolvedValue(0);
   });
 
@@ -97,6 +100,7 @@ describe('notification feed', () => {
       file: [{ id: 5 }],
       calendar: [{ id: 6 }],
       maintenance: [],
+      escalation: [],
     });
     for (const fn of [
       mocks.listQuoteNotifications,

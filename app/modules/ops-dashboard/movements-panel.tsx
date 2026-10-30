@@ -7,16 +7,10 @@ import { APP_LOCALE } from '@/lib/locale';
 import type { OpsMovement } from '@/lib/ops-dashboard';
 
 import { EventRow } from './event-row';
-import { LATE_AFTER_MS, movementState } from './ops-model';
-import { Empty, Panel, type PanelFrame, clock, send } from './ops-ui';
+import { LATE_AFTER_MS, type MovementState, movementState } from './ops-model';
+import { Empty, Panel, type PanelFrame, Segmented, StackedBar, clock, mono, send } from './ops-ui';
 
 type Filter = 'all' | 'open' | 'late';
-
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'open', label: 'Open' },
-  { value: 'late', label: 'Late' },
-];
 
 /** "Today", "Tomorrow" or the date, in the viewer's zone. */
 function dayHeading(iso: string, now: number): string {
@@ -41,8 +35,9 @@ export default function MovementsPanel({
   const [busy, setBusy] = useState<number | null>(null);
 
   const states = new Map(movements.map((m) => [m.id, now === null ? 'upcoming' : movementState(m, now)] as const));
-  const late = movements.filter((m) => states.get(m.id) === 'late').length;
-  const open = movements.filter((m) => states.get(m.id) !== 'done').length;
+  const count = (state: MovementState) => movements.filter((m) => states.get(m.id) === state).length;
+  const late = count('late');
+  const open = movements.length - count('done');
   const shown = movements.filter((m) => (filter === 'all' ? true : filter === 'late' ? states.get(m.id) === 'late' : states.get(m.id) !== 'done'));
   // The "now" line goes before the first event that is still ahead.
   const firstAhead = now === null ? -1 : shown.findIndex((m) => new Date(m.scheduledAt).getTime() > now + LATE_AFTER_MS);
@@ -59,33 +54,48 @@ export default function MovementsPanel({
   return (
     <Panel
       id="ops-movements"
-      icon="trip-planning"
       title="Movements"
-      count={open}
-      tone={late > 0 ? 'danger' : 'neutral'}
+      summary={
+        <>
+          {open} open
+          {late > 0 && (
+            <>
+              {' · '}
+              <span className="text-rose-600">{late} late</span>
+            </>
+          )}
+        </>
+      }
       href="/modules/trip-planning"
       moduleName="Trip Planning"
       frame={frame}
       defaultCols={2}
       actions={
-        <div className="flex rounded-lg bg-gray-100 p-0.5" role="group" aria-label="Show">
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => setFilter(f.value)}
-              aria-pressed={filter === f.value}
-              className={`rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${
-                filter === f.value ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-primary'
-              }`}
-            >
-              {f.label}
-              {f.value === 'late' && late > 0 && <span className="ml-1 text-rose-600">{late}</span>}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Show"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'open', label: 'Open' },
+            { value: 'late', label: 'Late', ...(late > 0 ? { count: late, alert: true } : {}) },
+          ]}
+        />
       }
     >
+      {now !== null && movements.length > 0 && (
+        <div className="border-b border-gray-100 py-4">
+          <StackedBar
+            segments={[
+              { label: 'done', value: count('done'), tone: 'good' },
+              { label: 'ahead', value: count('upcoming'), tone: 'neutral' },
+              { label: 'due now', value: count('now'), tone: 'warn' },
+              { label: 'late', value: late, tone: 'danger' },
+            ]}
+          />
+        </div>
+      )}
+
       {shown.length === 0 ? (
         <Empty>
           {movements.length === 0
@@ -101,10 +111,10 @@ export default function MovementsPanel({
             const heading = now !== null ? dayHeading(m.scheduledAt, now) : null;
             const newDay = heading !== null && (i === 0 || dayHeading(shown[i - 1]!.scheduledAt, now!) !== heading);
             const nowLine = i === firstAhead && now !== null && (
-              <li className="flex items-center gap-2 px-3 py-1" aria-label="Now">
+              <li className="flex items-center gap-2 py-1.5" aria-label="Now">
                 <span className="h-2 w-2 rounded-full bg-rose-500" />
                 <span className="h-px flex-1 bg-rose-300" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500">Now {clock(new Date(now).toISOString())}</span>
+                <span className={`${mono} text-[10px] font-bold uppercase tracking-wider text-rose-500`}>Now {clock(new Date(now).toISOString())}</span>
               </li>
             );
             // The line belongs to today: above a later day's heading, below today's.
@@ -113,7 +123,7 @@ export default function MovementsPanel({
               <Fragment key={m.id}>
                 {lineFirst && nowLine}
                 {newDay && (
-                  <li className="px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400 first:pt-1">{heading}</li>
+                  <li className="pb-1 pt-3 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400 first:pt-2">{heading}</li>
                 )}
                 {!lineFirst && nowLine}
                 <EventRow

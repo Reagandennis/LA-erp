@@ -11,7 +11,7 @@ import { subscribeServerEvents } from './messaging-alerts-store';
 import { dismissPushedToast, Toast, ToastStack, usePushedToasts } from './toast';
 import { useIsClient } from './use-client';
 
-type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance';
+type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance' | 'escalation';
 
 type RawTodoNotification = {
   id: number;
@@ -86,6 +86,15 @@ type RawMaintenanceNotification = {
   readAt: string | null;
 };
 
+type RawEscalationNotification = {
+  id: number;
+  tripId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
 type NotificationItem = {
   source: NotificationSource;
   id: number;
@@ -112,6 +121,7 @@ type NotificationFeed = {
   file?: RawFileNotification[];
   calendar?: RawCalendarNotification[];
   maintenance?: RawMaintenanceNotification[];
+  escalation?: RawEscalationNotification[];
 };
 
 const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
@@ -123,6 +133,7 @@ const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   file: '/api/files/notifications',
   calendar: '/api/calendar/notifications',
   maintenance: '/api/fleet/maintenance/notifications',
+  escalation: '/api/planning/trip-escalations',
 };
 
 function compositeKey(item: { source: NotificationSource; id: number }): string {
@@ -144,6 +155,9 @@ function buildToastTitle(source: NotificationSource, type: string): string {
   }
   if (source === 'trip') {
     return 'Trip reminder';
+  }
+  if (source === 'escalation') {
+    return 'Trip escalated';
   }
   if (source === 'message') {
     return 'New message';
@@ -168,7 +182,7 @@ function buildHref(item: { source: NotificationSource; entityId: number }): stri
   if (item.source === 'invoice') {
     return '/modules/invoices-review';
   }
-  if (item.source === 'trip') {
+  if (item.source === 'trip' || item.source === 'escalation') {
     return `/modules/trip-planning/${item.entityId}`;
   }
   if (item.source === 'message') {
@@ -322,6 +336,20 @@ export default function NotificationsBell() {
             readAt: item.readAt,
             href: buildHref({ source: 'maintenance', entityId: item.maintenanceId }),
             toastTitle: buildToastTitle('maintenance', item.type),
+          });
+        }
+
+        for (const item of feed?.escalation ?? []) {
+          merged.push({
+            source: 'escalation',
+            id: item.id,
+            entityId: item.tripId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'escalation', entityId: item.tripId }),
+            toastTitle: buildToastTitle('escalation', item.type),
           });
         }
 

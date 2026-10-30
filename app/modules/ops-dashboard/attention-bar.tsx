@@ -45,19 +45,19 @@ export default function AttentionBar({ sections }: Readonly<{ sections: Partial<
         </span>
         <div>
           <p className="text-sm font-bold text-emerald-800">All clear</p>
-          <p className="text-xs text-emerald-700">Nothing late, delayed, escalated or overdue on the panels you’re showing.</p>
+          <p className="text-xs text-emerald-700">Nothing late, delayed, escalated, offline or overdue on the panels you’re showing.</p>
         </div>
       </section>
     );
   }
 
   return (
-    <section aria-label="Needs attention" className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+    <section aria-label="Needs attention" className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-bold text-primary">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-gray-900">
           <span className={`h-2.5 w-2.5 rounded-full ${danger > 0 ? 'animate-pulse bg-rose-500' : 'bg-amber-400'}`} aria-hidden="true" />
           Needs attention
-          <span className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${danger > 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+          <span className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold tabular-nums ${danger > 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
             {items.length}
           </span>
         </h2>

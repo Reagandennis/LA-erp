@@ -270,3 +270,52 @@ export async function emailTripItineraryToCustomer(params: {
 
   return { to };
 }
+
+/**
+ * Tells the escalation list (Admin → Organization) that a trip log entry was
+ * escalated: what happened, who reported it, what is being done, and a button
+ * to the trip. One email to everyone on the list. Throws when delivery fails.
+ */
+export async function emailTripEscalation(params: {
+  recipients: { name: string; email: string }[];
+  trip: { reference: string; title: string; customer: string; country: string | null };
+  entry: { detail: string; receivedFrom: string | null; actionItem: string | null; loggedAt: string; dutyController: string | null };
+  escalatedBy: string;
+  tripUrl: string;
+}): Promise<{ to: string[] }> {
+  const { trip, entry } = params;
+  const to = params.recipients.map((r) => r.email.trim()).filter(Boolean);
+  if (to.length === 0) throw new EmailError('No one on the escalation list has an email address.');
+
+  const organization = await getOrganizationSettings();
+  const orgName = organization.companyName || 'Our company';
+  const loggedAt = new Date(entry.loggedAt).toLocaleString(APP_LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
+  const row = (label: string, value: string | null) =>
+    value
+      ? `<tr><td style="padding:3px 16px 3px 0;color:#6b7280;vertical-align:top;white-space:nowrap;">${escapeEmailHtml(label)}</td><td style="color:#111827;">${escapeEmailHtml(value)}</td></tr>`
+      : '';
+
+  const bodyHtml = `
+    <p><strong>${escapeEmailHtml(params.escalatedBy)}</strong> escalated an entry on the log of trip <strong>${escapeEmailHtml(trip.reference)}</strong>.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:14px 0;font-size:14px;color:#374151;">
+      ${row('Trip', `${trip.reference} · ${trip.title}`)}
+      ${row('Client', trip.customer)}
+      ${row('Country', trip.country)}
+      ${row('What happened', entry.detail)}
+      ${row('Reported by', entry.receivedFrom)}
+      ${row('Action', entry.actionItem)}
+      ${row('Logged', `${loggedAt}${entry.dutyController ? ` by ${entry.dutyController}` : ''}`)}
+    </table>
+    <p>Open the trip to see the full log and respond.</p>`;
+
+  const html = renderEmailLayout({
+    title: `Escalation: ${trip.reference}`,
+    bodyHtml,
+    organizationName: orgName,
+    accentColor: '#e11d48',
+    cta: { label: 'Open the trip in LA-ERP', url: params.tripUrl },
+  });
+
+  await sendEmail({ to, subject: `Escalation on ${trip.reference} · ${trip.customer}`, html });
+  return { to };
+}

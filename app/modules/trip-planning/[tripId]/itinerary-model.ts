@@ -171,3 +171,22 @@ export function reorderPayload(
     itemIds: sortDayItems(items.filter((item) => item.dayId === dayId)).map((item) => item.id),
   }));
 }
+
+/**
+ * Another event already at the same minute, so the desk can be asked before a
+ * second one lands on it. The one being edited is never its own clash.
+ */
+export function findTimeClash<T extends { id: number; scheduledAt: string | null }>(
+  scheduledAt: string | null,
+  items: T[],
+  excludeId: number | null = null,
+): T | null {
+  if (!scheduledAt) return null;
+  const minute = Math.floor(new Date(scheduledAt).getTime() / 60_000);
+  if (!Number.isFinite(minute)) return null;
+  return (
+    items.find(
+      (item) => item.id !== excludeId && item.scheduledAt !== null && Math.floor(new Date(item.scheduledAt).getTime() / 60_000) === minute,
+    ) ?? null
+  );
+}

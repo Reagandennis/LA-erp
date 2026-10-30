@@ -418,7 +418,7 @@ export default function TripsClient({
                 <input
                   type="search"
                   aria-label="Search trips"
-                  placeholder="Search by reference, tracking code, title, client, or traveller…"
+                  placeholder="Search by reference, tracking code, task number, client, or traveller…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"

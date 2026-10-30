@@ -18,9 +18,19 @@ export interface OrganizationSettings {
   defaultCurrency: string;
   defaultTaxRate: number;
   taxLabel: string;
+  /** Users told when a trip log entry is escalated. */
+  escalationRecipientIds: number[];
   hasLogo: boolean;
   logoMimeType: string | null;
   updatedAt: string;
+}
+
+/** Enough of a user to tick them for escalations. */
+interface EscalationCandidate {
+  id: number;
+  name: string;
+  email: string;
+  status: string;
 }
 
 interface OrganizationClientProps {
@@ -48,6 +58,9 @@ export default function OrganizationClient({ initialSettings }: OrganizationClie
     String(round2(settings.defaultTaxRate * 100)),
   );
   const [taxLabel, setTaxLabel] = useState(settings.taxLabel);
+  const [escalationRecipientIds, setEscalationRecipientIds] = useState<number[]>(settings.escalationRecipientIds ?? []);
+  // Everyone with an account, for the escalation list; null until loaded.
+  const [users, setUsers] = useState<EscalationCandidate[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -60,6 +73,22 @@ export default function OrganizationClient({ initialSettings }: OrganizationClie
       return () => clearTimeout(timeout);
     }
   }, [success]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/admin/users', { credentials: 'include' })
+      .then(async (response) => (response.ok ? ((await response.json()) as { users?: EscalationCandidate[] }).users ?? [] : []))
+      .catch(() => [])
+      .then((list) => {
+        if (active) setUsers(list.filter((u) => u.status === 'active').sort((a, b) => a.name.localeCompare(b.name)));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const toggleRecipient = (id: number) =>
+    setEscalationRecipientIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
 
   const handleSave = async () => {
     setError(null);
@@ -84,6 +113,7 @@ export default function OrganizationClient({ initialSettings }: OrganizationClie
           defaultCurrency,
           defaultTaxRate: (Number(defaultTaxRatePct) || 0) / 100,
           taxLabel: taxLabel.trim() || 'Tax',
+          escalationRecipientIds,
         }),
       });
       const data = (await response.json().catch(() => null)) as
@@ -94,7 +124,7 @@ export default function OrganizationClient({ initialSettings }: OrganizationClie
         return;
       }
       setSettings(data.settings);
-      setSuccess('Branding saved');
+      setSuccess('Settings saved');
     } catch {
       setError('Network error');
     } finally {
@@ -331,6 +361,45 @@ export default function OrganizationClient({ initialSettings }: OrganizationClie
             />
           </Field>
         </div>
+      </section>
+
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+        <h2 className="text-sm font-black text-gray-900 uppercase tracking-widest">Trip escalations</h2>
+        <p className="text-xs text-gray-500">
+          When someone escalates an entry on a trip log, these people get a notification in the app and an email with the
+          details. Whoever escalated it isn&apos;t told twice.
+        </p>
+        {users === null ? (
+          <p className="text-sm text-gray-400">Loading people…</p>
+        ) : users.length === 0 ? (
+          <p className="text-sm text-gray-400">No active users to choose from.</p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-1 md:grid-cols-2">
+            {users.map((user) => {
+              const on = escalationRecipientIds.includes(user.id);
+              return (
+                <li key={user.id}>
+                  <label
+                    className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition ${
+                      on ? 'border-rose-200 bg-rose-50/60' : 'border-gray-100 hover:bg-gray-50'
+                    }`}
+                  >
+                    <input type="checkbox" checked={on} onChange={() => toggleRecipient(user.id)} className="h-4 w-4 rounded border-gray-300 accent-[#e11d48]" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-gray-900">{user.name}</span>
+                      <span className="block truncate text-xs text-gray-500">{user.email}</span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="text-xs text-gray-400">
+          {escalationRecipientIds.length === 0
+            ? 'No one is chosen yet: escalations are only marked on the log until someone is.'
+            : `${escalationRecipientIds.length} ${escalationRecipientIds.length === 1 ? 'person' : 'people'} will be told. Save to apply.`}
+        </p>
       </section>
 
       {error && (

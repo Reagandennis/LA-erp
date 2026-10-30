@@ -55,6 +55,7 @@ model User {
   organizationUpdates            OrganizationSettings[]           @relation("OrganizationUpdatedBy")
   createdTrips                   Trip[]                           @relation("TripCreatedBy")
   tripLogEntries                 TripLogEntry[]                   @relation("TripLogEntryCreatedBy")
+  tripLogNotifications           TripLogNotification[]            @relation("TripLogNotificationUser")
   closedOutTrips                 TripCloseout[]                   @relation("TripCloseoutClosedBy")
   editedTripCloseouts            TripCloseout[]                   @relation("TripCloseoutUpdatedBy")
   tripShareLinks                 TripShareLink[]                  @relation("TripShareLinkCreatedBy")
@@ -592,25 +593,27 @@ model QuoteTemplate {
 }
 
 model OrganizationSettings {
-  id              Int      @id @default(1)
-  companyName     String?
-  addressLine1    String?
-  addressLine2    String?
-  city            String?
-  region          String?
-  postalCode      String?
-  country         String?
-  email           String?
-  phone           String?
-  website         String?
-  defaultCurrency String   @default("USD")
-  defaultTaxRate  Decimal  @default(0) @db.Decimal(6, 4)
-  taxLabel        String   @default("Tax")
-  logo            Bytes?
-  logoMimeType    String?
-  updatedById     Int?
-  updatedAt       DateTime @updatedAt
-  updatedBy       User?    @relation("OrganizationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  id                     Int      @id @default(1)
+  companyName            String?
+  addressLine1           String?
+  addressLine2           String?
+  city                   String?
+  region                 String?
+  postalCode             String?
+  country                String?
+  email                  String?
+  phone                  String?
+  website                String?
+  defaultCurrency        String   @default("USD")
+  defaultTaxRate         Decimal  @default(0) @db.Decimal(6, 4)
+  taxLabel               String   @default("Tax")
+  /// Users told (in the app and by email) when a trip log entry is escalated.
+  escalationRecipientIds Int[]    @default([])
+  logo                   Bytes?
+  logoMimeType           String?
+  updatedById            Int?
+  updatedAt              DateTime @updatedAt
+  updatedBy              User?    @relation("OrganizationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 }
 
 model QuoteSequence {
@@ -1054,7 +1057,7 @@ model TripSequence {
 /// One line in a trip's operations log: what was reported, by whom, and the
 /// action taken. Imported from FileMaker's task log and added to from the trip page.
 model TripLogEntry {
-  id             Int      @id @default(autoincrement())
+  id             Int                   @id @default(autoincrement())
   tripId         Int
   loggedAt       DateTime
   detail         String
@@ -1064,15 +1067,32 @@ model TripLogEntry {
   /// Duty controller on shift, free text: FileMaker names have no user account.
   dutyController String?
   comments       String?
-  escalated      Boolean  @default(false)
+  escalated      Boolean               @default(false)
   createdById    Int?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  trip           Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  createdBy      User?    @relation("TripLogEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  trip           Trip                  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdBy      User?                 @relation("TripLogEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  notifications  TripLogNotification[]
 
   @@index([tripId, loggedAt])
   @@index([escalated])
+}
+
+/// Someone on the escalation list was told a trip log entry was escalated.
+model TripLogNotification {
+  id        Int          @id @default(autoincrement())
+  userId    Int
+  entryId   Int
+  type      String       @default("trip.escalated")
+  message   String
+  createdAt DateTime     @default(now())
+  readAt    DateTime?
+  entry     TripLogEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  user      User         @relation("TripLogNotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([entryId])
 }
 
 /// Verification of a completed trip (lib/trip-closeout.ts). Stays editable after

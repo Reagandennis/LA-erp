@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
+import type { FlightCandidate, LookupAirport } from '@/lib/flight-status';
 import { APP_LOCALE } from '@/lib/locale';
 import { allTimeZones, localTimeZone, offsetLabel, utcToZoned, weekdayOf, zonedToUtcIso } from '@/lib/zoned-time';
 
@@ -9,6 +10,7 @@ import { REMINDER_OPTIONS, type CrewOptions, type TripDaySummary } from '../../t
 import type { EditorState } from '../editor-state';
 import { dayLabel } from '../itinerary-model';
 import { CrewFields } from './crew-fields';
+import { AirportInput, FlightNumberLookup, seenOn } from './flight-lookup';
 import ServicePicker from './service-picker';
 
 /** Zones offered above the full list: this office's, then the usual hubs. */
@@ -62,6 +64,50 @@ export default function FlightFields({
   // The airport the event happens at, and the one at the other end.
   const hereKey = arrival ? 'arriveAirport' : 'departAirport';
   const thereKey = arrival ? 'departAirport' : 'arriveAirport';
+
+  /**
+   * A look-up fills the airline, both airports, this end's local time and zone,
+   * and the duration in one patch (patch replaces the editor wholesale, so two
+   * calls in one event would lose the first). What it replaced is kept for Undo.
+   */
+  const [filled, setFilled] = useState<{ candidate: FlightCandidate; before: Partial<EditorState> } | null>(null);
+  const applyCandidate = (candidate: FlightCandidate) => {
+    const here = arrival ? candidate.destination : candidate.origin;
+    const time = arrival ? candidate.arrivalTime : candidate.departureTime;
+    setFilled({
+      candidate,
+      before: {
+        providerName: editor.providerName,
+        timezone: editor.timezone,
+        time: editor.time,
+        durationHours: editor.durationHours,
+        durationMinutes: editor.durationMinutes,
+        details: editor.details,
+      },
+    });
+    patch({
+      providerName: candidate.airline?.name ?? editor.providerName,
+      timezone: here?.tz ?? editor.timezone,
+      time: time ?? editor.time,
+      ...(candidate.durationMinutes != null
+        ? { durationHours: String(Math.floor(candidate.durationMinutes / 60)), durationMinutes: String(candidate.durationMinutes % 60) }
+        : {}),
+      details: {
+        ...editor.details,
+        flightNumber: candidate.flightNumber,
+        departAirport: candidate.origin?.iata ?? editor.details.departAirport ?? '',
+        arriveAirport: candidate.destination?.iata ?? editor.details.arriveAirport ?? '',
+      },
+    });
+  };
+  const undoFill = () => {
+    if (!filled) return;
+    patch(filled.before);
+    setFilled(null);
+  };
+  // Picking this end's airport also sets the zone its time is in.
+  const pickAirport = (key: string, airport: LookupAirport) =>
+    patch({ details: { ...editor.details, [key]: airport.iata }, ...(key === hereKey && airport.tz ? { timezone: airport.tz } : {}) });
 
   const switchDirection = (next: 'DEPARTURE' | 'ARRIVAL') => {
     if (next === editor.timeLabel) return;
@@ -135,17 +181,20 @@ export default function FlightFields({
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <label className="block">
-          <span className={labelClass}>Flight number</span>
-          <input
-            type="text"
-            placeholder="KQ 100"
-            value={editor.details.flightNumber ?? ''}
-            onChange={(e) => setDetail('flightNumber', e.target.value.toUpperCase())}
-            className={`${fieldClass} font-mono uppercase`}
-          />
-        </label>
+      <FlightNumberLookup value={editor.details.flightNumber ?? ''} onChange={(value) => setDetail('flightNumber', value)} onPick={applyCandidate} />
+      {filled && (
+        <p className="-mt-2 text-xs text-sky-800">
+          Filled from {filled.candidate.runs} recent {filled.candidate.runs === 1 ? 'run' : 'runs'} of {filled.candidate.flightNumber}
+          {seenOn(filled.candidate.lastSeen) && ` · last seen ${seenOn(filled.candidate.lastSeen)}`}
+          {filled.candidate.aircraft && ` · ${filled.candidate.aircraft}`}. Typical times, so check them against the ticket.
+          {!(arrival ? filled.candidate.arrivalTime : filled.candidate.departureTime) && ' No local time was known, so set the time by hand.'}{' '}
+          <button type="button" onClick={undoFill} className="font-semibold underline">
+            Undo
+          </button>
+        </p>
+      )}
+
+      <div className="grid grid-cols-3 gap-2">
         <label className="block">
           <span className={labelClass}>Airline</span>
           <input
@@ -158,24 +207,21 @@ export default function FlightFields({
         </label>
         <label className="block">
           <span className={`${labelClass} text-sky-700`}>{arrival ? 'Arrival airport' : 'Departure airport'}</span>
-          <input
-            type="text"
-            placeholder={arrival ? 'NBO' : 'NBO'}
-            maxLength={4}
+          <AirportInput
             value={editor.details[hereKey] ?? ''}
-            onChange={(e) => setDetail(hereKey, e.target.value.toUpperCase())}
-            className={`${fieldClass} font-mono uppercase ring-1 ring-sky-100`}
+            onChange={(value) => setDetail(hereKey, value)}
+            onPick={(airport) => pickAirport(hereKey, airport)}
+            placeholder="NBO or Nairobi"
+            className="ring-1 ring-sky-100"
           />
         </label>
         <label className="block">
           <span className={labelClass}>{arrival ? 'Arriving from' : 'Flying to'}</span>
-          <input
-            type="text"
-            placeholder={arrival ? 'LHR' : 'LHR'}
-            maxLength={4}
+          <AirportInput
             value={editor.details[thereKey] ?? ''}
-            onChange={(e) => setDetail(thereKey, e.target.value.toUpperCase())}
-            className={`${fieldClass} font-mono uppercase`}
+            onChange={(value) => setDetail(thereKey, value)}
+            onPick={(airport) => pickAirport(thereKey, airport)}
+            placeholder="LHR or London"
           />
         </label>
       </div>

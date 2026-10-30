@@ -328,3 +328,57 @@ export function scheduleCountdown(now: number, schedule: FlightSchedule): Countd
   if (now >= arr) return { phase: 'landed', label: `Due ${formatDuration(now - arr)} ago`, imminent: false };
   return { phase: 'scheduled', label: `Lands in ${formatDuration(arr - now)}`, imminent: arr - now <= 60 * 60_000 };
 }
+
+// ── Filling the flight form from FlightRadar24 ───────────────────────────────
+
+/** A schedule's arrival is at the gate, a few minutes after FR24's touchdown. */
+export const TAXI_IN_MINUTES = 10;
+
+export interface LookupAirport {
+  iata: string;
+  icao: string | null;
+  name: string;
+  city: string;
+  country: string;
+  /** IANA zone the airport's local times are in; null when the table has none. */
+  tz: string | null;
+}
+
+export interface LookupAirline {
+  name: string;
+  iata: string | null;
+  icao: string | null;
+}
+
+/**
+ * One flight as FR24 has flown it recently: its route, and the gate times a
+ * schedule would quote, taken as the median of its recent runs. Shape of
+ * `/api/flight-radar/lookup`.
+ */
+export interface FlightCandidate {
+  flightNumber: string;
+  airline: LookupAirline | null;
+  origin: LookupAirport | null;
+  destination: LookupAirport | null;
+  /** "HH:MM", local to the origin; null without a zone or a run to read it from. */
+  departureTime: string | null;
+  /** "HH:MM", local to the destination. */
+  arrivalTime: string | null;
+  /** Gate to gate, to the nearest five minutes. */
+  durationMinutes: number | null;
+  /** ICAO type code of the aircraft usually flying it, e.g. B77W. */
+  aircraft: string | null;
+  /** The tail number of the latest run. */
+  registration: string | null;
+  /** How many recent runs the times are drawn from, and when the latest was last seen. */
+  runs: number;
+  lastSeen: string | null;
+  /** In the air right now. */
+  airborne: boolean;
+}
+
+export interface FlightLookup {
+  query: { kind: 'flight' | 'callsign' | 'registration'; value: string };
+  candidates: FlightCandidate[];
+  checkedAt: string;
+}

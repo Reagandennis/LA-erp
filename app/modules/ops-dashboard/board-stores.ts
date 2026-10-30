@@ -24,7 +24,8 @@ export interface OpsLayout {
   country: string;
 }
 
-const LAYOUT_KEY = 'ops-dashboard:layout';
+// Bumped when the board's cards change, so every browser starts from the new default order.
+const LAYOUT_KEY = 'ops-dashboard:layout:2';
 
 export const DEFAULT_LAYOUT: OpsLayout = { order: [...OPS_PANELS], hidden: [], collapsed: [], sizes: {}, country: '' };
 

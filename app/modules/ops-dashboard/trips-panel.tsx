@@ -4,29 +4,33 @@ import Link from 'next/link';
 import { type ReactNode, useState } from 'react';
 
 import { useNow } from '@/app/ui/use-client';
-import type { OpsFlight, OpsTrip, OpsTripEvent, OpsTrips } from '@/lib/ops-dashboard';
+import type { OpsFlight, OpsTrip, OpsTrips } from '@/lib/ops-dashboard';
 import { SERVICE_COUNTRY_CODES } from '@/lib/service-catalog';
 
 import { useFlightDelays } from './board-stores';
-import { EventRow, STATE_STYLE, stateLabel } from './event-row';
+import { EventRow } from './event-row';
 import { type HealthLevel, type MovementState, type TripHealth, compareTrips, movementState, overdueLabel, tripHealth } from './ops-model';
-import { Empty, Panel, type PanelFrame, RowButton, ago, clock, fieldClass, send, shortDate } from './ops-ui';
+import {
+  Empty,
+  Panel,
+  type PanelFrame,
+  Pill,
+  RowButton,
+  Segmented,
+  TONE_SOLID,
+  type Tone,
+  ago,
+  clock,
+  fieldClass,
+  mono,
+  primaryButton,
+  send,
+  shortDate,
+} from './ops-ui';
 
-/** The strip shows from six hours ago to eighteen ahead, so "now" sits a quarter of the way in. */
-const AXIS_BEFORE_MS = 6 * 3_600_000;
-const AXIS_AFTER_MS = 18 * 3_600_000;
-const AXIS_SPAN_MS = AXIS_BEFORE_MS + AXIS_AFTER_MS;
+const LEVEL_TONE: Record<HealthLevel, Tone> = { danger: 'danger', warn: 'warn', live: 'info', ok: 'good', idle: 'neutral' };
 
-// Trip, its day, how it stands.
-const ROW_GRID = 'md:grid md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,14rem)] md:items-center md:gap-x-5';
-
-const LEVEL_STYLE: Record<HealthLevel, { dot: string; chip: string }> = {
-  danger: { dot: 'bg-rose-500', chip: 'bg-rose-100 text-rose-700' },
-  warn: { dot: 'bg-amber-400', chip: 'bg-amber-100 text-amber-800' },
-  live: { dot: 'bg-sky-500', chip: 'bg-sky-100 text-sky-800' },
-  ok: { dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700' },
-  idle: { dot: 'bg-gray-300', chip: 'bg-gray-100 text-gray-500' },
-};
+const tag = 'shrink-0 rounded bg-gray-100 px-1 text-[9px] font-bold text-gray-500';
 
 function healthLabel(health: TripHealth): string {
   switch (health.reason) {
@@ -52,71 +56,6 @@ function healthLabel(health: TripHealth): string {
 }
 
 type Filter = 'all' | 'attention' | 'mine';
-
-// ---------------------------------------------------------------- the day strip
-
-/** Local hours on the strip's axis that fall on a multiple of three. */
-function axisTicks(start: number): number[] {
-  const tick = new Date(start);
-  tick.setMinutes(0, 0, 0);
-  const ticks: number[] = [];
-  while (tick.getTime() <= start + AXIS_SPAN_MS) {
-    if (tick.getTime() >= start && tick.getHours() % 3 === 0) ticks.push(tick.getTime());
-    tick.setHours(tick.getHours() + 1);
-  }
-  return ticks;
-}
-
-const position = (t: number, start: number) => `${Math.min(100, Math.max(0, ((t - start) / AXIS_SPAN_MS) * 100))}%`;
-
-function AxisHeader({ now }: Readonly<{ now: number }>) {
-  const start = now - AXIS_BEFORE_MS;
-  return (
-    <div className={`hidden px-3 pb-1 md:grid ${ROW_GRID}`} aria-hidden="true">
-      <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">Trip</span>
-      <div className="relative h-4">
-        {axisTicks(start).map((t) => (
-          <span key={t} className="absolute -translate-x-1/2 text-[10px] tabular-nums text-gray-400" style={{ left: position(t, start) }}>
-            {clock(new Date(t).toISOString())}
-          </span>
-        ))}
-        <span className="absolute -translate-x-1/2 rounded bg-rose-500 px-1 text-[9px] font-bold uppercase text-white" style={{ left: position(now, start) }}>
-          Now
-        </span>
-      </div>
-      <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">Status · next</span>
-    </div>
-  );
-}
-
-/** The trip's events on a line from six hours ago to eighteen ahead, coloured by how each stands. */
-function DayStrip({ events, states, now }: Readonly<{ events: OpsTripEvent[]; states: MovementState[]; now: number }>) {
-  const start = now - AXIS_BEFORE_MS;
-  return (
-    <div className="relative h-7">
-      <span className="absolute inset-x-0 top-1/2 h-px bg-gray-200" />
-      {axisTicks(start).map((t) => (
-        <span key={t} className="absolute inset-y-1 w-px bg-gray-100" style={{ left: position(t, start) }} />
-      ))}
-      <span className="absolute inset-y-0 w-0.5 -translate-x-1/2 rounded bg-rose-400" style={{ left: position(now, start) }} />
-      {events.map((event, i) => {
-        const at = new Date(event.scheduledAt).getTime();
-        const offAxis = at < start || at > start + AXIS_SPAN_MS;
-        const state = states[i]!;
-        return (
-          <span
-            key={event.id}
-            title={`${clock(event.scheduledAt)} ${event.flightNumber ? `${event.flightNumber} ` : ''}${event.description} · ${stateLabel(state, event.scheduledAt, now)}`}
-            className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 ring-2 ring-white ${STATE_STYLE[state].dot} ${
-              event.category === 'flight' ? 'rotate-45 rounded-sm' : 'rounded-full'
-            } ${offAxis ? 'opacity-40' : ''}`}
-            style={{ left: position(at, start) }}
-          />
-        );
-      })}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------- one trip
 
@@ -181,11 +120,7 @@ function LogUpdate({ trip, onSaved, onCancel }: Readonly<{ trip: OpsTrip; onSave
         <button type="button" onClick={onCancel} className="shrink-0 px-2 py-1.5 text-xs font-bold text-gray-500 hover:text-gray-700">
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={saving || !form.detail.trim()}
-          className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
-        >
+        <button type="submit" disabled={saving || !form.detail.trim()} className={`${primaryButton} shrink-0 text-xs`}>
           {saving ? 'Saving…' : 'Add to log'}
         </button>
       </div>
@@ -202,6 +137,11 @@ function Fact({ label, children }: Readonly<{ label: string; children: ReactNode
   );
 }
 
+/**
+ * One line per trip, as the control room reads it: how it stands (the dot and
+ * the pill), who and what it is, the vehicle on it. Open it for today's
+ * events, the log and the quick actions.
+ */
 function TripRow({
   trip,
   health,
@@ -224,7 +164,7 @@ function TripRow({
   const [busy, setBusy] = useState<string | null>(null);
   const [logging, setLogging] = useState(false);
   const active = trip.status === 'Active';
-  const level = LEVEL_STYLE[health?.level ?? 'idle'];
+  const tone = LEVEL_TONE[health?.level ?? 'idle'];
   const code = trip.country ? (SERVICE_COUNTRY_CODES as Record<string, string>)[trip.country] : null;
 
   const run = async (key: string, work: () => Promise<boolean>) => {
@@ -255,69 +195,59 @@ function TripRow({
   const next = health?.next ?? null;
 
   return (
-    <li className={`rounded-xl border transition-colors ${open ? 'border-primary/20 bg-white shadow-sm' : 'border-gray-100 hover:border-gray-200'}`}>
-      <div className={`px-3 py-2.5 ${ROW_GRID}`}>
-        <div className="flex min-w-0 items-start gap-2">
-          <button
-            type="button"
-            onClick={onToggleOpen}
-            aria-expanded={open}
-            aria-label={open ? `Close ${trip.reference}` : `Open ${trip.reference}`}
-            className="mt-0.5 rounded p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary"
-          >
-            <svg className={`h-4 w-4 transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-            </svg>
+    <li className="border-b border-gray-100 last:border-b-0">
+      <div className="flex items-center gap-2.5 py-2.5">
+        <button
+          type="button"
+          onClick={onToggleOpen}
+          aria-expanded={open}
+          aria-label={open ? `Close ${trip.reference}` : `Open ${trip.reference}`}
+          className="shrink-0 rounded p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary"
+        >
+          <svg className={`h-4 w-4 transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${TONE_SOLID[tone]}`} aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={onToggleOpen} className="block w-full truncate text-left text-sm font-medium text-gray-900 hover:text-primary">
+            {trip.customer} · {trip.title}
           </button>
-          <div className="min-w-0">
-            <p className="flex items-center gap-1.5">
-              <span className={`h-2 w-2 shrink-0 rounded-full ${level.dot}`} aria-hidden="true" />
-              <Link href={`/modules/trip-planning/${trip.id}`} className="truncate font-mono text-xs font-bold text-gray-900 hover:text-primary">
-                {trip.reference}
-              </Link>
-              {code && <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] font-bold text-gray-500">{code}</span>}
-              {trip.mine && <span className="shrink-0 rounded bg-primary/10 px-1 text-[9px] font-bold text-primary">YOURS</span>}
-            </p>
-            <button type="button" onClick={onToggleOpen} className="block w-full truncate text-left text-xs text-gray-600 hover:text-primary">
-              {trip.customer} · {trip.title}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-2 md:mt-0">
-          {now !== null && trip.events.length > 0 ? (
-            <div className="hidden md:block">
-              <DayStrip events={trip.events} states={states} now={now} />
-            </div>
-          ) : (
-            <p className="hidden text-center text-[11px] text-gray-300 md:block">{now !== null && 'Nothing on the itinerary in this window'}</p>
-          )}
-        </div>
-
-        <div className="mt-1.5 flex items-start justify-between gap-2 md:mt-0">
-          <div className="min-w-0">
-            {health && (
-              <span className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-bold ${level.chip}`}>{healthLabel(health)}</span>
-            )}
-            {now !== null && (
-              <p className="mt-0.5 truncate text-[11px] text-gray-500">
-                {health && health.total > 0 && `${health.done}/${health.total} done`}
+          <p className="flex min-w-0 items-center gap-1.5 text-xs text-gray-500">
+            <Link href={`/modules/trip-planning/${trip.id}`} className={`${mono} shrink-0 hover:text-primary`}>
+              {trip.reference}
+            </Link>
+            {code && <span className={tag}>{code}</span>}
+            {trip.mine && <span className={tag}>YOURS</span>}
+            {now !== null && (health?.total || next) && (
+              <span className="min-w-0 truncate">
+                {health && health.total > 0 && `· ${health.done}/${health.total} done`}
                 {next && ` · next ${clock(next.scheduledAt)} ${next.description}`}
                 {next && new Date(next.scheduledAt).getTime() > now && ` (in ${overdueLabel(new Date(next.scheduledAt).getTime() - now, true)})`}
-              </p>
+              </span>
             )}
-          </div>
-          {quickAction}
+          </p>
         </div>
+        {trip.vehicle && (
+          <span className={`${mono} hidden shrink-0 text-xs text-gray-500 sm:inline`} title="Vehicle on the trip">
+            {trip.vehicle}
+          </span>
+        )}
+        {health && (
+          <Pill tone={tone} title={healthLabel(health)}>
+            {healthLabel(health)}
+          </Pill>
+        )}
+        {quickAction}
       </div>
 
       {open && (
-        <div className="grid gap-3 border-t border-gray-100 bg-gray-50/60 p-3 lg:grid-cols-[minmax(0,1fr)_17rem]">
+        <div className="mb-3 grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 lg:grid-cols-[minmax(0,1fr)_17rem]">
           <div className="min-w-0">
             {trip.events.length === 0 ? (
               <p className="py-4 text-center text-xs text-gray-400">Nothing on the itinerary from the start of today to 24 hours ahead.</p>
             ) : (
-              <ol className="space-y-0.5">
+              <ol>
                 {trip.events.map((event, i) => (
                   <EventRow
                     key={event.id}
@@ -347,7 +277,7 @@ function TripRow({
             )}
           </div>
 
-          <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-3">
+          <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-3">
             <dl className="grid grid-cols-2 gap-2">
               <Fact label="Controller">{trip.controller ?? '—'}</Fact>
               <Fact label="Status">{trip.status}</Fact>
@@ -395,8 +325,8 @@ function TripRow({
 // ---------------------------------------------------------------- the board
 
 /**
- * Every trip under way as one row: how it stands, its day on a timeline, and
- * what's next. Trips with a problem come first. Open a row to tick off its
+ * Every trip under way as one row: how it stands, the vehicle on it, and what
+ * comes next. Trips with a problem come first. Open a row to tick off its
  * events, log what happens, or start and close it.
  */
 export default function TripsPanel({
@@ -434,13 +364,12 @@ export default function TripsPanel({
     (r) =>
       (filter === 'all' || (filter === 'attention' ? needsAttention(r.health) : r.trip.mine)) &&
       (!needle ||
-        [r.trip.reference, r.trip.customer, r.trip.title, r.trip.controller ?? ''].some((v) => v.toLowerCase().includes(needle))),
+        [r.trip.reference, r.trip.customer, r.trip.title, r.trip.controller ?? '', r.trip.vehicle ?? ''].some((v) => v.toLowerCase().includes(needle))),
   );
-  const tally = (level: HealthLevel) => rows.filter((r) => r.health?.level === level).length;
 
-  const filters: { value: Filter; label: string; count?: number }[] = [
+  const filters: { value: Filter; label: string; count: number; alert?: boolean }[] = [
     { value: 'all', label: 'All', count: rows.length },
-    { value: 'attention', label: 'Attention', count: attention },
+    { value: 'attention', label: 'Attention', count: attention, alert: attention > 0 },
     // Everyone but an admin only sees their own trips, so "Mine" would say nothing new.
     ...(mine < rows.length ? [{ value: 'mine' as const, label: 'Mine', count: mine }] : []),
   ];
@@ -448,14 +377,11 @@ export default function TripsPanel({
   return (
     <Panel
       id="ops-trips"
-      icon="trip-planning"
-      title="Trip board"
-      count={rows.length}
-      tone={tally('danger') > 0 ? 'danger' : attention > 0 ? 'warn' : 'good'}
+      title="Active trips"
+      summary={`${data.active} live`}
       href="/modules/trip-planning"
       moduleName="Trip Planning"
       frame={frame}
-      defaultCols={3}
       actions={
         <div className="flex items-center gap-2">
           <input
@@ -464,84 +390,44 @@ export default function TripsPanel({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Find a trip…"
             aria-label="Find a trip"
-            className="hidden w-36 rounded-lg border border-gray-200 px-2.5 py-1 text-xs focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/15 sm:block"
+            className="hidden w-28 rounded-lg border border-gray-200 px-2.5 py-1 text-xs focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/15 sm:block"
           />
-          <div className="flex rounded-lg bg-gray-100 p-0.5" role="group" aria-label="Show">
-            {filters.map((f) => (
-              <button
-                key={f.value}
-                type="button"
-                onClick={() => setFilter(f.value)}
-                aria-pressed={filter === f.value}
-                className={`rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${
-                  filter === f.value ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-primary'
-                }`}
-              >
-                {f.label}
-                {f.count !== undefined && (
-                  <span className={`ml-1 tabular-nums ${f.value === 'attention' && f.count > 0 ? 'text-rose-600' : 'text-gray-400'}`}>{f.count}</span>
-                )}
-              </button>
-            ))}
-          </div>
+          <Segmented label="Show" value={filter} onChange={setFilter} options={filters} />
         </div>
       }
     >
       {rows.length === 0 ? (
         <Empty>No trips under way, starting within two days, or with anything on the itinerary in the next 24 hours.</Empty>
+      ) : shown.length === 0 ? (
+        <Empty>{needle ? `No trip matches “${query.trim()}”.` : filter === 'attention' ? 'No trip needs attention.' : 'None of these trips are yours.'}</Empty>
       ) : (
-        <>
-          {now !== null && (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 px-3 pb-2 pt-1 text-xs text-gray-500">
-              {(
-                [
-                  ['danger', 'need action'],
-                  ['warn', 'to check'],
-                  ['live', 'in progress'],
-                  ['ok', 'on track'],
-                  ['idle', 'quiet'],
-                ] as const
-              )
-                .filter(([level]) => tally(level) > 0)
-                .map(([level, label]) => (
-                  <span key={level} className="flex items-center gap-1.5">
-                    <span className={`h-2 w-2 rounded-full ${LEVEL_STYLE[level].dot}`} />
-                    <span className="font-bold text-gray-700">{tally(level)}</span> {label}
-                  </span>
-                ))}
-              {data.active + data.startingSoon > data.trips.length && (
-                <span className="text-gray-400">Showing {data.trips.length} of {data.active + data.startingSoon}</span>
-              )}
-            </div>
-          )}
-          {now !== null && shown.length > 0 && <AxisHeader now={now} />}
-          {shown.length === 0 ? (
-            <Empty>{needle ? `No trip matches “${query.trim()}”.` : filter === 'attention' ? 'No trip needs attention.' : 'None of these trips are yours.'}</Empty>
-          ) : (
-            <ul className="space-y-1.5">
-              {shown.map(({ trip, health, states }) => (
-                <TripRow
-                  key={trip.id}
-                  trip={trip}
-                  health={health}
-                  states={states}
-                  now={now}
-                  escalation={escalationOf.get(trip.id) ?? null}
-                  open={open.has(trip.id)}
-                  onToggleOpen={() =>
-                    setOpen((current) => {
-                      const next = new Set(current);
-                      if (next.has(trip.id)) next.delete(trip.id);
-                      else next.add(trip.id);
-                      return next;
-                    })
-                  }
-                  onChanged={onChanged}
-                />
-              ))}
-            </ul>
-          )}
-        </>
+        <ul>
+          {shown.map(({ trip, health, states }) => (
+            <TripRow
+              key={trip.id}
+              trip={trip}
+              health={health}
+              states={states}
+              now={now}
+              escalation={escalationOf.get(trip.id) ?? null}
+              open={open.has(trip.id)}
+              onToggleOpen={() =>
+                setOpen((current) => {
+                  const next = new Set(current);
+                  if (next.has(trip.id)) next.delete(trip.id);
+                  else next.add(trip.id);
+                  return next;
+                })
+              }
+              onChanged={onChanged}
+            />
+          ))}
+        </ul>
+      )}
+      {data.active + data.startingSoon > data.trips.length && (
+        <p className="pt-2 text-xs text-gray-400">
+          Showing {data.trips.length} of {data.active + data.startingSoon}
+        </p>
       )}
     </Panel>
   );

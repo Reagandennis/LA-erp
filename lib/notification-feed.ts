@@ -7,6 +7,7 @@ import { listMaintenanceNotifications, materializeMaintenanceReminders } from '.
 import { listInvoiceNotifications } from './invoices';
 import { prisma } from './prisma';
 import { listQuoteNotifications } from './quotes';
+import { listTripEscalationNotifications } from './trip-escalations';
 import { listTripNotifications, materializeDueTripReminders } from './trip-notifications';
 
 type PersonalTodoNotificationRow = {
@@ -63,7 +64,7 @@ async function settle<T>(source: string, work: Promise<T[]>): Promise<T[]> {
  * queries run concurrently on the server.
  */
 export async function loadNotificationFeed(userId: number, access: { maintenance?: boolean } = {}) {
-  const [todo, quote, invoice, trip, message, file, calendar, maintenance] = await Promise.all([
+  const [todo, quote, invoice, trip, message, file, calendar, maintenance, escalation] = await Promise.all([
     settle('todo', listPersonalTodoNotifications(userId)),
     settle('quote', listQuoteNotifications(userId)),
     settle('invoice', listInvoiceNotifications(userId)),
@@ -84,9 +85,10 @@ export async function loadNotificationFeed(userId: number, access: { maintenance
           materializeMaintenanceReminders(userId).then(() => listMaintenanceNotifications(userId)),
         )
       : Promise.resolve([]),
+    settle('escalation', listTripEscalationNotifications(userId)),
   ]);
 
-  return { todo, quote, invoice, trip, message, file, calendar, maintenance };
+  return { todo, quote, invoice, trip, message, file, calendar, maintenance, escalation };
 }
 
 export type NotificationFeed = Awaited<ReturnType<typeof loadNotificationFeed>>;

@@ -16,7 +16,29 @@ import {
 } from '@/lib/fleet';
 import type { OpsFuel, OpsJob, OpsMaintenance, OpsReference } from '@/lib/ops-dashboard';
 
-import { Empty, HeaderButton, Panel, type PanelFrame, Pill, RowButton, type Tone, ago, fieldClass, send } from './ops-ui';
+import {
+  Empty,
+  HeaderButton,
+  Panel,
+  type PanelFrame,
+  Pill,
+  RowButton,
+  StackedBar,
+  type Tone,
+  ago,
+  fieldClass,
+  formClass,
+  mono,
+  primaryButton,
+  rowClass,
+  send,
+  subClass,
+} from './ops-ui';
+
+/** The registration at the head of a fleet row, as the mono ID on a tracker list. */
+const plateClass = `${mono} w-24 shrink-0 truncate text-xs text-gray-500`;
+
+const labelClass = 'text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400';
 
 function VehiclePicker({ vehicles, value, onChange }: Readonly<{ vehicles: FleetVehicleRef[]; value: string; onChange: (id: string) => void }>) {
   return (
@@ -93,9 +115,8 @@ export function FuelPanel({
   return (
     <Panel
       id="ops-fuel"
-      icon="car-fuel"
       title="Car fuel"
-      count={data.month.fills}
+      summary={`${data.month.fills} fill-ups this month`}
       href="/modules/car-fuel"
       moduleName="Car Fuel"
       frame={frame}
@@ -115,7 +136,7 @@ export function FuelPanel({
     >
       {form && (
         <form
-          className="mb-2 grid grid-cols-2 gap-2 rounded-xl bg-gray-50 p-3"
+          className={`${formClass} grid grid-cols-2 gap-2`}
           onSubmit={(e) => {
             e.preventDefault();
             void save();
@@ -139,45 +160,42 @@ export function FuelPanel({
           </div>
           <input inputMode="numeric" placeholder="Odometer km" aria-label="Odometer km" value={form.odometerKm} onChange={(e) => setForm({ ...form, odometerKm: e.target.value })} className={fieldClass} />
           {error && <p className="col-span-2 text-xs text-rose-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={saving}
-            className="col-span-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-bold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
+          <button type="submit" disabled={saving} className={`${primaryButton} col-span-2`}>
             {saving ? 'Saving…' : 'Log fill-up now'}
           </button>
         </form>
       )}
 
-      <div className="grid grid-cols-3 gap-2 px-1 pb-2">
+      <div className="grid grid-cols-3 gap-2 py-3">
         {[
           ['Fill-ups', formatNumber(data.month.fills)],
           ['Litres', formatNumber(data.month.litres, 1)],
           ['Spend', formatTotals(data.month.spend)],
         ].map(([label, value]) => (
-          <div key={label} className="min-w-0 rounded-xl bg-gray-50 p-2.5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">{label}</p>
+          <div key={label} className="min-w-0 rounded-xl bg-gray-50 px-3 py-2.5">
+            <p className={labelClass}>{label}</p>
             <p className="mt-0.5 truncate text-sm font-bold tabular-nums text-primary" title={value}>
               {value}
             </p>
           </div>
         ))}
       </div>
-      <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">This month · latest fill-ups</p>
+      <p className={`${labelClass} border-b border-gray-100 pb-2`}>Latest fill-ups</p>
 
       {data.recent.length === 0 ? (
         <Empty>No fill-ups logged yet.</Empty>
       ) : (
-        <ul className="space-y-0.5">
+        <ul>
           {data.recent.map((log) => (
-            <li key={log.id} className="flex items-center gap-3 rounded-xl px-3 py-2">
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-gray-900">
-                  <span className="font-mono">{log.vehicle}</span> · {formatNumber(log.litres, 2)} L
-                </span>
-                <span className="block truncate text-[11px] text-gray-400">{[log.station, ago(log.filledAt, now)].filter(Boolean).join(' · ')}</span>
+            <li key={log.id} className={rowClass}>
+              <span className={plateClass} title={log.vehicle}>
+                {log.vehicle}
               </span>
-              {log.cost !== null && <span className="shrink-0 text-xs font-bold tabular-nums text-gray-600">{formatMoney(log.cost, log.currency)}</span>}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-gray-900">{formatNumber(log.litres, 2)} L</span>
+                <span className={subClass}>{[log.station, ago(log.filledAt, now)].filter(Boolean).join(' · ')}</span>
+              </span>
+              {log.cost !== null && <span className="shrink-0 text-sm font-semibold tabular-nums text-gray-900">{formatMoney(log.cost, log.currency)}</span>}
             </li>
           ))}
         </ul>
@@ -191,7 +209,7 @@ export function FuelPanel({
 const DISPLAY_TONE: Record<MaintenanceDisplayStatus, Tone> = {
   Overdue: 'danger',
   'Due soon': 'warn',
-  'In progress': 'neutral',
+  'In progress': 'info',
   Planned: 'neutral',
   Completed: 'good',
   Cancelled: 'neutral',
@@ -254,14 +272,25 @@ export function MaintenancePanel({
   };
 
   const attention = data.overdue + data.dueSoon + data.inProgress;
+  const summary =
+    data.overdue > 0 ? (
+      <>
+        <span className="text-rose-600">{data.overdue} overdue</span>
+        {data.dueSoon > 0 && ` · ${data.dueSoon} due soon`}
+      </>
+    ) : data.dueSoon > 0 ? (
+      <span className="text-amber-600">{data.dueSoon} due soon</span>
+    ) : data.inProgress > 0 ? (
+      `${data.inProgress} in progress`
+    ) : (
+      'Nothing due'
+    );
 
   return (
     <Panel
       id="ops-maintenance"
-      icon="car-maintenance"
       title="Car maintenance"
-      count={attention}
-      tone={data.overdue > 0 ? 'danger' : 'warn'}
+      summary={summary}
       href="/modules/car-maintenance"
       moduleName="Car Maintenance"
       frame={frame}
@@ -281,7 +310,7 @@ export function MaintenancePanel({
     >
       {form && (
         <form
-          className="mb-2 grid grid-cols-2 gap-2 rounded-xl bg-gray-50 p-3"
+          className={`${formClass} grid grid-cols-2 gap-2`}
           onSubmit={(e) => {
             e.preventDefault();
             void save();
@@ -312,37 +341,39 @@ export function MaintenancePanel({
             className={`${fieldClass} col-span-2`}
           />
           <input type="date" value={form.when} onChange={(e) => setForm({ ...form, when: e.target.value })} aria-label="Date" className={fieldClass} />
-          <button
-            type="submit"
-            disabled={busy === 'new'}
-            className="rounded-lg bg-primary px-3 py-1.5 text-sm font-bold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
+          <button type="submit" disabled={busy === 'new'} className={primaryButton}>
             {form.status === 'In progress' ? 'Report' : 'Book'}
           </button>
           {error && <p className="col-span-2 text-xs text-rose-600">{error}</p>}
         </form>
       )}
 
-      <div className="flex flex-wrap gap-1.5 px-2 pb-2 pt-1">
-        <Pill tone={data.overdue > 0 ? 'danger' : 'neutral'}>{data.overdue} overdue</Pill>
-        <Pill tone={data.dueSoon > 0 ? 'warn' : 'neutral'}>{data.dueSoon} due soon</Pill>
-        <Pill>{data.inProgress} in progress</Pill>
-      </div>
+      {attention > 0 && (
+        <div className="border-b border-gray-100 py-4">
+          <StackedBar
+            segments={[
+              { label: 'overdue', value: data.overdue, tone: 'danger' },
+              { label: 'due soon', value: data.dueSoon, tone: 'warn' },
+              { label: 'in progress', value: data.inProgress, tone: 'info' },
+            ]}
+          />
+        </div>
+      )}
 
       {data.jobs.length === 0 ? (
         <Empty>No open maintenance.</Empty>
       ) : (
-        <ul className="space-y-0.5">
+        <ul>
           {data.jobs.map((job) => (
-            <li key={job.id} className="flex items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-gray-50">
+            <li key={job.id} className={rowClass}>
+              <span className={plateClass} title={job.vehicle}>
+                {job.vehicle}
+              </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-gray-900">
-                  <span className="font-mono">{job.vehicle}</span> · {job.category}
-                </span>
-                <span className="block truncate text-[11px] text-gray-500">
-                  {job.title}
-                  {job.scheduledFor && <span className="text-gray-400"> · {formatDateKey(job.scheduledFor)}</span>}
-                  <span className="text-gray-400"> · {job.kind}</span>
+                <span className="block truncate text-sm font-medium text-gray-900">{job.title}</span>
+                <span className={subClass}>
+                  {job.category} · {job.kind}
+                  {job.scheduledFor && ` · ${formatDateKey(job.scheduledFor)}`}
                 </span>
               </span>
               <Pill tone={DISPLAY_TONE[job.display]}>{job.display}</Pill>
@@ -360,8 +391,8 @@ export function MaintenancePanel({
       )}
 
       {data.comingDue.length > 0 && (
-        <div className="mt-2 border-t border-gray-100 px-3 pt-2">
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">Coming due</p>
+        <div className="mt-3 border-t border-gray-100 pt-3">
+          <p className={`${labelClass} mb-1.5`}>Coming due</p>
           <ul className="space-y-1 pb-1">
             {data.comingDue.map((r) => (
               <li key={r.key} className={`text-xs ${r.overdue ? 'text-rose-600' : 'text-amber-700'}`}>

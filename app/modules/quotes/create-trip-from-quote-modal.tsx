@@ -145,7 +145,7 @@ export default function CreateTripFromQuoteModal({
           </div>
 
           <div className="p-6 sm:p-8 space-y-5">
-            <Field label="Trip title">
+            <Field label="Task number">
               <input
                 type="text"
                 value={title}

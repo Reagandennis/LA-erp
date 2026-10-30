@@ -17,14 +17,9 @@ import type { OpsFlight } from '@/lib/ops-dashboard';
 import { isValidTimeZone } from '@/lib/zoned-time';
 
 import { reportFlightDelay } from './board-stores';
-import { Check, Empty, Panel, type PanelFrame, clock, send, shortDate } from './ops-ui';
+import { Check, Empty, Panel, type PanelFrame, Pill, type Tone, clock, mono, rowClass, send, shortDate, subClass } from './ops-ui';
 
-const CHIP: Record<Punctuality, string> = {
-  early: 'bg-sky-50 text-sky-700 ring-sky-200',
-  ontime: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  late: 'bg-rose-50 text-rose-700 ring-rose-200',
-  unknown: 'bg-slate-50 text-slate-500 ring-slate-200',
-};
+const PUNCTUALITY: Record<Punctuality, Tone> = { early: 'info', ontime: 'good', late: 'danger', unknown: 'neutral' };
 
 const TAKEOFF_ICON =
   'M2.5 19h19v2h-19v-2zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 2.59 4.49L21 11.49c.81-.23 1.28-1.05 1.07-1.85z';
@@ -62,49 +57,53 @@ function FlightRow({
   useEffect(() => reportFlightDelay(flight.id, delay), [flight.id, delay]);
   useEffect(() => () => reportFlightDelay(flight.id, null), [flight.id]);
 
+  const detail = [
+    at ? `${arrival ? 'Lands' : 'Departs'} ${shortDate(at, timeZone)}` : null,
+    progress?.detail ?? countdown?.label ?? null,
+    track?.eta && !track.landedAt ? `ETA ${clock(track.eta, timeZone)}` : null,
+    track?.landedAt ? `Landed ${clock(track.landedAt, timeZone)}` : null,
+    state === 'failed' ? 'FlightRadar24 unreachable, retrying' : null,
+  ].filter(Boolean);
+
   return (
-    <li className={`flex items-start gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-gray-50 ${flight.completed ? 'opacity-60' : ''}`}>
-      <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${arrival ? 'bg-sky-100 text-sky-700' : 'bg-indigo-100 text-indigo-700'}`}>
+    <li className={`${rowClass} ${flight.completed ? 'opacity-60' : ''}`}>
+      <span
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${arrival ? 'bg-sky-100 text-sky-700' : 'bg-indigo-100 text-indigo-700'}`}
+        title={arrival ? 'Arrival' : 'Departure'}
+      >
         <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path d={arrival ? LANDING_ICON : TAKEOFF_ICON} />
         </svg>
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="font-mono text-sm font-bold text-gray-900">{flight.flightNumber ?? 'No flight no.'}</span>
-          <span className="font-mono text-xs font-semibold text-gray-500">
+        <p className="truncate text-sm font-medium text-gray-900">
+          <span className={mono}>{flight.flightNumber ?? 'No flight no.'}</span>
+          <span className="text-gray-500">
+            {' · '}
             {flight.from || track?.origin || '—'} → {flight.to || track?.destination || '—'}
           </span>
-          {at && (
-            // The flight's own zone when it has one, else the viewer's (which the server can't know).
-            <span suppressHydrationWarning className="text-xs font-bold tabular-nums text-primary">
-              {arrival ? 'Lands' : 'Departs'} {clock(at, timeZone)}
-              <span suppressHydrationWarning className="font-medium text-gray-400"> · {shortDate(at, timeZone)}</span>
-            </span>
-          )}
-        </div>
-        <Link href={`/modules/trip-planning/${flight.tripId}`} className="block truncate text-xs text-gray-500 hover:text-primary">
-          <span className="font-mono">{flight.tripReference}</span> · {flight.customer}
+        </p>
+        <Link href={`/modules/trip-planning/${flight.tripId}`} className={`${subClass} hover:text-primary`}>
+          <span className={mono}>{flight.tripReference}</span> · {flight.customer}
           {flight.airline && ` · ${flight.airline}`}
         </Link>
-        <p className="truncate text-[11px] text-gray-400">
-          {progress?.detail ?? countdown?.label ?? ''}
-          {track?.eta && !track.landedAt && ` · ETA ${clock(track.eta, timeZone)}`}
-          {track?.landedAt && ` · Landed ${clock(track.landedAt, timeZone)}`}
-          {state === 'failed' && ' · FlightRadar24 unreachable, retrying'}
-        </p>
+        {detail.length > 0 && <p suppressHydrationWarning className="truncate text-[11px] text-gray-400">{detail.join(' · ')}</p>}
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1.5">
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${CHIP[status]}`}>{chip}</span>
-        {flight.canEdit && (
-          <Check
-            checked={flight.completed}
-            disabled={pending}
-            label={flight.completed ? 'Mark not handled' : arrival ? 'Mark met' : 'Mark seen off'}
-            onChange={onToggle}
-          />
-        )}
-      </div>
+      {at && (
+        // The flight's own zone when it has one, else the viewer's (which the server can't know).
+        <span suppressHydrationWarning className={`${mono} shrink-0 text-sm tabular-nums text-gray-700`} title={arrival ? 'Lands' : 'Departs'}>
+          {clock(at, timeZone)}
+        </span>
+      )}
+      <Pill tone={PUNCTUALITY[status]}>{chip}</Pill>
+      {flight.canEdit && (
+        <Check
+          checked={flight.completed}
+          disabled={pending}
+          label={flight.completed ? 'Mark not handled' : arrival ? 'Mark met' : 'Mark seen off'}
+          onChange={onToggle}
+        />
+      )}
     </li>
   );
 }
@@ -118,6 +117,7 @@ export default function FlightsPanel({
 }: Readonly<{ flights: OpsFlight[]; canOpenFlightTracker: boolean; frame: PanelFrame; onChanged: () => Promise<void> }>) {
   const now = useNow(30_000);
   const [busy, setBusy] = useState<number | null>(null);
+  const open = flights.filter((f) => !f.completed).length;
 
   const toggle = async (flight: OpsFlight) => {
     setBusy(flight.id);
@@ -131,9 +131,8 @@ export default function FlightsPanel({
   return (
     <Panel
       id="ops-flights"
-      icon="flight-tracker"
       title="Flights"
-      count={flights.filter((f) => !f.completed).length}
+      summary={`${open} in the next 36h`}
       href={canOpenFlightTracker ? '/modules/flight-tracker' : '/modules/trip-planning'}
       moduleName={canOpenFlightTracker ? 'Flight Tracker' : 'Trip Planning'}
       frame={frame}
@@ -141,7 +140,7 @@ export default function FlightsPanel({
       {flights.length === 0 ? (
         <Empty>No flights on ongoing trips in the next 36 hours.</Empty>
       ) : (
-        <ul className="space-y-0.5">
+        <ul>
           {flights.map((flight) => (
             <FlightRow key={flight.id} flight={flight} now={now} pending={busy === flight.id} onToggle={() => void toggle(flight)} />
           ))}

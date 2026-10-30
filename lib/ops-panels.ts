@@ -3,29 +3,36 @@
  * board's layout menu and the API's `?panels=` both read it.
  */
 
-export const OPS_PANELS = ['trips', 'movements', 'flights', 'whatsapp', 'handover', 'tasks', 'maintenance', 'fuel'] as const;
+/** In the board's default order: the operations-control cards first, the desk's other panels after. */
+export const OPS_PANELS = ['map', 'trips', 'flights', 'handover', 'tasks', 'trackers', 'vehicles', 'movements', 'whatsapp', 'maintenance', 'fuel'] as const;
 
 export type OpsPanelKey = (typeof OPS_PANELS)[number];
 
 /** Holding this module shows the panel (admins see them all). */
 export const PANEL_MODULE: Record<OpsPanelKey, string> = {
-  movements: 'trip-planning',
+  map: 'map',
   trips: 'trip-planning',
   flights: 'trip-planning',
-  whatsapp: 'whatsapp',
   handover: 'handover',
   tasks: 'todo-personal',
+  trackers: 'map',
+  vehicles: 'vehicles',
+  movements: 'trip-planning',
+  whatsapp: 'whatsapp',
   maintenance: 'car-maintenance',
   fuel: 'car-fuel',
 };
 
 export const PANEL_TITLE: Record<OpsPanelKey, string> = {
-  movements: 'Movements',
-  trips: 'Trip board',
+  map: 'Live map',
+  trips: 'Active trips',
   flights: 'Flights',
-  whatsapp: 'WhatsApp',
-  handover: 'Shift handover',
+  handover: 'Handovers',
   tasks: 'Tasks',
+  trackers: 'Trackers',
+  vehicles: 'Vehicles',
+  movements: 'Movements',
+  whatsapp: 'WhatsApp',
   maintenance: 'Car maintenance',
   fuel: 'Car fuel',
 };

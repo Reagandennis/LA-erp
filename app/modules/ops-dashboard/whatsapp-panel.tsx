@@ -8,7 +8,7 @@ import { useNow } from '@/app/ui/use-client';
 import type { StoredMessage } from '@/lib/messaging-store';
 import type { OpsChat, OpsWhatsapp } from '@/lib/ops-dashboard';
 
-import { Empty, Panel, type PanelFrame, ago, clock, fieldClass } from './ops-ui';
+import { Empty, Panel, type PanelFrame, ago, clock, fieldClass, rowClass } from './ops-ui';
 
 const THREAD_LIMIT = 25;
 
@@ -102,8 +102,8 @@ function Thread({
   };
 
   return (
-    <div className="flex h-[26rem] max-h-full flex-col [[data-sized]_&]:h-full">
-      <div className="flex items-center gap-2 border-b border-gray-100 px-2 pb-2">
+    <div className="flex h-[26rem] max-h-full flex-col pt-3 [[data-sized]_&]:h-full">
+      <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
         <button
           type="button"
           onClick={onBack}
@@ -120,14 +120,14 @@ function Thread({
         </Link>
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-1.5 overflow-y-auto px-2 py-2">
+      <div ref={scrollRef} className="flex-1 space-y-1.5 overflow-y-auto py-2">
         {messages === null && !error && <p className="py-6 text-center text-xs text-gray-400">Loading…</p>}
         {messages?.length === 0 && <p className="py-6 text-center text-xs text-gray-400">No messages yet.</p>}
         {messages?.map((m) => (
           <div key={m.id} className={`flex ${m.fromMe ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-sm ${
-                m.fromMe ? 'rounded-br-md bg-emerald-100 text-gray-900' : 'rounded-bl-md bg-gray-100 text-gray-900'
+              className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-sm text-gray-900 ${
+                m.fromMe ? 'rounded-br-md bg-emerald-100' : 'rounded-bl-md bg-gray-100'
               }`}
             >
               {chat.kind === 'group' && !m.fromMe && <p className="text-[11px] font-bold text-emerald-700">{m.senderName}</p>}
@@ -139,9 +139,9 @@ function Thread({
         ))}
       </div>
 
-      {error && <p className="px-2 pb-1 text-xs text-rose-600">{error}</p>}
+      {error && <p className="pb-1 text-xs text-rose-600">{error}</p>}
       <form
-        className="flex items-end gap-2 border-t border-gray-100 px-2 pt-2"
+        className="flex items-end gap-2 border-t border-gray-100 pt-2"
         onSubmit={(e) => {
           e.preventDefault();
           void reply();
@@ -186,7 +186,14 @@ export default function WhatsappPanel({
   const keyOf = (c: OpsChat) => `${c.accountId}:${c.chatId}`;
 
   return (
-    <Panel id="ops-whatsapp" icon="whatsapp" title="WhatsApp" count={data.unreadChats} tone="good" href="/modules/whatsapp" moduleName="WhatsApp" frame={frame}>
+    <Panel
+      id="ops-whatsapp"
+      title="WhatsApp"
+      summary={!data.linked ? 'Not linked' : data.unreadChats > 0 ? <span className="text-emerald-600">{data.unreadChats} unread</span> : 'All read'}
+      href="/modules/whatsapp"
+      moduleName="WhatsApp"
+      frame={frame}
+    >
       {!data.linked ? (
         <Empty>
           Link your WhatsApp in the{' '}
@@ -205,22 +212,16 @@ export default function WhatsappPanel({
       ) : data.chats.length === 0 ? (
         <Empty>No chats yet.</Empty>
       ) : (
-        <ul className="space-y-0.5">
+        <ul>
           {data.chats.map((chat) => (
-            <li key={keyOf(chat)}>
-              <button
-                type="button"
-                onClick={() => setOpen(chat)}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-gray-50"
-              >
+            <li key={keyOf(chat)} className={rowClass}>
+              <button type="button" onClick={() => setOpen(chat)} className="flex w-full min-w-0 items-center gap-3 text-left">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">
                   {chat.name.trim().charAt(0).toUpperCase() || '#'}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
-                    <span className={`truncate text-sm ${chat.unread > 0 ? 'font-bold text-gray-900' : 'font-semibold text-gray-800'}`}>
-                      {chat.name}
-                    </span>
+                    <span className={`truncate text-sm ${chat.unread > 0 ? 'font-bold text-gray-900' : 'font-medium text-gray-800'}`}>{chat.name}</span>
                     <span className={`shrink-0 text-[11px] tabular-nums ${chat.unread > 0 ? 'font-bold text-emerald-600' : 'text-gray-400'}`}>
                       {ago(chat.lastMessageAt, now)}
                     </span>

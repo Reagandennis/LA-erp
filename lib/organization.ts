@@ -18,6 +18,8 @@ export interface OrganizationSummary {
   defaultCurrency: string;
   defaultTaxRate: number;
   taxLabel: string;
+  /** Users told when a trip log entry is escalated (lib/trip-escalations). */
+  escalationRecipientIds: number[];
   hasLogo: boolean;
   logoMimeType: string | null;
   updatedAt: string;
@@ -38,6 +40,7 @@ interface OrganizationRecord {
   defaultCurrency: string;
   defaultTaxRate: Prisma.Decimal;
   taxLabel: string;
+  escalationRecipientIds: number[];
   logo: Buffer | null;
   logoMimeType: string | null;
   updatedById: number | null;
@@ -81,6 +84,7 @@ function serialize(record: OrganizationRecord): OrganizationSummary {
     defaultCurrency: record.defaultCurrency,
     defaultTaxRate: toNumber(record.defaultTaxRate),
     taxLabel: record.taxLabel,
+    escalationRecipientIds: record.escalationRecipientIds ?? [],
     hasLogo: record.logo !== null,
     logoMimeType: record.logoMimeType,
     updatedAt: record.updatedAt.toISOString(),
@@ -110,6 +114,7 @@ export interface OrganizationWriteInput {
   defaultCurrency?: string;
   defaultTaxRate?: number;
   taxLabel?: string;
+  escalationRecipientIds?: number[];
 }
 
 export async function updateOrganizationSettings(
@@ -131,6 +136,7 @@ export async function updateOrganizationSettings(
   if (input.defaultTaxRate !== undefined)
     data.defaultTaxRate = new Prisma.Decimal(input.defaultTaxRate);
   if (input.taxLabel !== undefined) data.taxLabel = input.taxLabel;
+  if (input.escalationRecipientIds !== undefined) data.escalationRecipientIds = [...new Set(input.escalationRecipientIds)];
 
   const updated = await getOrganizationClient().upsert({
     where: { id: 1 },

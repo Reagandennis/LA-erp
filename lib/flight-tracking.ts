@@ -54,11 +54,12 @@ function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 /** FR24 wants whole seconds with a Z. */
-function fr24Time(ms: number): string {
+export function fr24Time(ms: number): string {
   return new Date(ms).toISOString().slice(0, 19) + 'Z';
 }
 
-async function fr24Get<T>(path: string): Promise<T[]> {
+/** One call to the FR24 API, as the body it returns. Shared by the status and the form's lookup. */
+export async function fr24Fetch<T>(path: string): Promise<T | null> {
   const token = process.env.FR24_API_TOKEN;
   if (!token) throw new FlightTrackingError('FlightRadar24 API token is not configured.', 500);
 
@@ -80,7 +81,12 @@ async function fr24Get<T>(path: string): Promise<T[]> {
           : `FlightRadar24 error (${response.status}).`;
     throw new FlightTrackingError(message, response.status === 429 ? 429 : 502);
   }
-  const body = (await response.json().catch(() => null)) as { data?: T[] } | null;
+  return (await response.json().catch(() => null)) as T | null;
+}
+
+/** The rows of a list endpoint. */
+export async function fr24Get<T>(path: string): Promise<T[]> {
+  const body = await fr24Fetch<{ data?: T[] }>(path);
   return body?.data ?? [];
 }
 

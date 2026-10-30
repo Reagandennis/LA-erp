@@ -17,6 +17,7 @@ import {
   type TripStatus,
 } from '../types';
 import { SILENT_BANNER_HEADER } from '@/app/ui/banner';
+import { useConfirm } from '@/app/ui/confirm-dialog';
 import TripBuilder from '../trip-builder';
 import { formatDuration } from '@/lib/flight-status';
 import { isValidTimeZone, localTimeZone, utcToZoned, zonedToUtcIso } from '@/lib/zoned-time';
@@ -27,8 +28,7 @@ import {
   dayLabel,
   dayTypeChips,
   groupItemsByDay,
-  reorderPayload,
-} from './itinerary-model';
+  reorderPayload, findTimeClash } from './itinerary-model';
 import { AttachmentPicker } from './_components/attachment-picker';
 import { AttachmentStrip } from './_components/attachment-strip';
 import { CrewRow } from './_components/crew-row';
@@ -482,6 +482,8 @@ export default function ItineraryPageClient({
   const [addingHere, setAddingHere] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editor, setEditor] = useState<EditorState>(blankEditor(null));
+  // In-app "are you sure?" for deletes and for a second event on the same minute.
+  const { confirm, dialog } = useConfirm();
   const [dayMenuOpen, setDayMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   /** The trip form is open once its options have loaded. */
@@ -512,6 +514,25 @@ export default function ItineraryPageClient({
   const applyTrip = (next: TripDetail) => setTrip(next);
 
   // ── Items ───────────────────────────────────────────────────────────────
+
+  /** "“Airport pickup” at 09:00 on Day 2", for the prompts. */
+  const describeItem = (item: { description: string; scheduledAt: string | null; dayId: number | null }) => {
+    const day = item.dayId != null ? trip.days.find((d) => d.id === item.dayId) : null;
+    const time = item.scheduledAt ? new Date(item.scheduledAt).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' }) : null;
+    return `“${item.description}”${time ? ` at ${time}` : ''}${day ? ` on Day ${day.dayNumber}` : ''}`;
+  };
+
+  /** Asks before a second event lands on the same minute as one already on the trip. */
+  const clearOfClash = async (payload: ItemPayload, excludeId: number | null) => {
+    const clash = findTimeClash(payload.scheduledAt, trip.items, excludeId);
+    if (!clash) return true;
+    return confirm({
+      title: 'Same time as another event',
+      message: `${describeItem(clash)} is already on the itinerary. Put “${payload.description}” at the same time too?`,
+      confirmLabel: 'Yes, same time',
+      tone: 'primary',
+    });
+  };
 
   const startAdd = (category: TripItemCategory = 'activity') => {
     setError(null);
@@ -599,6 +620,7 @@ export default function ItineraryPageClient({
       setError(payload.error);
       return;
     }
+    if (!(await clearOfClash(payload, null))) return;
     setError(null);
     setPending('add');
     try {
@@ -639,6 +661,7 @@ export default function ItineraryPageClient({
       setError(payload.error);
       return;
     }
+    if (!(await clearOfClash(payload, editingItemId))) return;
     setError(null);
     setPendingItemId(editingItemId);
     try {
@@ -688,7 +711,13 @@ export default function ItineraryPageClient({
   };
 
   const deleteItem = async (itemId: number) => {
-    if (!confirm('Remove this item from the itinerary?')) return;
+    const item = trip.items.find((candidate) => candidate.id === itemId);
+    const ok = await confirm({
+      title: 'Remove this event?',
+      message: `${item ? describeItem(item) : 'This event'} will be taken off the itinerary. This can't be undone.`,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     setPendingItemId(itemId);
     setError(null);
     try {
@@ -829,13 +858,13 @@ export default function ItineraryPageClient({
   };
 
   const removeDay = async (dayId: number) => {
-    if (
-      !confirm(
-        'Delete this day? Anything scheduled on it moves to Unscheduled rather than being deleted.',
-      )
-    ) {
-      return;
-    }
+    const day = trip.days.find((d) => d.id === dayId);
+    const ok = await confirm({
+      title: day ? `Delete Day ${day.dayNumber}?` : 'Delete this day?',
+      message: 'Anything scheduled on it moves to Unscheduled rather than being deleted.',
+      confirmLabel: 'Delete day',
+    });
+    if (!ok) return;
     setPending('day');
     await callDayEndpoint(
       `/api/trips/${trip.id}/days/${dayId}`,
@@ -888,6 +917,7 @@ export default function ItineraryPageClient({
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50/50">
+      {dialog}
       <header className="sticky top-0 z-30 shrink-0 border-b border-gray-100 bg-white">
         <div className="flex items-center gap-4 px-4 py-3 sm:px-6">
           <Link
@@ -1973,10 +2003,25 @@ function ItemEditor({
             key={category}
             type="button"
             onClick={() =>
+              editor.category !== category &&
               patch({
                 category,
-                // Details are category-specific; carrying them across would
-                // leave a flight number sitting on a hotel.
+                // A new kind of event starts with a clean slate: what was typed
+                // for a hotel shouldn't turn up as a flight's title. Where it
+                // sits (day, date, time), who it's for and its notes stay.
+                description: '',
+                subtitle: '',
+                providerName: '',
+                phone: '',
+                bookingUrl: '',
+                placeName: '',
+                address: '',
+                confirmationCode: '',
+                imageUrl: '',
+                unitPrice: '',
+                endTime: '',
+                durationHours: '',
+                durationMinutes: '',
                 details: {},
                 timeLabel: CATEGORY_META[category].timeLabels[0] ?? '',
               })

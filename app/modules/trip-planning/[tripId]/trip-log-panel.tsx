@@ -2,6 +2,7 @@
 
 import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useMemo, useState } from 'react';
+import { useConfirm } from '@/app/ui/confirm-dialog';
 
 export interface TripLogEntry {
   id: number;
@@ -41,6 +42,23 @@ function localDayKey(iso: string): string {
  * The trip's operations log (newest first) and its notes. FileMaker's task log
  * was imported here; the team keeps adding to it as the trip runs.
  */
+interface EscalationOutcome {
+  recipients: number;
+  notified: number;
+  emailed: number;
+  emailError: string | null;
+}
+
+/** "Escalation sent to 3 people and emailed", or why it wasn't. */
+function escalationNotice(outcome: EscalationOutcome): { text: string; warn: boolean } {
+  if (outcome.recipients === 0) {
+    return { text: 'Escalated, but no one is set to receive escalations yet. An admin chooses them under Admin → Organization.', warn: true };
+  }
+  const people = `${outcome.notified} ${outcome.notified === 1 ? 'person' : 'people'}`;
+  if (outcome.emailed > 0) return { text: `Escalation sent to ${people} and emailed.`, warn: false };
+  return { text: `Escalation sent to ${people} in the app. Email didn’t go: ${outcome.emailError ?? 'unknown reason'}.`, warn: true };
+}
+
 export default function TripLogPanel({
   tripId,
   description,
@@ -64,7 +82,9 @@ export default function TripLogPanel({
   const [escalated, setEscalated] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [escalation, setEscalation] = useState<{ text: string; warn: boolean } | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   useEffect(() => {
     let active = true;
@@ -121,7 +141,9 @@ export default function TripLogPanel({
           escalated,
         }),
       });
-      const data = (await response.json().catch(() => null)) as { entry?: TripLogEntry; error?: string } | null;
+      const data = (await response.json().catch(() => null)) as
+        | { entry?: TripLogEntry; escalation?: EscalationOutcome | null; error?: string }
+        | null;
       if (!response.ok || !data?.entry) {
         setFormError(data?.error ?? 'Could not add the entry');
         return;
@@ -129,6 +151,7 @@ export default function TripLogPanel({
       const next = [...(entries ?? []), data.entry];
       setEntries(next);
       onCountChange(next.length);
+      setEscalation(data.escalation ? escalationNotice(data.escalation) : null);
       setDetail('');
       setReceivedFrom('');
       setActionItem('');
@@ -139,7 +162,12 @@ export default function TripLogPanel({
   };
 
   const remove = async (entry: TripLogEntry) => {
-    if (!window.confirm('Remove this log entry?')) return;
+    const ok = await confirm({
+      title: 'Remove this log entry?',
+      message: `“${entry.detail.length > 80 ? `${entry.detail.slice(0, 79)}…` : entry.detail}” will be gone from the trip log.`,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     const response = await fetch(`/api/trips/${tripId}/log/${entry.id}`, {
       method: 'DELETE',
       credentials: 'include',
@@ -159,6 +187,7 @@ export default function TripLogPanel({
 
   return (
     <div>
+      {dialog}
       <div className="mb-6">
         <h2 className="text-xl font-bold text-gray-900">Trip log</h2>
         <p className="mt-1 text-xs text-gray-500">What was reported, who reported it, and what was done.</p>
@@ -224,6 +253,9 @@ export default function TripLogPanel({
             Escalate
           </label>
           <div className="flex items-center gap-3">
+            {escalation && (
+              <span className={`text-xs ${escalation.warn ? 'text-amber-700' : 'text-emerald-700'}`}>{escalation.text}</span>
+            )}
             {formError && <span className="text-xs text-rose-600">{formError}</span>}
             <button
               type="submit"

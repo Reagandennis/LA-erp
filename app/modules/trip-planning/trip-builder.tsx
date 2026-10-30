@@ -108,7 +108,7 @@ export default function TripBuilder({
       return;
     }
     if (!title.trim()) {
-      setError('Title is required');
+      setError('Task number is required');
       return;
     }
 
@@ -121,7 +121,8 @@ export default function TripBuilder({
       status,
       startDate: startDate || null,
       endDate: endDate || null,
-      currency,
+      // A new trip takes the default currency; only an existing one shows the field.
+      ...(trip ? { currency } : {}),
       notes: notes.trim() || null,
     };
     // Lead first.
@@ -334,12 +335,12 @@ export default function TripBuilder({
                   </p>
                 )}
               </Field>
-              <Field label="Title" wide>
+              <Field label="Task number" wide>
                 <input
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Short, descriptive title"
+                  placeholder="The task number for this trip"
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>
@@ -372,22 +373,24 @@ export default function TripBuilder({
                   </p>
                 )}
               </Field>
-              <Field label="Currency">
-                <select
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
-                >
-                  {COMMON_CURRENCIES.includes(currency) ? null : (
-                    <option value={currency}>{currency}</option>
-                  )}
-                  {COMMON_CURRENCIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              {trip && (
+                <Field label="Currency">
+                  <select
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
+                  >
+                    {COMMON_CURRENCIES.includes(currency) ? null : (
+                      <option value={currency}>{currency}</option>
+                    )}
+                    {COMMON_CURRENCIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               <Field label="Status">
                 <select
                   value={status}

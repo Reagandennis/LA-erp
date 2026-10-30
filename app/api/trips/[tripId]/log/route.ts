@@ -4,6 +4,7 @@ import { recordAuditEvent } from '@/lib/audit';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
+import { notifyTripEscalation } from '@/lib/trip-escalations';
 import { addTripLogEntry, listTripLog } from '@/lib/trip-log';
 import { userHasRole } from '@/lib/user';
 import { tripLogEntryCreateSchema } from '@/lib/validation';
@@ -65,14 +66,24 @@ export async function POST(
   });
   if (!entry) return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
 
+  // The entry is saved either way; who was told comes back with it.
+  const escalation = entry.escalated
+    ? await notifyTripEscalation({
+        tripId,
+        entry,
+        actor: { id: auth.user.id, name: auth.user.name },
+        tripUrl: new URL(`/modules/trip-planning/${tripId}`, request.nextUrl.origin).toString(),
+      })
+    : null;
+
   await recordAuditEvent({
     action: 'trip.log.added',
     entityType: 'trip',
     entityId: String(tripId),
     actorUserId: auth.user.id,
-    metadata: { entryId: entry.id, escalated: entry.escalated },
+    metadata: { entryId: entry.id, escalated: entry.escalated, ...(escalation ? { notified: escalation.notified, emailed: escalation.emailed } : {}) },
     request,
   });
 
-  return NextResponse.json({ entry }, { status: 201 });
+  return NextResponse.json({ entry, escalation }, { status: 201 });
 }

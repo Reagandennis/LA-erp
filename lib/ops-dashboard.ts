@@ -14,18 +14,22 @@ import {
   reminderMessage,
 } from './fleet';
 import { listFleetVehicles, listMaintenance, listVehicleOdometers } from './fleet-server';
+import { getMapWorkspace } from './map-store';
+import type { MapCategoryDto, MapDeviceTagDto, MapGeofenceDto, TrackedDevice } from './map-types';
 import { listAccounts } from './messaging-accounts';
 import { OPS_PANELS, type OpsPanelKey, PANEL_MODULE } from './ops-panels';
 import { getOrganizationSettings } from './organization';
 import { prisma } from './prisma';
 import { ADMIN_ROLE_NAME } from './rbac';
+import { type TrackedDevices, listTrackedDevices } from './tracked-devices';
 import { buildAccessFilter, canEditTrip } from './trips';
 import { type AccessUser, userHasModule, userHasRole } from './user';
 
 /**
- * The Ops Dashboard: what the operations desk watches through the day. Today's
- * movements, the trips under way and their flights, the desk's WhatsApp, shift
- * handovers, their tasks, and the fleet's fuel and maintenance.
+ * The Ops Dashboard: what the operations desk watches through the day. The
+ * live map and the trackers on it, the trips under way and their flights,
+ * shift handovers, tasks, the vehicle register, today's movements, the desk's
+ * WhatsApp, and the fleet's fuel and maintenance.
  *
  * Each panel loads only for someone who holds its module (lib/ops-panels), with
  * the record rules that module applies: trips the viewer created or owns
@@ -86,6 +90,8 @@ export interface OpsTrip {
   endDate: string | null;
   /** Vehicle, driver and officer of the first live assignment. */
   crew: string | null;
+  /** The assigned vehicle's registration on its own, for the board's row. */
+  vehicle: string | null;
   /** Who controls it: the owner, or whoever created it. */
   controller: string | null;
   /** The viewer created or owns it. */
@@ -246,7 +252,32 @@ export interface OpsMaintenance {
   comingDue: Array<{ key: string; maintenanceId: number; message: string; overdue: boolean }>;
 }
 
+/** The live trackers (Traccar and Zello), as the Map module shows them. */
+export interface OpsTrackers {
+  /** False when no tracking source is set up at all. */
+  configured: boolean;
+  /** A configured source that failed, e.g. an expired Traccar token. */
+  error: string | null;
+  devices: TrackedDevice[];
+}
+
+/** The trackers plus what the map draws around them. */
+export interface OpsMap extends OpsTrackers {
+  categories: MapCategoryDto[];
+  geofences: MapGeofenceDto[];
+  deviceTags: MapDeviceTagDto[];
+}
+
+/** The vehicle register by status: Available, Assigned, Maintenance, Off duty. */
+export interface OpsVehicles {
+  total: number;
+  byStatus: { status: string; count: number }[];
+}
+
 export interface OpsSections {
+  map: OpsMap;
+  trackers: OpsTrackers;
+  vehicles: OpsVehicles;
   movements: OpsMovement[];
   trips: OpsTrips;
   flights: OpsFlight[];
@@ -429,6 +460,7 @@ async function loadTrips(user: AccessUser, isAdmin: boolean): Promise<OpsTrips> 
         startDate: t.startDate?.toISOString() ?? null,
         endDate: t.endDate?.toISOString() ?? null,
         crew: crewLine(t.assignments[0]),
+        vehicle: t.assignments[0]?.vehicle?.registration ?? null,
         controller: t.owner?.name ?? t.createdBy.name,
         mine: t.ownerId === user.id || t.createdById === user.id,
         canEdit: canEditTrip(t, user.id, isAdmin),
@@ -816,9 +848,42 @@ async function loadMaintenance(today: string): Promise<OpsMaintenance> {
   return summarizeMaintenance(items, odometers, today);
 }
 
+// --- Trackers, map, vehicles -------------------------------------------------
+
+async function loadTrackers(devices: () => Promise<TrackedDevices>): Promise<OpsTrackers> {
+  const { devices: list, sources } = await devices();
+  const failed = Object.entries(sources)
+    .filter(([, status]) => status.configured && status.error)
+    .map(([name, status]) => `${name}: ${status.error}`);
+  return {
+    configured: Object.values(sources).some((status) => status.configured),
+    error: failed.length > 0 ? failed.join(' · ') : null,
+    devices: list,
+  };
+}
+
+async function loadMap(devices: () => Promise<TrackedDevices>): Promise<OpsMap> {
+  const [trackers, workspace] = await Promise.all([loadTrackers(devices), getMapWorkspace()]);
+  return {
+    ...trackers,
+    categories: workspace.categories,
+    geofences: workspace.geofences.filter((fence) => fence.visible),
+    deviceTags: workspace.deviceTags,
+  };
+}
+
+async function loadVehicles(): Promise<OpsVehicles> {
+  const rows = await prisma.vehicle.groupBy({ by: ['status'], _count: { _all: true } });
+  const byStatus = rows.map((row) => ({ status: row.status, count: row._count._all })).sort((a, b) => b.count - a.count);
+  return { total: byStatus.reduce((sum, row) => sum + row.count, 0), byStatus };
+}
+
 // --- The board ---------------------------------------------------------------
 
 const EMPTY: OpsSections = {
+  map: { configured: false, error: null, devices: [], categories: [], geofences: [], deviceTags: [] },
+  trackers: { configured: false, error: null, devices: [] },
+  vehicles: { total: 0, byStatus: [] },
   movements: [],
   trips: { active: 0, startingSoon: 0, trips: [], escalations: [] },
   flights: [],
@@ -843,7 +908,14 @@ export async function loadOpsDashboard(user: AccessUser, panels?: readonly OpsPa
   // The server's TZ is the business's (see .env.example).
   const today = localDateKey();
 
+  // The map and the trackers panel read the same positions: one call serves both.
+  let tracked: Promise<TrackedDevices> | null = null;
+  const devices = () => (tracked ??= listTrackedDevices());
+
   const loaders: { [K in OpsPanelKey]: () => Promise<OpsSections[K]> } = {
+    map: () => loadMap(devices),
+    trackers: () => loadTrackers(devices),
+    vehicles: () => loadVehicles(),
     movements: () => loadMovements(user, isAdmin),
     trips: () => loadTrips(user, isAdmin),
     flights: () => loadFlights(user, isAdmin),

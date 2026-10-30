@@ -506,7 +506,7 @@ export const tripCreateSchema = z.object({
     .min(1, 'Add at least one traveller')
     .max(50, 'A trip can have at most 50 travellers'),
   ownerId: z.number().int().positive().optional().nullable(),
-  title: z.string().trim().min(1, 'Title is required').max(200),
+  title: z.string().trim().min(1, 'Task number is required').max(200),
   description: z.string().trim().max(10000).optional().nullable(),
   status: tripStatusSchema.optional(),
   startDate: z.string().trim().optional().nullable(),
@@ -689,6 +689,7 @@ export const organizationUpdateSchema = z.object({
   defaultCurrency: currencySchema.optional(),
   defaultTaxRate: z.number().finite().gte(0).lte(1).optional(),
   taxLabel: z.string().trim().min(1).max(40).optional(),
+  escalationRecipientIds: z.array(z.number().int().positive()).max(100).optional(),
 });
 
 const hexColorSchema = z

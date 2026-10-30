@@ -683,7 +683,7 @@ export const TRIP_SORTS: TripSort[] = ['updated', 'start-asc', 'start-desc'];
 export interface TripSearchInput {
   userId: number;
   isAdmin: boolean;
-  /** Free text over reference, tracking code, title, client and traveller names. */
+  /** Free text over reference, tracking code, task number (the title), client and traveller names. */
   q?: string | null;
   status?: TripStatus | null;
   /** Defaults to most recently updated first. */

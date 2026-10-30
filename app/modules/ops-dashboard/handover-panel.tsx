@@ -3,16 +3,20 @@
 import { useState } from 'react';
 
 import { HANDOVER_STATUSES, SHIFT_PERIODS } from '@/app/modules/handover/types';
+import { useNow } from '@/app/ui/use-client';
 import type { OpsHandover } from '@/lib/ops-dashboard';
 
-import { Empty, HeaderButton, Panel, type PanelFrame, Pill, RowButton, type Tone, fieldClass, send, shortDate } from './ops-ui';
+import { Empty, HeaderButton, Panel, type PanelFrame, Pill, RowButton, type Tone, fieldClass, formClass, primaryButton, rowClass, send, shortDate } from './ops-ui';
 
 const STATUS_TONE: Record<string, Tone> = { Urgent: 'danger', Attention: 'warn', Normal: 'neutral' };
+
+/** The night shift runs from 18:00 to 06:00, so those are the shift changes. */
+const isNight = (hours: number) => hours >= 18 || hours < 6;
 
 type HandoverForm = { shiftPeriod: string; status: string; post: string; summary: string; watchItems: string };
 
 const blankForm = (): HandoverForm => ({
-  shiftPeriod: new Date().getHours() >= 18 || new Date().getHours() < 6 ? 'Night' : 'Day',
+  shiftPeriod: isNight(new Date().getHours()) ? 'Night' : 'Day',
   status: 'Normal',
   post: '',
   summary: '',
@@ -25,6 +29,7 @@ export default function HandoverPanel({
   frame,
   onChanged,
 }: Readonly<{ data: OpsHandover; frame: PanelFrame; onChanged: () => Promise<void> }>) {
+  const now = useNow(60_000);
   const [busy, setBusy] = useState<number | 'new' | null>(null);
   const [form, setForm] = useState<HandoverForm | null>(null);
 
@@ -58,14 +63,18 @@ export default function HandoverPanel({
   };
 
   const urgent = data.items.some((h) => h.status === 'Urgent' && !h.mine);
+  const nextChange = now === null ? null : isNight(new Date(now).getHours()) ? '06:00' : '18:00';
 
   return (
     <Panel
       id="ops-handover"
-      icon="handover"
-      title="Shift handover"
-      count={data.awaiting}
-      tone={urgent ? 'danger' : 'warn'}
+      title="Handovers"
+      summary={
+        <>
+          {nextChange && `Shift change ${nextChange} · `}
+          {data.awaiting > 0 ? <span className={urgent ? 'text-rose-600' : 'text-amber-600'}>{data.awaiting} to acknowledge</span> : 'All acknowledged'}
+        </>
+      }
       href="/modules/handover"
       moduleName="Handover"
       frame={frame}
@@ -77,7 +86,7 @@ export default function HandoverPanel({
     >
       {form && (
         <form
-          className="mb-2 space-y-2 rounded-xl bg-gray-50 p-3"
+          className={`${formClass} space-y-2`}
           onSubmit={(e) => {
             e.preventDefault();
             void save();
@@ -114,11 +123,7 @@ export default function HandoverPanel({
             aria-label="Watch items"
             className={fieldClass}
           />
-          <button
-            type="submit"
-            disabled={busy === 'new' || !form.summary.trim()}
-            className="w-full rounded-lg bg-primary px-3 py-1.5 text-sm font-bold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
+          <button type="submit" disabled={busy === 'new' || !form.summary.trim()} className={`${primaryButton} w-full`}>
             Hand over
           </button>
         </form>
@@ -127,29 +132,28 @@ export default function HandoverPanel({
       {data.items.length === 0 ? (
         <Empty>Every handover from the last week has been acknowledged.</Empty>
       ) : (
-        <ul className="space-y-1.5">
+        <ul>
           {data.items.map((h) => (
-            <li key={h.id} className="rounded-xl border border-gray-100 px-3 py-2.5">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
-                    <Pill tone={STATUS_TONE[h.status] ?? 'neutral'}>{h.status}</Pill>
-                    <span suppressHydrationWarning>
-                      {h.shiftPeriod} shift · {shortDate(h.shiftDate)}
-                    </span>
-                    {h.post && <span>· {h.post}</span>}
+            <li key={h.id} className={`${rowClass} items-start`}>
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-2 text-sm font-medium text-gray-900">{h.summary}</p>
+                <p className="mt-0.5 truncate text-xs text-gray-500" suppressHydrationWarning>
+                  {h.shiftPeriod} shift · {shortDate(h.shiftDate)}
+                  {h.post && ` · ${h.post}`}
+                  {' · '}
+                  {h.author ? `From ${h.author}` : 'Author unknown'}
+                </p>
+                {h.watchItems && (
+                  <p className="mt-1 line-clamp-2 text-xs text-amber-800">
+                    <span className="font-bold">Watch: </span>
+                    {h.watchItems}
                   </p>
-                  <p className="mt-1 line-clamp-2 text-sm text-gray-900">{h.summary}</p>
-                  {h.watchItems && (
-                    <p className="mt-1 line-clamp-2 text-xs text-amber-800">
-                      <span className="font-bold">Watch: </span>
-                      {h.watchItems}
-                    </p>
-                  )}
-                  <p className="mt-1 text-[11px] text-gray-400">{h.author ? `From ${h.author}` : 'Author unknown'}</p>
-                </div>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <Pill tone={STATUS_TONE[h.status] ?? 'neutral'}>{h.status}</Pill>
                 {h.mine ? (
-                  <span className="shrink-0 text-[11px] text-gray-400" title="The incoming shift acknowledges it">
+                  <span className="text-[11px] text-gray-400" title="The incoming shift acknowledges it">
                     Yours
                   </span>
                 ) : (
