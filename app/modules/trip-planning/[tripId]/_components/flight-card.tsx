@@ -64,6 +64,13 @@ const PUNCTUALITY_STYLE: Record<Punctuality, { chip: string; dot: string }> = {
   unknown: { chip: 'bg-slate-50 text-slate-500 ring-slate-200', dot: 'bg-slate-400' },
 };
 
+const PUNCTUALITY_TEXT: Record<Punctuality, string> = {
+  early: 'text-sky-700',
+  ontime: 'text-emerald-700',
+  late: 'text-rose-700',
+  unknown: 'text-slate-500',
+};
+
 const TAKEOFF_ICON =
   'M2.5 19h19v2h-19v-2zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 2.59 4.49L21 11.49c.81-.23 1.28-1.05 1.07-1.85z';
 const LANDING_ICON =
@@ -143,6 +150,27 @@ export default function FlightCard({
         ? 'Scheduled'
         : (progress?.label ?? 'Scheduled');
 
+  // The actual take-off once FR24 has seen it, else the scheduled departure.
+  const takeoff = track?.takeoffAt
+    ? { label: 'Took off', clock: zonedClock(track.takeoffAt, timeZone) }
+    : { label: 'Departs', clock: departs };
+  // Where it lands: the touchdown, the live ETA, then the schedule. The day
+  // is named when it isn't the event's own.
+  const landingAt = track?.landedAt ?? track?.eta ?? schedule.arrival;
+  const landingDay = zonedDate(landingAt, timeZone);
+  const landing = {
+    label: track?.landedAt ? 'Landed' : track?.eta ? 'Lands (ETA)' : 'Lands',
+    clock: track?.landedAt || track?.eta ? zonedClock(landingAt, timeZone) : lands,
+    day: landingDay && landingDay !== eventDate ? landingDay : null,
+  };
+  // Early or late, and by how much, against the schedule.
+  const punctuality =
+    progress && progress.deltaMinutes !== null && progress.status !== 'unknown'
+      ? progress.status === 'ontime'
+        ? 'On time'
+        : `${formatDuration(progress.deltaMinutes * 60_000)} ${progress.status}`
+      : chipText;
+
   // The side of the route the event happens at reads strongest.
   const side = (active: boolean) => (active ? 'text-slate-900' : 'text-slate-400');
 
@@ -191,9 +219,6 @@ export default function FlightCard({
                 <span className="ml-1 text-[10px] font-medium text-slate-400">{departs.zone}</span>
               )}
             </p>
-            {track?.takeoffAt && (
-              <p className="text-[11px] text-slate-500">Took off {zonedClock(track.takeoffAt, timeZone).time}</p>
-            )}
           </div>
 
           <div className="relative mb-6 flex-1">
@@ -220,11 +245,29 @@ export default function FlightCard({
                 <span className="ml-1 text-[10px] font-medium text-slate-400">{lands.zone}</span>
               )}
             </p>
-            {track?.landedAt ? (
-              <p className="text-[11px] text-slate-500">Landed {zonedClock(track.landedAt, timeZone).time}</p>
-            ) : track?.eta ? (
-              <p className="text-[11px] text-slate-500">ETA {zonedClock(track.eta, timeZone).time}</p>
-            ) : null}
+          </div>
+        </div>
+
+        {/* Took off, lands and how that compares with the schedule */}
+        <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-slate-50 px-3 py-2">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">{takeoff.label}</p>
+            <p className="font-mono text-sm font-semibold text-slate-800">
+              {takeoff.clock.time}
+              {takeoff.clock.zone && <span className="ml-1 text-[10px] font-medium text-slate-400">{takeoff.clock.zone}</span>}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">{landing.label}</p>
+            <p className="font-mono text-sm font-semibold text-slate-800">
+              {landing.clock.time}
+              {landing.clock.zone && <span className="ml-1 text-[10px] font-medium text-slate-400">{landing.clock.zone}</span>}
+              {landing.day && <span className="ml-1 text-[10px] font-medium text-slate-400">· {landing.day}</span>}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Schedule</p>
+            <p className={`text-sm font-semibold ${PUNCTUALITY_TEXT[status]}`}>{punctuality}</p>
           </div>
         </div>
 

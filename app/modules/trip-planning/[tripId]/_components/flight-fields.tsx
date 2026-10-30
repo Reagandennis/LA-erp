@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 
 import type { FlightCandidate, LookupAirport } from '@/lib/flight-status';
 import { APP_LOCALE } from '@/lib/locale';
-import { allTimeZones, localTimeZone, offsetLabel, utcToZoned, weekdayOf, zonedToUtcIso } from '@/lib/zoned-time';
+import { allTimeZones, localTimeZone, offsetLabel, weekdayOf } from '@/lib/zoned-time';
 
 import { REMINDER_OPTIONS, type CrewOptions, type TripDaySummary } from '../../types';
 import type { EditorState } from '../editor-state';
@@ -135,22 +135,6 @@ export default function FlightFields({
       rest: all.filter((zone) => !common.includes(zone)).map((zone) => ({ zone, label: label(zone) })),
     };
   }, [editor.date]);
-
-  const durationTotal =
-    (Number(editor.durationHours) || 0) * 60 + (Number(editor.durationMinutes) || 0);
-
-  // "Lands 08:45 (GMT+3) on Tuesday": the other end of the flight, in this zone.
-  const otherEnd = useMemo(() => {
-    if (!editor.date || !editor.time || durationTotal <= 0) return null;
-    const at = zonedToUtcIso(editor.date, editor.time, editor.timezone);
-    if (!at) return null;
-    const other = new Date(at).getTime() + (arrival ? -1 : 1) * durationTotal * 60_000;
-    const zoned = utcToZoned(new Date(other).toISOString(), editor.timezone);
-    const sameDay = zoned.date === editor.date;
-    return `${arrival ? 'Departs' : 'Lands'} ${zoned.time} (${offsetLabel(editor.timezone, other)})${
-      sameDay ? '' : ` on ${weekdayOf(zoned.date, APP_LOCALE)}`
-    }`;
-  }, [editor.date, editor.time, editor.timezone, durationTotal, arrival]);
 
   const weekday = weekdayOf(editor.date, APP_LOCALE);
 
@@ -347,7 +331,6 @@ export default function FlightFields({
             <span className="pointer-events-none absolute right-3 top-1/2 mt-0.5 -translate-y-1/2 text-xs text-gray-400">min</span>
           </div>
         </label>
-        {otherEnd && <p className="pb-2 text-xs font-medium text-sky-700">{otherEnd}</p>}
       </div>
 
       {/* Who meets them at arrivals, or takes them to departures. */}
