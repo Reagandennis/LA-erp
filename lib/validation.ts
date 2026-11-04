@@ -428,18 +428,6 @@ const tripItemSharedFields = {
   vehicleId: z.number().int().positive().optional().nullable(),
 };
 
-/** Ground movements need someone to drive and something to drive; a CPO is optional. */
-export const CREWED_CATEGORIES = ['flight', 'transportation'] as const;
-
-function requireCrew(
-  item: { category?: string; driverId?: number | null; vehicleId?: number | null },
-  ctx: z.RefinementCtx,
-) {
-  if (!(CREWED_CATEGORIES as readonly string[]).includes(item.category ?? '')) return;
-  if (!item.driverId) ctx.addIssue({ code: 'custom', message: 'Pick a driver', path: ['driverId'] });
-  if (!item.vehicleId) ctx.addIssue({ code: 'custom', message: 'Pick a vehicle', path: ['vehicleId'] });
-}
-
 export const tripItemTypeSchema = z.enum([
   'flight',
   'car',
@@ -506,7 +494,8 @@ export const tripCreateSchema = z.object({
     .min(1, 'Add at least one traveller')
     .max(50, 'A trip can have at most 50 travellers'),
   ownerId: z.number().int().positive().optional().nullable(),
-  title: z.string().trim().min(1, 'Task number is required').max(200),
+  /** The task number; a trip can be opened without one. */
+  title: z.string().trim().max(200).optional().nullable(),
   description: z.string().trim().max(10000).optional().nullable(),
   status: tripStatusSchema.optional(),
   startDate: z.string().trim().optional().nullable(),
@@ -522,7 +511,7 @@ export const tripUpdateSchema = z
     customerId: z.number().int().positive().optional(),
     ownerId: z.number().int().positive().optional().nullable(),
     country: tripCountrySchema.optional().nullable(),
-    title: z.string().trim().min(1).max(200).optional(),
+    title: z.string().trim().max(200).optional(),
     description: z.string().trim().max(10000).optional().nullable(),
     status: tripStatusSchema.optional(),
     startDate: z.string().trim().optional().nullable(),
@@ -540,7 +529,8 @@ export const tripUpdateSchema = z
 
 export const tripItineraryItemAddSchema = z.object({
   items: z
-    .array(tripItineraryItemDraftSchema.extend({ travelers: eventTravelersSchema }).superRefine(requireCrew))
+    // A movement may be saved before its driver, vehicle or CPO is known; the gap is notified (lib/crew-gaps.ts).
+    .array(tripItineraryItemDraftSchema.extend({ travelers: eventTravelersSchema }))
     .min(1, 'Add at least one item')
     .max(100),
 });

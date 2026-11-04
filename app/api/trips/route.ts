@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       clientCode: validation.data.clientCode ?? null,
       travelers: validation.data.travelers,
       ownerId: validation.data.ownerId ?? null,
-      title: validation.data.title,
+      title: validation.data.title ?? '',
       description: validation.data.description ?? null,
       status: validation.data.status,
       startDate: validation.data.startDate ?? null,

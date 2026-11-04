@@ -17,6 +17,7 @@ vi.mock('../lib/prisma', () => ({
   },
 }));
 
+import { crewGapLabel, crewGaps } from '../lib/crew-gaps';
 import { listCrewOptions } from '../lib/trip-crew';
 import { tripItineraryItemAddSchema } from '../lib/validation';
 
@@ -64,12 +65,9 @@ describe('adding crewed events', () => {
     return result.success ? [] : result.error.issues.map((issue) => issue.message);
   };
 
-  it('needs a driver and a vehicle for transport and flights', () => {
-    expect(errors(event({ category: 'transportation' }))).toEqual(['Pick a driver', 'Pick a vehicle']);
-    expect(errors(event({ category: 'flight', driverId: 1 }))).toEqual(['Pick a vehicle']);
-  });
-
-  it("doesn't need a CPO", () => {
+  it('saves transport and flights with or without a driver, vehicle or CPO', () => {
+    expect(errors(event({ category: 'transportation' }))).toEqual([]);
+    expect(errors(event({ category: 'flight', driverId: 1 }))).toEqual([]);
     expect(errors(event({ category: 'transportation', driverId: 1, vehicleId: 30 }))).toEqual([]);
     expect(errors(event({ category: 'flight', driverId: 1, vehicleId: 30, officerId: 7 }))).toEqual([]);
   });
@@ -77,5 +75,30 @@ describe('adding crewed events', () => {
   it('leaves other kinds of event alone', () => {
     expect(errors(event({ category: 'activity' }))).toEqual([]);
     expect(errors(event({}))).toEqual([]);
+  });
+});
+
+describe('crew gaps', () => {
+  it('names what a movement still lacks, in order', () => {
+    expect(crewGaps({ category: 'transportation' })).toEqual(['driver', 'vehicle', 'CPO']);
+    expect(crewGaps({ category: 'flight', driverId: 1, vehicleId: 30 })).toEqual(['CPO']);
+    expect(crewGaps({ category: 'transportation', driverId: 1, vehicleId: 30, officerId: 7 })).toEqual([]);
+  });
+
+  it('counts an imported record’s typed-in driver and vehicle', () => {
+    expect(crewGaps({ category: 'transportation', details: { driverName: 'Peter', vehicle: 'KDA 123A' } })).toEqual(['CPO']);
+    expect(crewGaps({ category: 'transportation', details: { driverName: '  ' } })).toEqual(['driver', 'vehicle', 'CPO']);
+  });
+
+  it('has nothing to say about events that take no crew', () => {
+    expect(crewGaps({ category: 'activity' })).toEqual([]);
+    expect(crewGaps({ category: null })).toEqual([]);
+  });
+
+  it('reads as a sentence', () => {
+    expect(crewGapLabel(['driver', 'vehicle', 'CPO'])).toBe('No driver, vehicle or CPO assigned');
+    expect(crewGapLabel(['vehicle', 'CPO'])).toBe('No vehicle or CPO assigned');
+    expect(crewGapLabel(['CPO'])).toBe('No CPO assigned');
+    expect(crewGapLabel([])).toBe('');
   });
 });

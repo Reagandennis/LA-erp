@@ -21,7 +21,7 @@ import { enforceRateLimit } from './rate-limit';
  * in AI Studio, which halts every key when it reaches zero.
  */
 
-export type AiFeature = 'chatbot' | 'web_search' | 'intel' | 'radio';
+export type AiFeature = 'chatbot' | 'web_search' | 'intel' | 'radio' | 'ticket';
 
 interface Price {
   /** USD per 1M tokens. */
@@ -141,6 +141,7 @@ const FEATURE_NAMES: Record<AiFeature, string> = {
   web_search: 'Web search',
   intel: 'Intel reports',
   radio: 'Radio transcription',
+  ticket: 'E-ticket reading',
 };
 
 /** May this feature call Gemini right now? Budgets apply to every feature alike. */

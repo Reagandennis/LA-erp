@@ -1,5 +1,6 @@
 'use client';
 
+import { parseDateKey } from '@/lib/date-grid';
 import { APP_LOCALE } from '@/lib/locale';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -28,6 +29,7 @@ import {
   dayLabel,
   dayTypeChips,
   groupItemsByDay,
+  planEventDay,
   reorderPayload, findTimeClash } from './itinerary-model';
 import { AttachmentPicker } from './_components/attachment-picker';
 import { AttachmentStrip } from './_components/attachment-strip';
@@ -155,6 +157,12 @@ function formatRangeBadge(start: string | null, end: string | null): string {
   return `${fmt(s)} – ${fmt(e)}`;
 }
 
+/** "Tuesday, May 13" for a "YYYY-MM-DD", for the prompts. */
+function formatDateKey(key: string): string {
+  const parsed = parseDateKey(key);
+  return parsed ? parsed.toLocaleDateString(APP_LOCALE, { weekday: 'long', month: 'short', day: 'numeric' }) : key;
+}
+
 function formatTimeRange(scheduledAt: string | null, endsAt: string | null): string {
   if (!scheduledAt) return '';
   const s = new Date(scheduledAt);
@@ -279,8 +287,7 @@ function crewPayload(
   if (editor.category !== 'flight' && editor.category !== 'transportation') {
     return { driverId: null, officerId: null, vehicleId: null };
   }
-  if (!editor.driverId && !editor.details.driverName) return { error: 'Pick a driver' };
-  if (!editor.vehicleId && !editor.details.vehicle) return { error: 'Pick a vehicle' };
+  // None is required: a gap goes to the notification bell and the ops board instead.
   return { driverId: editor.driverId, officerId: editor.officerId, vehicleId: editor.vehicleId };
 }
 
@@ -534,6 +541,64 @@ export default function ItineraryPageClient({
     });
   };
 
+  /**
+   * The day an event belongs on, by its date. A date no day has yet gets a day
+   * made for it; one outside the trip's dates is put to the planner first and,
+   * if they go ahead, the trip's dates move to cover it. Null when they
+   * decline or a step fails (the error is shown).
+   */
+  const placeOnDate = async (
+    payload: ItemPayload,
+    dateKey: string | null,
+  ): Promise<{ dayId: number | null } | null> => {
+    const plan = planEventDay(trip, dateKey, payload.dayId);
+    if (plan.outside && dateKey) {
+      const when = formatDateKey(dateKey);
+      const range =
+        trip.startDate && trip.endDate ? ` (${formatRangeBadge(trip.startDate, trip.endDate)})` : '';
+      const ok = await confirm({
+        title: 'Outside the trip dates',
+        message:
+          `${when} is ${plan.outside} the dates assigned to this trip${range}. ` +
+          `Add “${payload.description}” there anyway? The trip will then ${plan.outside === 'before' ? 'start' : 'end'} on ${when}, with a day added for it.`,
+        confirmLabel: 'Add it anyway',
+        tone: 'primary',
+      });
+      if (!ok) return null;
+    }
+    if (plan.widen) {
+      const r = await fetch(`/api/trips/${trip.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(plan.widen),
+      });
+      const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
+      if (!r.ok || !data?.trip) {
+        setError(data?.error ?? "Could not move the trip's dates");
+        return null;
+      }
+      applyTrip(data.trip);
+    }
+    if (plan.newDay) {
+      const r = await fetch(`/api/trips/${trip.id}/days`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(plan.newDay),
+      });
+      const data = (await r.json().catch(() => null)) as { trip?: TripDetail; error?: string } | null;
+      const day = data?.trip?.days.find((candidate) => candidate.dateKey === dateKey);
+      if (!r.ok || !data?.trip || !day) {
+        setError(data?.error ?? 'Could not add a day for that date');
+        return null;
+      }
+      applyTrip(data.trip);
+      return { dayId: day.id };
+    }
+    return { dayId: plan.dayId };
+  };
+
   const startAdd = (category: TripItemCategory = 'activity') => {
     setError(null);
     setEditingItemId(null);
@@ -622,6 +687,9 @@ export default function ItineraryPageClient({
     }
     if (!(await clearOfClash(payload, null))) return;
     setError(null);
+    const placed = await placeOnDate(payload, editor.date || null);
+    if (!placed) return;
+    payload.dayId = placed.dayId;
     setPending('add');
     try {
       const r = await fetch(`/api/trips/${trip.id}/items`, {
@@ -648,6 +716,8 @@ export default function ItineraryPageClient({
       } else {
         applyTrip(data.trip);
       }
+      // Show the day the event went to, if its date took it elsewhere.
+      if (placed.dayId !== currentDayId) setActiveDayId(placed.dayId);
       cancelAddOrEdit();
     } finally {
       setPending(null);
@@ -663,6 +733,9 @@ export default function ItineraryPageClient({
     }
     if (!(await clearOfClash(payload, editingItemId))) return;
     setError(null);
+    const placed = await placeOnDate(payload, editor.date || null);
+    if (!placed) return;
+    payload.dayId = placed.dayId;
     setPendingItemId(editingItemId);
     try {
       const r = await fetch(`/api/trips/${trip.id}/items/${editingItemId}`, {
@@ -683,6 +756,7 @@ export default function ItineraryPageClient({
         keepEditingAfterFileError(latest, editingItemId, editor, synced.error);
         return;
       }
+      if (placed.dayId !== currentDayId) setActiveDayId(placed.dayId);
       cancelAddOrEdit();
     } finally {
       setPendingItemId(null);
@@ -928,7 +1002,7 @@ export default function ItineraryPageClient({
           </Link>
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-semibold uppercase tracking-wider text-primary">
-              {trip.reference} · {trip.trackingCode}
+              {trip.reference}
             </p>
             <h1 className="truncate text-base font-bold tracking-tight text-gray-900 sm:text-lg">
               {trip.title}

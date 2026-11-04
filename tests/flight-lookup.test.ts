@@ -136,6 +136,64 @@ describe('lookupFlights', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("answers for the event's date with the flight as it flew that day, to the minute", async () => {
+    // KQ100 on 28 Oct took off 06:55Z: 09:40 Nairobi after the taxi; landed 15:20Z: 15:30 London.
+    fetchMock.mockResolvedValueOnce(list([run(28, { datetime_takeoff: '2026-10-28T06:55:00Z' }), run(27)]));
+
+    const lookup = await lookupFlights('KQ100', NOW, '2026-10-28');
+
+    const url = fetchMock.mock.calls[0]![0] as string;
+    expect(url).toContain('flight_datetime_from=2026-10-27T00:00:00Z');
+    expect(url).toContain('flight_datetime_to=2026-10-30T00:00:00Z');
+    expect(lookup.candidates).toHaveLength(1);
+    expect(lookup.candidates[0]).toMatchObject({
+      basis: 'date',
+      onDate: '2026-10-28',
+      runs: 1,
+      departureTime: '09:40',
+      arrivalTime: '15:30',
+      // 8h25 in the air plus the taxi either side.
+      durationMinutes: 530,
+    });
+    // Asked again for a different day, it is a different question.
+    fetchMock.mockResolvedValueOnce(list([run(27)]));
+    expect((await lookupFlights('KQ100', NOW, '2026-10-27')).candidates[0]?.onDate).toBe('2026-10-27');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to recent runs when nothing flew on the event's date", async () => {
+    fetchMock.mockResolvedValueOnce(list([])).mockResolvedValueOnce(list([run(29), run(28)]));
+
+    const lookup = await lookupFlights('KQ100', NOW, '2026-10-26');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![0]).toContain('flight_datetime_from=2026-10-20T12:00:00Z');
+    expect(lookup.candidates[0]).toMatchObject({ basis: 'recent', onDate: null, runs: 2 });
+  });
+
+  it("prefers the runs on the event's weekday for a date still ahead", async () => {
+    // Fridays leave later: 23 and 30 Oct 2026 are Fridays, 29 Oct a Thursday.
+    fetchMock.mockResolvedValueOnce(
+      list([
+        run(30, { datetime_takeoff: '2026-10-30T08:45:00Z', datetime_landed: '2026-10-30T17:20:00Z' }),
+        run(29),
+        run(23, { datetime_takeoff: '2026-10-23T08:45:00Z', datetime_landed: '2026-10-23T17:20:00Z' }),
+      ]),
+    );
+
+    const lookup = await lookupFlights('KQ100', NOW, '2026-11-06');
+
+    // Only the ten recent days are asked for: a future date has no flights of its own.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toContain('flight_datetime_to=2026-10-30T12:00:00Z');
+    // London was still on summer time on the 23rd, so the two landings read 18:30 and 17:30 there.
+    expect(lookup.candidates[0]).toMatchObject({ basis: 'weekday', runs: 2, departureTime: '11:30', arrivalTime: '18:00' });
+
+    // A weekday none of the runs fell on: every run counts, as before.
+    fetchMock.mockResolvedValueOnce(list([run(30), run(29)]));
+    expect((await lookupFlights('KQ100', NOW, '2026-11-01')).candidates[0]).toMatchObject({ basis: 'recent', runs: 2 });
+  });
+
   it('refuses what is neither a flight nor a tail number', async () => {
     await expect(lookupFlights('?', NOW)).rejects.toBeInstanceOf(FlightTrackingError);
     expect(fetchMock).not.toHaveBeenCalled();

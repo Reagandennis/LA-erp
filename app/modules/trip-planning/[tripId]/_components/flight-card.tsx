@@ -91,6 +91,25 @@ function zonedClock(iso: string | null, timeZone: string | undefined): { time: s
   return { time, zone };
 }
 
+/** The office's zone: every airport time on the card is also given in Nairobi. */
+const OFFICE_ZONE = 'Africa/Nairobi';
+
+/**
+ * The same moment in Nairobi, as a second line under a time shown in the
+ * flight's own zone; nothing when the two read the same (the flight is at
+ * Nairobi, or the zones agree at that moment).
+ */
+function NairobiLine({ iso, shown }: { iso: string | null; shown: { time: string; zone: string } }) {
+  if (!iso) return null;
+  const nairobi = zonedClock(iso, OFFICE_ZONE);
+  if (nairobi.time === '--:--' || (nairobi.time === shown.time && nairobi.zone === shown.zone)) return null;
+  return (
+    <span className="mt-0.5 block font-mono text-[10px] font-medium text-slate-400">
+      {nairobi.time} <span className="font-sans">Nairobi</span>
+    </span>
+  );
+}
+
 function zonedDate(iso: string | null, timeZone: string | undefined): string {
   if (!iso) return '';
   const date = new Date(iso);
@@ -152,8 +171,8 @@ export default function FlightCard({
 
   // The actual take-off once FR24 has seen it, else the scheduled departure.
   const takeoff = track?.takeoffAt
-    ? { label: 'Took off', clock: zonedClock(track.takeoffAt, timeZone) }
-    : { label: 'Departs', clock: departs };
+    ? { label: 'Took off', clock: zonedClock(track.takeoffAt, timeZone), at: track.takeoffAt }
+    : { label: 'Departs', clock: departs, at: schedule.departure };
   // Where it lands: the touchdown, the live ETA, then the schedule. The day
   // is named when it isn't the event's own.
   const landingAt = track?.landedAt ?? track?.eta ?? schedule.arrival;
@@ -162,6 +181,7 @@ export default function FlightCard({
     label: track?.landedAt ? 'Landed' : track?.eta ? 'Lands (ETA)' : 'Lands',
     clock: track?.landedAt || track?.eta ? zonedClock(landingAt, timeZone) : lands,
     day: landingDay && landingDay !== eventDate ? landingDay : null,
+    at: landingAt,
   };
   // Early or late, and by how much, against the schedule.
   const punctuality =
@@ -218,6 +238,7 @@ export default function FlightCard({
               {schedule.departure && departs.zone && (
                 <span className="ml-1 text-[10px] font-medium text-slate-400">{departs.zone}</span>
               )}
+              <NairobiLine iso={schedule.departure} shown={departs} />
             </p>
           </div>
 
@@ -244,6 +265,7 @@ export default function FlightCard({
               {schedule.arrival && lands.zone && (
                 <span className="ml-1 text-[10px] font-medium text-slate-400">{lands.zone}</span>
               )}
+              <NairobiLine iso={schedule.arrival} shown={lands} />
             </p>
           </div>
         </div>
@@ -255,6 +277,7 @@ export default function FlightCard({
             <p className="font-mono text-sm font-semibold text-slate-800">
               {takeoff.clock.time}
               {takeoff.clock.zone && <span className="ml-1 text-[10px] font-medium text-slate-400">{takeoff.clock.zone}</span>}
+              <NairobiLine iso={takeoff.at} shown={takeoff.clock} />
             </p>
           </div>
           <div>
@@ -263,6 +286,7 @@ export default function FlightCard({
               {landing.clock.time}
               {landing.clock.zone && <span className="ml-1 text-[10px] font-medium text-slate-400">{landing.clock.zone}</span>}
               {landing.day && <span className="ml-1 text-[10px] font-medium text-slate-400">· {landing.day}</span>}
+              <NairobiLine iso={landing.at} shown={landing.clock} />
             </p>
           </div>
           <div>

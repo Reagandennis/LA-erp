@@ -1,4 +1,5 @@
 import { SERVICE_COUNTRIES } from '@/lib/service-catalog';
+import { crewGapLabel } from '@/lib/crew-gaps';
 import type { TrackedDevice } from '@/lib/map-types';
 import type { OpsFlight, OpsMovement, OpsSections, OpsTrip, OpsTripEvent } from '@/lib/ops-dashboard';
 import type { OpsPanelKey } from '@/lib/ops-panels';
@@ -284,6 +285,20 @@ export function buildAttention(
       title: `${t.reference} should have started`,
       detail: `${t.title} · still Planned`,
       href: tripHref(t.id),
+    });
+  }
+
+  // Movements still ahead with a driver, vehicle or CPO yet to be assigned.
+  const uncrewed = (sections.movements ?? []).filter((m) => !m.completed && m.crewGaps.length > 0);
+  if (uncrewed.length > 0) {
+    const roles = [...new Set(uncrewed.flatMap((m) => m.crewGaps))];
+    items.push({
+      key: 'crew-gaps',
+      tone: 'warn',
+      panel: 'movements',
+      title: `${uncrewed.length} ${uncrewed.length === 1 ? 'movement' : 'movements'} with crew still to assign`,
+      detail: `${crewGapLabel(roles)} · ${uncrewed[0].description}${uncrewed.length > 1 ? ` and ${uncrewed.length - 1} more` : ''}`,
+      href: '#ops-movements',
     });
   }
 

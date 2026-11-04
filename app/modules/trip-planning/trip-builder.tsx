@@ -107,11 +107,6 @@ export default function TripBuilder({
       setError('Add the client code for the reference');
       return;
     }
-    if (!title.trim()) {
-      setError('Task number is required');
-      return;
-    }
-
     const fields = {
       customerId: cId,
       country: country || null,
@@ -340,7 +335,7 @@ export default function TripBuilder({
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="The task number for this trip"
+                  placeholder="Optional — the task number for this trip"
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>

@@ -5,6 +5,7 @@ import { useShowMore } from '@/app/ui/use-show-more';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { PeopleView } from '@/lib/people-views';
+import { startVisibleInterval } from '@/lib/visible-interval';
 import { CPO_GRADES, ENGAGEMENT_TYPES, PERSONNEL_ROLES } from '@/lib/people-views';
 import type { PersonnelLicence, PersonnelListItem, PersonnelSummary, UserOption } from '@/lib/personnel';
 import { AvatarStatus, StatusDot, presenceOf, usePresence } from '@/app/ui/status-dot';
@@ -115,6 +116,8 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
 
   const [licenceOpen, setLicenceOpen] = useState(false);
   const [licenceForm, setLicenceForm] = useState<LicenceForm>(EMPTY_LICENCE);
+  /** A driving licence entered on the add form, saved right after the person. */
+  const [newLicence, setNewLicence] = useState<LicenceForm>(EMPTY_LICENCE);
 
   // The open card's full record (notes, resource links); the list rows carry
   // only what the cards show. `detail` lags `selectedId` while it loads.
@@ -171,6 +174,22 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
     }
   };
 
+  // Licences can change from the Licence Compliance page (linked, deleted), so
+  // the list re-reads itself while visible and when the window comes back.
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    refreshRef.current = refresh;
+  });
+  useEffect(() => {
+    const stop = startVisibleInterval(() => void refreshRef.current(), 60_000);
+    const onFocus = () => void refreshRef.current();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      stop();
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
+
   // Only records linked to a login account have presence to report.
   const presenceIds = useMemo(() => items.flatMap((p) => (p.user ? [p.user.id] : [])), [items]);
   const presence = usePresence(presenceIds);
@@ -212,6 +231,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
   const openCreate = () => {
     // On a role page the new person obviously holds that role, so pre-tick it.
     setForm({ ...BASE_FORM, roles: view.role ? [view.role] : [] });
+    setNewLicence(EMPTY_LICENCE);
     setPendingPhoto(null);
     setPhotoPreview(null);
     setEditing(false);
@@ -225,7 +245,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
       email: p.email ?? '',
       phone: p.phone ?? '',
       role: p.role ?? '',
-      department: p.department,
+      department: p.roles.includes('Driver') ? 'Operations' : p.department,
       status: p.status,
       location: p.location ?? '',
       manager: p.manager ?? '',
@@ -247,11 +267,14 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
   };
 
   const toggleRole = (role: string) => {
-    setForm((f) => ({
-      ...f,
-      roles: f.roles.includes(role) ? f.roles.filter((r) => r !== role) : [...f.roles, role],
-    }));
+    setForm((f) => {
+      const roles = f.roles.includes(role) ? f.roles.filter((r) => r !== role) : [...f.roles, role];
+      return { ...f, roles, department: roles.includes('Driver') ? 'Operations' : f.department };
+    });
   };
+
+  /** Drivers belong to Operations, nothing else: the department is pinned while the role is on. */
+  const departmentPinned = form.roles.includes('Driver');
 
   const pickPhoto = (file: File | null) => {
     setPendingPhoto(file);
@@ -276,6 +299,12 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
     e.preventDefault();
     if (!form.name.trim()) {
       setError('Name is required.');
+      return;
+    }
+    // Checked before the person is saved, so a half-filled licence can't leave them without one.
+    const licence = !editing && newLicence.licenseNumber.trim() ? newLicence : null;
+    if (licence && !licence.expiryDate) {
+      setError("Add the licence's expiry date, or clear the licence number.");
       return;
     }
     setBusy(true);
@@ -324,6 +353,17 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
           return;
         }
         if (pendingPhoto) await uploadPhoto(payload.item.id, pendingPhoto);
+        if (licence) {
+          const failure = await saveLicence(payload.item.id, body.name, licence);
+          if (failure) {
+            // The person is saved; their licence can be added again from their record.
+            await refresh();
+            setFormOpen(false);
+            setSelectedId(payload.item.id);
+            setError(`${body.name} was added, but the licence wasn't saved: ${failure}`);
+            return;
+          }
+        }
       }
       await refresh();
       setFormOpen(false);
@@ -350,6 +390,23 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
 
   // --- Licences -------------------------------------------------------------
 
+  /** Saves a licence against a person; the error text when it fails, else null. */
+  const saveLicence = async (personnelId: number, driverName: string, licence: LicenceForm): Promise<string | null> => {
+    const fd = new FormData();
+    fd.append('personnelId', String(personnelId));
+    // driverName stays denormalised on the licence row; the server keeps it in
+    // step when the person is renamed.
+    fd.append('driverName', driverName);
+    fd.append('licenseNumber', licence.licenseNumber.trim());
+    fd.append('category', licence.category);
+    fd.append('expiryDate', licence.expiryDate);
+    if (licence.document) fd.append('document', licence.document);
+    const res = await fetch('/api/drivers', { method: 'POST', credentials: 'include', body: fd });
+    if (res.ok) return null;
+    const err = await res.json().catch(() => null);
+    return err?.error ?? 'Could not add the licence.';
+  };
+
   const addLicence = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
@@ -360,20 +417,9 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
     setBusy(true);
     setError(null);
     try {
-      const fd = new FormData();
-      // driverName stays denormalised on the licence row; the server keeps it in
-      // step with the person's name from here on.
-      fd.append('driverName', selected.name);
-      fd.append('personnelId', String(selected.id));
-      fd.append('licenseNumber', licenceForm.licenseNumber.trim());
-      fd.append('category', licenceForm.category);
-      fd.append('expiryDate', licenceForm.expiryDate);
-      if (licenceForm.document) fd.append('document', licenceForm.document);
-
-      const res = await fetch('/api/drivers', { method: 'POST', credentials: 'include', body: fd });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        setError(err?.error ?? 'Could not add the licence.');
+      const failure = await saveLicence(selected.id, selected.name, licenceForm);
+      if (failure) {
+        setError(failure);
         return;
       }
       setLicenceForm(EMPTY_LICENCE);
@@ -773,7 +819,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
                 </div>
                 <div>
                   <Label>Supplied by</Label>
-                  <input className={inputClass} value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} placeholder="Vendor or consultancy" disabled={form.engagement === 'Employee'} />
+                  <input className={inputClass} value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} placeholder="Vendor" disabled={form.engagement === 'Employee'} />
                 </div>
               </div>
 
@@ -793,12 +839,48 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
                 </div>
               )}
 
+              {/* A new driver's licence goes in here; an existing person's are managed on their record. */}
+              {!editing && view.showLicences && form.roles.includes('Driver') && (
+                <div className="border border-gray-100 rounded-xl p-3 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Driving licence</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Licence number</Label>
+                      <input className={inputClass} value={newLicence.licenseNumber} onChange={(e) => setNewLicence({ ...newLicence, licenseNumber: e.target.value })} placeholder="Optional — add later from their record" />
+                    </div>
+                    <div>
+                      <Label>Category</Label>
+                      <select className={inputClass} value={newLicence.category} onChange={(e) => setNewLicence({ ...newLicence, category: e.target.value })}>
+                        {LICENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Expires{newLicence.licenseNumber.trim() ? ' *' : ''}</Label>
+                      <input type="date" className={inputClass} value={newLicence.expiryDate} onChange={(e) => setNewLicence({ ...newLicence, expiryDate: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Scan / document</Label>
+                      <input type="file" className="text-xs text-gray-500" onChange={(e) => setNewLicence({ ...newLicence, document: e.target.files?.[0] ?? null })} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Department</Label>
-                  <select className={inputClass} value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
+                  <select
+                    className={`${inputClass} disabled:bg-gray-50 disabled:text-gray-500`}
+                    value={departmentPinned ? 'Operations' : form.department}
+                    disabled={departmentPinned}
+                    title={departmentPinned ? 'Drivers are always in Operations' : undefined}
+                    onChange={(e) => setForm({ ...form, department: e.target.value })}
+                  >
                     {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
                   </select>
+                  {departmentPinned && <p className="mt-1 text-[11px] text-gray-400">Drivers are always in Operations.</p>}
                 </div>
                 <div>
                   <Label>Status</Label>

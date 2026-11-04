@@ -9,8 +9,12 @@
 /** Operational roles a person can be assigned in. A person may hold several. */
 export const PERSONNEL_ROLES = ['Driver', 'CPO', 'Airport Greeter', 'Security Advisor'] as const;
 
-/** How a person is engaged — they may come from a vendor or be a consultant. */
-export const ENGAGEMENT_TYPES = ['Employee', 'Vendor', 'Consultant', 'Contractor'] as const;
+/**
+ * How a person is engaged: ours, or supplied by a vendor. Older records may
+ * still carry 'Consultant' or 'Contractor'; they show as stored and fall back
+ * to Employee only when re-saved with an unknown value (lib/personnel.ts).
+ */
+export const ENGAGEMENT_TYPES = ['Employee', 'Vendor'] as const;
 
 /**
  * Grades offered on a person. The legacy `OFFICER_GRADES` in
@@ -57,7 +61,7 @@ export const PEOPLE_VIEWS: Record<string, PeopleView> = {
     slug: 'personnel',
     role: null,
     title: 'Personnel',
-    subtitle: 'Everyone we assign to work — employees, vendor staff and consultants.',
+    subtitle: 'Everyone we assign to work — employees and vendor staff.',
     addLabel: 'Add person',
     emptyTitle: 'No personnel yet',
     emptyHint: 'Add your first team member to get started.',

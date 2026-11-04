@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { syncPersonnelResources } from '@/lib/personnel-sync';
 import { prisma } from '@/lib/prisma';
 
 export const LICENSE_CATEGORIES = [
@@ -168,6 +169,8 @@ export async function createDriverLicense(input: {
     },
     select: LICENSE_SELECT,
   });
+  // The Task Assignment driver row carries the licence number; keep it in step.
+  if (row.personnelId) await syncPersonnelResources(row.personnelId);
   return serialize(row);
 }
 
@@ -183,7 +186,7 @@ export async function updateDriverLicense(
     notes?: string | null;
   },
 ): Promise<DriverLicenseSummary | null> {
-  const existing = await prisma.driverLicense.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.driverLicense.findUnique({ where: { id }, select: { id: true, personnelId: true } });
   if (!existing) return null;
 
   const data: Record<string, unknown> = {};
@@ -191,7 +194,15 @@ export async function updateDriverLicense(
     const v = patch.driverName.trim();
     if (v) data.driverName = v;
   }
-  if (patch.personnelId !== undefined) data.personnelId = patch.personnelId;
+  if (patch.personnelId !== undefined) {
+    data.personnelId = patch.personnelId;
+    // Linking to a person: the licence now shows under their name.
+    if (patch.personnelId !== null) {
+      const person = await prisma.personnel.findUnique({ where: { id: patch.personnelId }, select: { name: true } });
+      if (!person) return null;
+      data.driverName = person.name;
+    }
+  }
   if (patch.licenseNumber !== undefined) {
     const v = patch.licenseNumber.trim();
     if (v) data.licenseNumber = v;
@@ -206,13 +217,18 @@ export async function updateDriverLicense(
     data,
     select: LICENSE_SELECT,
   });
+  // Both the old holder (if the licence moved) and the new one.
+  for (const personnelId of new Set([existing.personnelId, row.personnelId])) {
+    if (personnelId) await syncPersonnelResources(personnelId);
+  }
   return serialize(row);
 }
 
 export async function deleteDriverLicense(id: number): Promise<boolean> {
-  const existing = await prisma.driverLicense.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.driverLicense.findUnique({ where: { id }, select: { id: true, personnelId: true } });
   if (!existing) return false;
   await prisma.driverLicense.delete({ where: { id } });
+  if (existing.personnelId) await syncPersonnelResources(existing.personnelId);
   return true;
 }
 

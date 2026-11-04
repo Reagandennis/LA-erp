@@ -14,6 +14,7 @@ const FEATURES: Record<string, string> = {
   web_search: 'Web search (assistant)',
   intel: 'Intel reports',
   radio: 'Radio transcription',
+  ticket: 'E-ticket reading (trip planning)',
 };
 
 const usd = (value: number) => (value > 0 && value < 0.01 ? '< $0.01' : `$${value.toFixed(2)}`);

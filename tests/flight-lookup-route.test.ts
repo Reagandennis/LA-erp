@@ -44,7 +44,7 @@ describe('flight lookup route', () => {
     const r = await get('q=kq%20100');
     expect(r.status).toBe(200);
     expect((await r.json()).lookup.candidates[0].flightNumber).toBe('KQ100');
-    expect(lookupFlights).toHaveBeenCalledWith('kq 100');
+    expect(lookupFlights).toHaveBeenCalledWith('kq 100', expect.any(Number), null);
   });
 
   it('passes FR24 trouble on with its status, and holds back a busy user', async () => {

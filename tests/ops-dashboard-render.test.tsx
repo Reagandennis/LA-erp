@@ -30,15 +30,15 @@ const board: OpsDashboard = {
     },
     vehicles: { total: 3, byStatus: [{ status: 'Available', count: 2 }, { status: 'Maintenance', count: 1 }] },
     movements: [
-      { id: 1, tripId: 11, reference: 'MCF-KEN-OCT-2661', customer: 'MCF', country: 'Kenya', category: 'transportation', description: 'Airport pickup', timeLabel: 'PICK-UP', scheduledAt: at, placeName: 'JKIA', crew: 'KDA 123A · Peter', flightNumber: null, completed: false, canEdit: true },
-      { id: 2, tripId: 11, reference: 'MCF-KEN-OCT-2661', customer: 'MCF', country: 'Kenya', category: 'flight', description: 'Arrival', timeLabel: 'ARRIVAL', scheduledAt: at, placeName: null, crew: null, flightNumber: 'KQ 101', completed: true, canEdit: true },
+      { id: 1, tripId: 11, reference: 'MCF-KEN-OCT-2661', customer: 'MCF', country: 'Kenya', category: 'transportation', description: 'Airport pickup', timeLabel: 'PICK-UP', scheduledAt: at, placeName: 'JKIA', crew: 'KDA 123A · Peter', crewGaps: [], flightNumber: null, completed: false, canEdit: true },
+      { id: 2, tripId: 11, reference: 'MCF-KEN-OCT-2661', customer: 'MCF', country: 'Kenya', category: 'flight', description: 'Arrival', timeLabel: 'ARRIVAL', scheduledAt: at, placeName: null, crew: null, crewGaps: [], flightNumber: 'KQ 101', completed: true, canEdit: true },
     ],
     trips: {
       active: 1,
       startingSoon: 0,
       escalations: [{ id: 4, tripId: 11, reference: 'MCF-KEN-OCT-2661', country: 'Kenya', detail: 'Road closed', at, by: 'Ops' }],
       trips: [
-        { id: 11, reference: 'MCF-KEN-OCT-2661', title: 'Nairobi visit', customer: 'MCF', status: 'Active', country: 'Kenya', startDate: at, endDate: null, crew: 'KDA 123A', vehicle: 'KDA 123A', controller: 'Ops', mine: true, canEdit: true, events: [{ id: 1, category: 'transportation', description: 'Airport pickup', timeLabel: null, scheduledAt: at, placeName: 'JKIA', crew: null, flightNumber: null, completed: false }], lastLog: { at, detail: 'At hotel', escalated: true, by: 'Ops' } },
+        { id: 11, reference: 'MCF-KEN-OCT-2661', title: 'Nairobi visit', customer: 'MCF', status: 'Active', country: 'Kenya', startDate: at, endDate: null, crew: 'KDA 123A', vehicle: 'KDA 123A', controller: 'Ops', mine: true, canEdit: true, events: [{ id: 1, category: 'transportation', description: 'Airport pickup', timeLabel: null, scheduledAt: at, placeName: 'JKIA', crew: null, crewGaps: [], flightNumber: null, completed: false }], lastLog: { at, detail: 'At hotel', escalated: true, by: 'Ops' } },
       ],
     },
     flights: [

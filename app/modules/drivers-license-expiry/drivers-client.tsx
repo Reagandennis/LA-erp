@@ -1,15 +1,24 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { startVisibleInterval } from '@/lib/visible-interval';
 
 /**
  * Org-wide driving-licence watchlist.
  *
  * Licences are now owned by the person who holds them, and are added, renewed
  * and deleted from the Personnel / Drivers directory. This page is the
- * read-only compliance view over the same rows: who is expired, who is about to
- * be, and which licences were never matched to a person.
+ * compliance view over the same rows: who is expired, who is about to be, and
+ * which licences were never matched to a person (those can be linked to a
+ * driver from here). It refreshes itself, so a licence added on the Drivers
+ * page shows up without a reload.
  */
+
+/** How often the list is re-read while the tab is visible. */
+const REFRESH_MS = 30_000;
+
+type DriverOption = { id: number; name: string };
 
 const BRAND = '#03458f';
 
@@ -70,16 +79,75 @@ export default function DriversClient({ isAdmin, canOpenPersonnel, initialItems,
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('All');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** The licence being linked to a driver, and the drivers to choose from (fetched once). */
+  const [linking, setLinking] = useState<number | null>(null);
+  const [drivers, setDrivers] = useState<DriverOption[] | null>(null);
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     try {
-      const res = await fetch('/api/drivers', { credentials: 'include' });
+      const res = await fetch('/api/drivers', { credentials: 'include', cache: 'no-store' });
       if (!res.ok) return;
       const data = (await res.json()) as { items?: License[]; stats?: Stats };
       if (data.items) setItems(data.items);
       if (data.stats) setStats(data.stats);
     } catch {
       /* keep current data on transient failure */
+    }
+  }, []);
+
+  // Licences are written on the Drivers page (often in another tab), so this
+  // list re-reads itself while visible and as soon as the window comes back.
+  useEffect(() => {
+    const stop = startVisibleInterval(() => void reload(), REFRESH_MS);
+    const onFocus = () => void reload();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      stop();
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [reload]);
+
+  const canLink = isAdmin && canOpenPersonnel;
+
+  const startLink = async (licenceId: number) => {
+    setError(null);
+    setLinking(licenceId);
+    if (drivers !== null) return;
+    try {
+      const res = await fetch('/api/personnel?role=Driver', { credentials: 'include' });
+      const data = (await res.json().catch(() => null)) as { items?: DriverOption[] } | null;
+      if (!res.ok || !data?.items) {
+        setError("The drivers couldn't be loaded. Try again.");
+        setLinking(null);
+        return;
+      }
+      setDrivers(data.items.map((d) => ({ id: d.id, name: d.name })));
+    } catch {
+      setError("The drivers couldn't be loaded. Try again.");
+      setLinking(null);
+    }
+  };
+
+  const linkTo = async (licenceId: number, personnelId: number) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/drivers/${licenceId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personnelId }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(err?.error ?? "The licence couldn't be linked.");
+        return;
+      }
+      setLinking(null);
+      await reload();
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -123,7 +191,7 @@ export default function DriversClient({ isAdmin, canOpenPersonnel, initialItems,
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Licence Compliance</h1>
             <p className="text-gray-500 mt-1 text-sm">
-              Every driving licence on file, soonest expiry first. Licences are added and renewed on the person.
+              Every driving licence on file, soonest expiry first. Licences are added and renewed on the person; this list keeps itself up to date.
             </p>
           </div>
           {canOpenPersonnel && (
@@ -145,6 +213,10 @@ export default function DriversClient({ isAdmin, canOpenPersonnel, initialItems,
             </div>
           ))}
         </div>
+
+        {error && (
+          <div className="mb-5 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-700">{error}</div>
+        )}
 
         {/* Rows whose holder could not be matched to a person during the backfill.
             Nothing was guessed, so these need a human to reconcile them. */}
@@ -223,8 +295,42 @@ export default function DriversClient({ isAdmin, canOpenPersonnel, initialItems,
                             ) : (
                               <span className="font-medium text-gray-900 truncate block">{l.driverName}</span>
                             )}
-                            {l.personnelId === null && (
-                              <span className="text-xs text-amber-600">Not linked to a person</span>
+                            {l.personnelId === null && linking !== l.id && (
+                              <span className="text-xs text-amber-600">
+                                Not linked to a person
+                                {canLink && (
+                                  <>
+                                    {' · '}
+                                    <button type="button" onClick={() => void startLink(l.id)} className="font-semibold text-[#03458f] hover:underline">
+                                      Link to a driver
+                                    </button>
+                                  </>
+                                )}
+                              </span>
+                            )}
+                            {linking === l.id && (
+                              <span className="mt-1 flex items-center gap-2">
+                                <select
+                                  aria-label="Driver to link"
+                                  className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs"
+                                  defaultValue=""
+                                  disabled={busy || drivers === null}
+                                  onChange={(e) => {
+                                    const id = Number(e.target.value);
+                                    if (id > 0) void linkTo(l.id, id);
+                                  }}
+                                >
+                                  <option value="">{drivers === null ? 'Loading drivers…' : 'Choose a driver…'}</option>
+                                  {(drivers ?? []).map((d) => (
+                                    <option key={d.id} value={d.id}>
+                                      {d.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button type="button" onClick={() => setLinking(null)} className="text-xs text-gray-500 hover:underline">
+                                  Cancel
+                                </button>
+                              </span>
                             )}
                           </div>
                         </div>

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { crewGapLabel } from '@/lib/crew-gaps';
 import type { OpsTripEvent } from '@/lib/ops-dashboard';
 
 import { type MovementState, overdueLabel } from './ops-model';
@@ -52,13 +53,23 @@ export function EventRow({
   onToggle: () => void;
   trip?: { id: number; reference: string; customer: string };
 }>) {
+  // What's still to assign, until the event is done.
+  const gap: ReactNode =
+    event.crewGaps.length > 0 && !event.completed ? (
+      <span className="text-amber-600">{crewGapLabel(event.crewGaps)}</span>
+    ) : null;
   const subline: ReactNode = trip ? (
     <Link href={`/modules/trip-planning/${trip.id}`} className={`${subClass} hover:text-primary`}>
       <span className={mono}>{trip.reference}</span> · {trip.customer}
       {event.crew && ` · ${event.crew}`}
+      {gap && <> · {gap}</>}
     </Link>
-  ) : event.crew ? (
-    <span className={subClass}>{event.crew}</span>
+  ) : event.crew || gap ? (
+    <span className={subClass}>
+      {event.crew}
+      {event.crew && gap && ' · '}
+      {gap}
+    </span>
   ) : null;
 
   return (

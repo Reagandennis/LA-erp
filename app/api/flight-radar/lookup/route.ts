@@ -9,7 +9,11 @@ import { requireModuleRequest } from '@/lib/request-auth';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-/** The flight form's "Look up": `?q=KQ100` or `?q=5Y-KZX` → what FR24 has flown lately (see lib/flight-lookup). */
+/**
+ * The flight form's "Look up": `?q=KQ100` or `?q=5Y-KZX`, with the event's
+ * `date=YYYY-MM-DD` → the flight on that day, or what FR24 has flown lately
+ * (see lib/flight-lookup).
+ */
 export async function GET(request: NextRequest) {
   const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.flights);
   if (response || !auth) return response;
@@ -33,8 +37,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Enter a flight number like KQ100 or a tail number like 5Y-KZX.' }, { status: 400 });
   }
 
+  const dateParam = request.nextUrl.searchParams.get('date')?.trim() ?? '';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : null;
+
   try {
-    return NextResponse.json({ lookup: await lookupFlights(q) });
+    return NextResponse.json({ lookup: await lookupFlights(q, Date.now(), date) });
   } catch (error) {
     if (error instanceof FlightTrackingError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

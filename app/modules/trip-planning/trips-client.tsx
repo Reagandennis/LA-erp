@@ -279,7 +279,8 @@ export default function TripsClient({
     : initialPendingCloseouts;
 
   const hasTrips = counts.total > 0;
-  const isFiltered = settledQuery.length > 0 || activeFilter !== 'All';
+  // A status pill alone never makes the list "filtered": with no trips at all the screen should invite the first one.
+  const isFiltered = settledQuery.length > 0;
   const rows = loaded.trips;
   const remaining = Math.max(0, loaded.total - rows.length);
   const listStale = !listCurrent && !listFailed;

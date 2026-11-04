@@ -12,14 +12,18 @@ import {
   normalizeFlightNumber,
 } from './flight-status';
 import { FlightTrackingError, fr24Fetch, fr24Get, fr24Time } from './flight-tracking';
+import { parseDateKey } from './date-grid';
 import { utcToZoned } from './zoned-time';
 
 /**
  * Fills the flight form from a flight number, callsign or tail number. FR24
  * has no schedule or search endpoint, so the answer is built from the
- * flight's recent runs: the route it flew, and the gate times a schedule
- * would quote, as the median of those runs. A tail number gives the flights
- * that aircraft has flown lately, the one in the air first.
+ * flight's runs. Given the event's date: a date that has come is answered
+ * with the flight as it actually flew that day; a date still ahead with the
+ * typical times of its recent runs, preferring the ones on that weekday
+ * (schedules often differ by day). Without a date, the recent runs regardless.
+ * A tail number gives the flights that aircraft has flown lately, the one in
+ * the air first.
  */
 
 /** How far back a flight's recent runs are read. A weekly service still shows. */
@@ -97,15 +101,41 @@ export function classifyQuery(raw: string): LookupQuery | null {
 
 const FILTER: Record<LookupQuery['kind'], string> = { flight: 'flights', callsign: 'callsigns', registration: 'registrations' };
 
-/** The median of some instants as "HH:MM" in `zone`, to the nearest five minutes. */
+/** The median of some instants as "HH:MM" in `zone`, to the nearest five minutes; a single run to the minute. */
 function typicalTime(instants: number[], zone: string): string | null {
   const minutes = instants
     .map((at) => utcToZoned(new Date(at).toISOString(), zone).time)
     .filter(Boolean)
     .map((time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)));
   if (minutes.length === 0) return null;
-  const typical = roundTo(median(minutes), 5) % (24 * 60);
+  const typical = roundTo(median(minutes), minutes.length === 1 ? 1 : 5) % (24 * 60);
   return `${String(Math.floor(typical / 60)).padStart(2, '0')}:${String(typical % 60).padStart(2, '0')}`;
+}
+
+/** The calendar day, local to `zone` (UTC without one), of an instant. */
+function localDay(iso: string | null, zone: string | null): string | null {
+  if (!iso) return null;
+  if (zone) return utcToZoned(iso, zone).date || null;
+  return iso.slice(0, 10);
+}
+/** 0–6, Sunday first, of a "YYYY-MM-DD". */
+function weekdayOfKey(key: string): number {
+  return new Date(`${key}T12:00:00Z`).getUTCDay();
+}
+
+/** The day a run took off, local to its origin. */
+function departedOn(run: Fr24SummaryFull): string | null {
+  const origin = findAirport(str(run.orig_icao), str(run.orig_iata));
+  return localDay(str(run.datetime_takeoff) ?? str(run.first_seen), origin?.tz ?? null);
+}
+/** The day a run landed, local to where it landed. */
+function landedOn(run: Fr24SummaryFull): string | null {
+  const destination = findAirport(str(run.dest_icao_actual) ?? str(run.dest_icao), str(run.dest_iata_actual) ?? str(run.dest_iata));
+  return localDay(str(run.datetime_landed), destination?.tz ?? null);
+}
+/** Whether a run is the flight of `dateKey`: it left or landed on that local day. */
+function flewOn(run: Fr24SummaryFull, dateKey: string): boolean {
+  return departedOn(run) === dateKey || landedOn(run) === dateKey;
 }
 
 function toLookupAirport(airport: AirportInfo | null): LookupAirport | null {
@@ -134,8 +164,29 @@ async function airlineFor(icao: string | null, flightNumber: string): Promise<Lo
   return findAirline(null, airlineCodeOf(flightNumber));
 }
 
-/** One candidate from the runs of one flight on one route, the latest run first. */
-async function candidateFrom(runs: Fr24SummaryFull[]): Promise<FlightCandidate> {
+/** Which runs a candidate's times are read from, and what that makes them. */
+interface TimesFrom {
+  basis: FlightCandidate['basis'];
+  onDate: string | null;
+  /** Keep only the runs on this weekday (0–6) when there are any. */
+  weekday?: number;
+}
+
+/**
+ * One candidate from the runs of one flight on one route, the latest run
+ * first. The times come from the runs on the wanted weekday when there are
+ * any, else from all of them.
+ */
+async function candidateFrom(allRuns: Fr24SummaryFull[], from: TimesFrom): Promise<FlightCandidate> {
+  const sameWeekday =
+    from.weekday === undefined
+      ? []
+      : allRuns.filter((run) => {
+          const day = departedOn(run);
+          return day !== null && weekdayOfKey(day) === from.weekday;
+        });
+  const runs = sameWeekday.length > 0 ? sameWeekday : allRuns;
+  const basis: FlightCandidate['basis'] = from.basis === 'date' ? 'date' : sameWeekday.length > 0 ? 'weekday' : 'recent';
   const latest = [...runs].sort(
     (a, b) => (instant(b.datetime_takeoff) ?? instant(b.first_seen) ?? 0) - (instant(a.datetime_takeoff) ?? instant(a.first_seen) ?? 0),
   );
@@ -170,11 +221,16 @@ async function candidateFrom(runs: Fr24SummaryFull[]): Promise<FlightCandidate> 
     runs: runs.length,
     lastSeen: str(first.last_seen) ?? str(first.datetime_takeoff) ?? str(first.first_seen),
     airborne: runs.some((run) => run.flight_ended === false && Boolean(str(run.datetime_takeoff)) && !str(run.datetime_landed)),
+    basis,
+    onDate: basis === 'date' ? from.onDate : null,
   };
 }
 
 /** The runs grouped by flight and route, each as one candidate; the one in the air first, then the best known. */
-export async function candidatesFrom(rows: Fr24SummaryFull[]): Promise<FlightCandidate[]> {
+export async function candidatesFrom(
+  rows: Fr24SummaryFull[],
+  from: TimesFrom = { basis: 'recent', onDate: null },
+): Promise<FlightCandidate[]> {
   const groups = new Map<string, Fr24SummaryFull[]>();
   for (const row of rows) {
     const flight = str(row.flight) ?? str(row.callsign);
@@ -185,7 +241,7 @@ export async function candidatesFrom(rows: Fr24SummaryFull[]): Promise<FlightCan
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   const candidates: FlightCandidate[] = [];
-  for (const runs of groups.values()) candidates.push(await candidateFrom(runs));
+  for (const runs of groups.values()) candidates.push(await candidateFrom(runs, from));
   return candidates.sort(
     (a, b) => Number(b.airborne) - Number(a.airborne) || b.runs - a.runs || (b.lastSeen ?? '').localeCompare(a.lastSeen ?? ''),
   );
@@ -200,20 +256,43 @@ function remember(key: string, lookup: FlightLookup, now: number) {
   cache.set(key, { expires: now + CACHE_TTL_MS, lookup });
 }
 
-/** What FR24 has flown lately under `raw`: a flight number, callsign or tail number. */
-export async function lookupFlights(raw: string, now = Date.now()): Promise<FlightLookup> {
+/** FR24's summaries for `query` between two instants, newest first. */
+async function summaries(query: LookupQuery, from: number, to: number): Promise<Fr24SummaryFull[]> {
+  return fr24Get<Fr24SummaryFull>(
+    `/api/flight-summary/full?${FILTER[query.kind]}=${encodeURIComponent(query.value)}` +
+      `&flight_datetime_from=${fr24Time(from)}&flight_datetime_to=${fr24Time(to)}&limit=${RESULT_LIMIT}&sort=desc`,
+  );
+}
+
+/**
+ * What FR24 knows of `raw` (a flight number, callsign or tail number) for an
+ * event on `dateKey`. A date that has come: the flight as it flew that day,
+ * falling back to recent runs when it didn't. A date ahead, or none: the
+ * recent runs, with that weekday's preferred for the times.
+ */
+export async function lookupFlights(raw: string, now = Date.now(), dateKey: string | null = null): Promise<FlightLookup> {
   const query = classifyQuery(raw);
   if (!query) throw new FlightTrackingError('Enter a flight number like KQ100 or a tail number like 5Y-KZX.', 400);
+  const date = dateKey && parseDateKey(dateKey) ? dateKey.slice(0, 10) : null;
 
-  const key = `${query.kind}:${query.value}`;
+  const key = `${query.kind}:${query.value}:${date ?? ''}`;
   const cached = cache.get(key);
   if (cached && cached.expires > now) return cached.lookup;
 
-  const rows = await fr24Get<Fr24SummaryFull>(
-    `/api/flight-summary/full?${FILTER[query.kind]}=${encodeURIComponent(query.value)}` +
-      `&flight_datetime_from=${fr24Time(now - HISTORY_DAYS * DAY)}&flight_datetime_to=${fr24Time(now)}&limit=${RESULT_LIMIT}&sort=desc`,
-  );
-  const lookup: FlightLookup = { query, candidates: await candidatesFrom(rows), checkedAt: new Date(now).toISOString() };
+  let candidates: FlightCandidate[] | null = null;
+  const dayStart = date ? Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) : null;
+  if (date && dayStart !== null && dayStart <= now) {
+    // That day in every zone: from the evening before (UTC) to the morning after.
+    const rows = await summaries(query, dayStart - DAY, Math.min(dayStart + 2 * DAY, now));
+    const onDay = rows.filter((run) => flewOn(run, date));
+    if (onDay.length > 0) candidates = await candidatesFrom(onDay, { basis: 'date', onDate: date });
+  }
+  if (candidates === null) {
+    const rows = await summaries(query, now - HISTORY_DAYS * DAY, now);
+    candidates = await candidatesFrom(rows, { basis: 'recent', onDate: null, weekday: date ? weekdayOfKey(date) : undefined });
+  }
+
+  const lookup: FlightLookup = { query, candidates, checkedAt: new Date(now).toISOString() };
   remember(key, lookup, now);
   return lookup;
 }

@@ -51,12 +51,12 @@ describe('empty runs', () => {
     expect(emptyRunTitle(' ', '')).toBe('Empty run');
   });
 
-  it('still need a driver and a vehicle, with a distance allowed', () => {
+  it('can be saved before its driver and vehicle are known, with a distance allowed', () => {
     const add = (extra: Record<string, unknown>) =>
       tripItineraryItemAddSchema.safeParse({
         items: [{ description: 'Empty run · Base → JKIA', quantity: 1, category: 'transportation', timeLabel: EMPTY_RUN, ...extra }],
       }).success;
-    expect(add({})).toBe(false);
+    expect(add({})).toBe(true);
     expect(add({ driverId: 1, vehicleId: 2, details: { pickupLocation: 'Yard', dropoffLocation: 'JKIA', distanceKm: '18' } })).toBe(true);
   });
 });

@@ -3,8 +3,10 @@ import 'server-only';
 import { Prisma } from '@prisma/client';
 
 import { isPreviewableImage } from './attachment-types';
+import { crewGaps } from './crew-gaps';
 import { addDays, dateKey, parseDateKey } from './date-grid';
 import { prisma } from './prisma';
+import { syncCrewGapNotifications } from './trip-notifications';
 import type { ServiceCountry } from './service-catalog';
 import {
   buildTripReference,
@@ -363,6 +365,7 @@ type TripDayCollectionClient = {
   }) => Promise<TripDayRecord[]>;
   findUnique: (args: { where: { id: number } }) => Promise<TripDayRecord | null>;
   create: (args: { data: Record<string, unknown> }) => Promise<TripDayRecord>;
+  createMany: (args: { data: Array<Record<string, unknown>> }) => Promise<{ count: number }>;
   update: (args: { where: { id: number }; data: Record<string, unknown> }) => Promise<TripDayRecord>;
   updateMany: (args: {
     where: Record<string, unknown>;
@@ -938,7 +941,7 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
     : new Date().getUTCFullYear();
 
   return prisma.$transaction(async (tx) => {
-    const { trip, tripItineraryItem, trackingSequence } = txClients(tx);
+    const { trip, tripItineraryItem, tripDay, trackingSequence } = txClients(tx);
 
     // Before the sequences, so a rejected traveller doesn't burn a reference.
     const travelerIds = [
@@ -982,6 +985,8 @@ export async function createTrip(input: TripCreateInput): Promise<TripDetail> {
         })),
       });
     }
+
+    await createDaysForDates(tripDay, created.id, input.startDate, input.endDate);
 
     if (input.items.length > 0) {
       await tripItineraryItem.createMany({
@@ -1153,8 +1158,9 @@ export async function addTripItems(params: {
   const crewError = await crewProblem(params.items);
   if (crewError) return { error: crewError, status: 400 };
 
+  let outcome: { detail: TripDetail; createdIds: number[] };
   try {
-    return await prisma.$transaction(async (tx) => {
+    outcome = await prisma.$transaction(async (tx) => {
       const { trip, tripItineraryItem } = txClients(tx);
       // One past the highest position in use, not the item count. Deleting an
       // item leaves a gap, so counting would hand the new item a position that
@@ -1202,19 +1208,33 @@ export async function addTripItems(params: {
         }),
       });
       const idAt = new Map(created.map((row) => [row.position, row.id]));
+      const createdIds = params.items.map((_, idx) => idAt.get(startPosition + idx)!);
       await linkEventTravelers(
         tx,
         existing,
-        params.items.map((item, idx) => ({ itemId: idAt.get(startPosition + idx)!, travelers: item.travelers ?? [] })),
+        createdIds.map((itemId, idx) => ({ itemId, travelers: params.items[idx].travelers ?? [] })),
         params.userId,
       );
       const fresh = await trip.findUnique({ where: { id: params.tripId }, include: tripInclude });
-      return serializeDetail(fresh!);
+      return { detail: serializeDetail(fresh!), createdIds };
     });
   } catch (error) {
     if (error instanceof TripTravelerError) return { error: error.message, status: 400 };
     throw error;
   }
+
+  // A movement may be saved without its crew; the desk is told what's missing.
+  for (const [idx, item] of params.items.entries()) {
+    const gaps = crewGaps(item);
+    if (gaps.length > 0) {
+      await syncCrewGapNotifications({
+        trip: existing,
+        item: { id: outcome.createdIds[idx], description: item.description },
+        gaps,
+      });
+    }
+  }
+  return outcome.detail;
 }
 
 export interface TripItineraryItemUpdateInput {
@@ -1269,8 +1289,21 @@ export async function updateTripItem(params: {
   const crewError = await crewProblem([params.input], item);
   if (crewError) return { error: crewError, status: 400 };
 
+  // Crew before and after the edit, so the gap note can follow it.
+  const pick = <K extends 'category' | 'driverId' | 'officerId' | 'vehicleId' | 'details'>(key: K) =>
+    params.input[key] !== undefined ? params.input[key] : item[key];
+  const gapsBefore = crewGaps(item);
+  const gapsAfter = crewGaps({
+    category: pick('category'),
+    driverId: pick('driverId'),
+    officerId: pick('officerId'),
+    vehicleId: pick('vehicleId'),
+    details: pick('details'),
+  });
+
+  let detail: TripDetail;
   try {
-    return await prisma.$transaction(async (tx) => {
+    detail = await prisma.$transaction(async (tx) => {
       const { trip, tripItineraryItem } = txClients(tx);
       const data: Record<string, unknown> = {};
       if (params.input.dayId !== undefined) data.dayId = params.input.dayId;
@@ -1349,6 +1382,14 @@ export async function updateTripItem(params: {
     if (error instanceof TripTravelerError) return { error: error.message, status: 400 };
     throw error;
   }
+
+  await syncCrewGapNotifications({
+    trip: existing,
+    item: { id: params.itemId, description: params.input.description ?? item.description },
+    gaps: gapsAfter,
+    before: gapsBefore,
+  });
+  return detail;
 }
 
 export async function deleteTripItem(params: {
@@ -1392,7 +1433,7 @@ export async function createTripFromQuote(input: CreateTripFromQuoteInput): Prom
 > {
   // Outer transaction: re-read the quote inside the tx, then build the trip.
   const result = await prisma.$transaction(async (tx) => {
-    const { quote, trip, tripItineraryItem, trackingSequence } = txClients(tx);
+    const { quote, trip, tripItineraryItem, tripDay, trackingSequence } = txClients(tx);
 
     const quoteRecord = await quote.findUnique({
       where: { id: input.quoteId },
@@ -1452,6 +1493,8 @@ export async function createTripFromQuote(input: CreateTripFromQuoteInput): Prom
       include: tripInclude,
     });
 
+    await createDaysForDates(tripDay, created.id, startDate, endDate);
+
     if (quoteRecord.items.length > 0) {
       await tripItineraryItem.createMany({
         data: quoteRecord.items
@@ -1494,6 +1537,68 @@ export async function listOwnerCandidates(excludeUserId: number) {
 // exist — "Add another day" lived in React state and vanished on refresh.
 
 const MAX_TRIP_DAYS = 60;
+
+/**
+ * "YYYY-MM-DD" of every date from `start` to `end` inclusive, read in UTC the
+ * way the trip's own dates are. None when either date is missing or the end
+ * comes first; never more than MAX_TRIP_DAYS.
+ */
+export function tripDayKeys(
+  start: string | Date | null | undefined,
+  end: string | Date | null | undefined,
+): string[] {
+  if (!start || !end) return [];
+  const first = new Date(start);
+  const last = new Date(end);
+  if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime())) return [];
+  const from = Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), first.getUTCDate());
+  const to = Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate());
+  const keys: string[] = [];
+  for (let at = from; at <= to && keys.length < MAX_TRIP_DAYS; at += 86_400_000) {
+    keys.push(new Date(at).toISOString().slice(0, 10));
+  }
+  return keys;
+}
+
+/**
+ * The trip's dates once `removed` is gone. Deleting the first or last dated
+ * day pulls the trip's start or end in to the next dated day, so the dates on
+ * the trip keep matching its itinerary. A middle day changes nothing, and so
+ * does the last dated day of all: the trip keeps the dates it had.
+ */
+export function tripDatesWithoutDay(
+  trip: { startDate: Date | null; endDate: Date | null },
+  removed: { dateKey: string | null },
+  remaining: Array<{ dateKey: string | null }>,
+): { startDate?: Date; endDate?: Date } | null {
+  if (!removed.dateKey) return null;
+  const keys = remaining.flatMap((day) => (day.dateKey ? [day.dateKey] : [])).sort();
+  if (keys.length === 0) return null;
+  const startKey = trip.startDate?.toISOString().slice(0, 10) ?? null;
+  const endKey = trip.endDate?.toISOString().slice(0, 10) ?? null;
+  const change: { startDate?: Date; endDate?: Date } = {};
+  if (startKey && removed.dateKey <= startKey && keys[0] > startKey) change.startDate = new Date(keys[0]);
+  const last = keys[keys.length - 1];
+  if (endKey && removed.dateKey >= endKey && last < endKey) change.endDate = new Date(last);
+  return change.startDate || change.endDate ? change : null;
+}
+
+/**
+ * A new trip's itinerary opens with one day per date between its start and
+ * end, so the planner fills the days in rather than adding them one by one.
+ */
+async function createDaysForDates(
+  tripDay: TripDayCollectionClient,
+  tripId: number,
+  start: string | Date | null | undefined,
+  end: string | Date | null | undefined,
+): Promise<void> {
+  const keys = tripDayKeys(start, end);
+  if (keys.length === 0) return;
+  await tripDay.createMany({
+    data: keys.map((dateKey, index) => ({ tripId, dateKey, dayNumber: index + 1 })),
+  });
+}
 
 /** Shift a "YYYY-MM-DD" key by whole days, staying in local calendar terms. */
 function shiftDateKey(key: string, days: number): string | null {
@@ -1656,10 +1761,12 @@ export async function deleteTripDay(params: {
     }
 
     await tripDay.delete({ where: { id: params.dayId } });
-    await renumberDays(
-      tripDay,
-      guard.days.filter((day) => day.id !== params.dayId),
-    );
+    const remaining = guard.days.filter((day) => day.id !== params.dayId);
+    await renumberDays(tripDay, remaining);
+    // An edge day takes the trip's start or end with it.
+    const removed = guard.days.find((day) => day.id === params.dayId)!;
+    const dates = tripDatesWithoutDay(guard.trip, removed, remaining);
+    if (dates) await trip.update({ where: { id: params.tripId }, data: dates });
     return refreshDetail(trip, params.tripId);
   });
 }

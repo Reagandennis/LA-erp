@@ -8,6 +8,7 @@ import {
   groupItemsByDay,
   insertionIndex,
   nextDateKey,
+  planEventDay,
   reorderPayload,
   sortDayItems,
 } from '../app/modules/trip-planning/[tripId]/itinerary-model';
@@ -226,6 +227,64 @@ describe('labels', () => {
 
   it('crosses a month boundary when suggesting the next date', () => {
     expect(nextDateKey([day(1, 1, '2026-05-31')])).toBe('2026-06-01');
+  });
+});
+
+describe('planEventDay', () => {
+  const trip = {
+    startDate: '2026-11-10T00:00:00.000Z',
+    endDate: '2026-11-12T00:00:00.000Z',
+    days: [day(1, 1, '2026-11-10'), day(2, 2, '2026-11-11'), day(3, 3, '2026-11-12')],
+  };
+  const stay = { newDay: null, outside: null, widen: null };
+
+  it('keeps the event on the day it is being added to when the date matches, or there is no date', () => {
+    expect(planEventDay(trip, '2026-11-11', 2)).toEqual({ dayId: 2, ...stay });
+    expect(planEventDay(trip, null, 2)).toEqual({ dayId: 2, ...stay });
+    expect(planEventDay(trip, null, null)).toEqual({ dayId: null, ...stay });
+  });
+
+  it('moves the event to the day that has its date', () => {
+    expect(planEventDay(trip, '2026-11-12', 1)).toEqual({ dayId: 3, ...stay });
+    expect(planEventDay(trip, '2026-11-10', null)).toEqual({ dayId: 1, ...stay });
+  });
+
+  it('leaves an undated itinerary alone: those days are not driven by dates', () => {
+    const undated = { startDate: null, endDate: null, days: [day(1, 1), day(2, 2)] };
+    expect(planEventDay(undated, '2026-11-11', 2)).toEqual({ dayId: 2, ...stay });
+  });
+
+  it('asks for a day before the trip, moving the start and putting the day first', () => {
+    expect(planEventDay(trip, '2026-11-08', 1)).toEqual({
+      dayId: null,
+      newDay: { dateKey: '2026-11-08', afterDayId: null, atStart: true },
+      outside: 'before',
+      widen: { startDate: '2026-11-08' },
+    });
+  });
+
+  it('asks for a day after the trip, moving the end and putting the day last', () => {
+    expect(planEventDay(trip, '2026-11-15', 3)).toEqual({
+      dayId: null,
+      newDay: { dateKey: '2026-11-15', afterDayId: 3, atStart: false },
+      outside: 'after',
+      widen: { endDate: '2026-11-15' },
+    });
+  });
+
+  it('fills a gap inside the trip without asking', () => {
+    const gappy = { ...trip, days: [day(1, 1, '2026-11-10'), day(3, 2, '2026-11-12')] };
+    expect(planEventDay(gappy, '2026-11-11', 1)).toEqual({
+      dayId: null,
+      newDay: { dateKey: '2026-11-11', afterDayId: 1, atStart: false },
+      outside: null,
+      widen: null,
+    });
+  });
+
+  it('appends when the trip has dates but no dated days yet', () => {
+    const bare = { ...trip, days: [] };
+    expect(planEventDay(bare, '2026-11-11', null).newDay).toEqual({ dateKey: '2026-11-11', afterDayId: null, atStart: false });
   });
 });
 

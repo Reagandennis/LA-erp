@@ -13,6 +13,7 @@ import {
   maintenanceDisplayStatus,
   reminderMessage,
 } from './fleet';
+import { type CrewRole, crewGaps } from './crew-gaps';
 import { listFleetVehicles, listMaintenance, listVehicleOdometers } from './fleet-server';
 import { getMapWorkspace } from './map-store';
 import type { MapCategoryDto, MapDeviceTagDto, MapGeofenceDto, TrackedDevice } from './map-types';
@@ -75,6 +76,8 @@ export interface OpsTripEvent {
   placeName: string | null;
   /** Driver, vehicle and officer on the event itself. */
   crew: string | null;
+  /** Of those, the ones still to assign (lib/crew-gaps.ts). */
+  crewGaps: CrewRole[];
   flightNumber: string | null;
   completed: boolean;
 }
@@ -134,6 +137,8 @@ export interface OpsMovement {
   placeName: string | null;
   /** Driver, vehicle and officer on the event itself. */
   crew: string | null;
+  /** Of those, the ones still to assign (lib/crew-gaps.ts). */
+  crewGaps: CrewRole[];
   flightNumber: string | null;
   completed: boolean;
   canEdit: boolean;
@@ -415,6 +420,9 @@ async function loadTrips(user: AccessUser, isAdmin: boolean): Promise<OpsTrips> 
             placeName: true,
             details: true,
             completedAt: true,
+            driverId: true,
+            officerId: true,
+            vehicleId: true,
             ...CREW_SELECT,
           },
         },
@@ -472,6 +480,7 @@ async function loadTrips(user: AccessUser, isAdmin: boolean): Promise<OpsTrips> 
           scheduledAt: it.scheduledAt!.toISOString(),
           placeName: it.placeName,
           crew: crewLine(it),
+          crewGaps: crewGaps(it),
           flightNumber: it.category === 'flight' ? text(it.details, 'flightNumber') : null,
           completed: it.completedAt !== null,
         })),
@@ -511,6 +520,9 @@ async function loadMovements(user: AccessUser, isAdmin: boolean): Promise<OpsMov
       placeName: true,
       details: true,
       completedAt: true,
+      driverId: true,
+      officerId: true,
+      vehicleId: true,
       ...CREW_SELECT,
       trip: {
         select: { id: true, reference: true, country: true, status: true, createdById: true, ownerId: true, customer: { select: { name: true } } },
@@ -529,6 +541,7 @@ async function loadMovements(user: AccessUser, isAdmin: boolean): Promise<OpsMov
     scheduledAt: r.scheduledAt!.toISOString(),
     placeName: r.placeName,
     crew: crewLine(r),
+    crewGaps: crewGaps(r),
     flightNumber: r.category === 'flight' ? text(r.details, 'flightNumber') : null,
     completed: r.completedAt !== null,
     canEdit: canEditTrip(r.trip, user.id, isAdmin),

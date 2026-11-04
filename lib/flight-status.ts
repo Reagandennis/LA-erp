@@ -370,11 +370,18 @@ export interface FlightCandidate {
   aircraft: string | null;
   /** The tail number of the latest run. */
   registration: string | null;
-  /** How many recent runs the times are drawn from, and when the latest was last seen. */
+  /** How many runs the times are drawn from, and when the latest was last seen. */
   runs: number;
   lastSeen: string | null;
   /** In the air right now. */
   airborne: boolean;
+  /**
+   * What the times are: the flight as it flew on the event's date, the typical
+   * times of its runs on that weekday, or of its recent runs regardless.
+   */
+  basis: 'date' | 'weekday' | 'recent';
+  /** "YYYY-MM-DD" when `basis` is 'date'. */
+  onDate: string | null;
 }
 
 export interface FlightLookup {

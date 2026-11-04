@@ -38,6 +38,7 @@ export default function MovementsPanel({
   const count = (state: MovementState) => movements.filter((m) => states.get(m.id) === state).length;
   const late = count('late');
   const open = movements.length - count('done');
+  const uncrewed = movements.filter((m) => !m.completed && m.crewGaps.length > 0).length;
   const shown = movements.filter((m) => (filter === 'all' ? true : filter === 'late' ? states.get(m.id) === 'late' : states.get(m.id) !== 'done'));
   // The "now" line goes before the first event that is still ahead.
   const firstAhead = now === null ? -1 : shown.findIndex((m) => new Date(m.scheduledAt).getTime() > now + LATE_AFTER_MS);
@@ -62,6 +63,12 @@ export default function MovementsPanel({
             <>
               {' · '}
               <span className="text-rose-600">{late} late</span>
+            </>
+          )}
+          {uncrewed > 0 && (
+            <>
+              {' · '}
+              <span className="text-amber-600">{uncrewed} without crew</span>
             </>
           )}
         </>

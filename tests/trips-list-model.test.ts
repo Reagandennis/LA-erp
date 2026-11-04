@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_LIST_QUERY,
+  STATUS_FILTERS,
   appendTripPage,
   applyListQuery,
   formatTripDate,
@@ -20,6 +21,13 @@ describe('trips list query in the URL', () => {
     expect(parseListQuery({ q: ' nairobi ', status: 'Active', sort: 'start-asc', tab: 'close-out' })).toEqual(query);
     // A repeated param is read once.
     expect(parseListQuery({ q: ['a', 'b'] })).toEqual({ ...DEFAULT_LIST_QUERY, q: 'a' });
+    // "All" is a pill of its own, since the default is Draft.
+    expect(parseListQuery(new URLSearchParams('status=All')).status).toBe('All');
+  });
+
+  it('opens on drafts, with "All" between the completed and cancelled pills', () => {
+    expect(DEFAULT_LIST_QUERY.status).toBe('Draft');
+    expect(STATUS_FILTERS).toEqual(['Draft', 'Planned', 'Active', 'Completed', 'All', 'Cancelled']);
   });
 
   it('falls back to the defaults for anything unknown or missing', () => {
@@ -35,22 +43,26 @@ describe('trips list query in the URL', () => {
 
     applyListQuery(params, DEFAULT_LIST_QUERY);
     expect(params.toString()).toBe('tab=close-out');
+
+    applyListQuery(params, { ...DEFAULT_LIST_QUERY, status: 'All' });
+    expect(params.toString()).toBe('tab=close-out&status=All');
   });
 
-  it('builds the API query for one page', () => {
+  it('builds the API query for one page: "All" is no status filter, the default pill is one', () => {
     expect(listPageSearchParams({ q: 'Omar', status: 'All', sort: 'start-asc' }, 2).toString()).toBe('q=Omar&sort=start-asc&page=2');
-    expect(listPageSearchParams(DEFAULT_LIST_QUERY, 1).toString()).toBe('page=1');
+    expect(listPageSearchParams(DEFAULT_LIST_QUERY, 1).toString()).toBe('status=Draft&page=1');
+    expect(listPageSearchParams({ q: '', status: 'All', sort: 'updated' }, 1).toString()).toBe('page=1');
   });
 
   it('keys each distinct query differently', () => {
     const keys = new Set([
       listQueryKey(DEFAULT_LIST_QUERY),
       listQueryKey({ ...DEFAULT_LIST_QUERY, q: 'a' }),
-      listQueryKey({ ...DEFAULT_LIST_QUERY, status: 'Draft' }),
+      listQueryKey({ ...DEFAULT_LIST_QUERY, status: 'All' }),
       listQueryKey({ ...DEFAULT_LIST_QUERY, sort: 'start-desc' }),
     ]);
     expect(keys.size).toBe(4);
-    expect(listQueryKey({ q: 'a', status: 'All', sort: 'updated' })).toBe(listQueryKey({ ...DEFAULT_LIST_QUERY, q: 'a' }));
+    expect(listQueryKey({ q: 'a', status: 'Draft', sort: 'updated' })).toBe(listQueryKey({ ...DEFAULT_LIST_QUERY, q: 'a' }));
   });
 });
 

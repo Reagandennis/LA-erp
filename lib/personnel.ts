@@ -27,6 +27,10 @@ export type PersonnelStatus = (typeof PERSONNEL_STATUSES)[number];
 function pickDepartment(value: unknown): Department {
   return (DEPARTMENTS as readonly string[]).includes(value as string) ? (value as Department) : 'Operations';
 }
+/** Drivers belong to Operations, whatever department was sent. */
+function departmentFor(roles: readonly string[], value: unknown): Department {
+  return roles.includes('Driver') ? 'Operations' : pickDepartment(value);
+}
 function pickStatus(value: unknown): PersonnelStatus {
   return (PERSONNEL_STATUSES as readonly string[]).includes(value as string) ? (value as PersonnelStatus) : 'Active';
 }
@@ -318,6 +322,7 @@ export async function createPersonnel(input: {
   const name = input.name.trim();
   if (!name) throw new Error('Name is required');
   const linkedUserId = await resolveUserId(input.userId, null);
+  const roles = normalizeRoles(input.roles);
 
   const row = await prisma.personnel.create({
     data: {
@@ -325,13 +330,13 @@ export async function createPersonnel(input: {
       email: trimOrNull(input.email),
       phone: trimOrNull(input.phone),
       role: trimOrNull(input.role),
-      department: pickDepartment(input.department),
+      department: departmentFor(roles, input.department),
       status: pickStatus(input.status),
       location: trimOrNull(input.location),
       manager: trimOrNull(input.manager),
       joinDate: parseDate(input.joinDate),
       skills: normalizeSkills(input.skills),
-      roles: normalizeRoles(input.roles),
+      roles,
       engagement: pickEngagement(input.engagement),
       supplierName: trimOrNull(input.supplierName),
       callSign: trimOrNull(input.callSign),
@@ -369,8 +374,9 @@ export async function updatePersonnel(
     notes?: string | null;
   },
 ): Promise<PersonnelSummary | null> {
-  const existing = await prisma.personnel.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.personnel.findUnique({ where: { id }, select: { id: true, roles: true } });
   if (!existing) return null;
+  const roles = patch.roles !== undefined ? normalizeRoles(patch.roles) : (existing.roles ?? []);
 
   const data: Record<string, unknown> = {};
   if (patch.name !== undefined) {
@@ -380,13 +386,14 @@ export async function updatePersonnel(
   if (patch.email !== undefined) data.email = trimOrNull(patch.email);
   if (patch.phone !== undefined) data.phone = trimOrNull(patch.phone);
   if (patch.role !== undefined) data.role = trimOrNull(patch.role);
-  if (patch.department !== undefined) data.department = pickDepartment(patch.department);
+  // A driver is in Operations whatever is sent, including when Driver is being added now.
+  if (patch.department !== undefined || roles.includes('Driver')) data.department = departmentFor(roles, patch.department);
   if (patch.status !== undefined) data.status = pickStatus(patch.status);
   if (patch.location !== undefined) data.location = trimOrNull(patch.location);
   if (patch.manager !== undefined) data.manager = trimOrNull(patch.manager);
   if (patch.joinDate !== undefined) data.joinDate = parseDate(patch.joinDate);
   if (patch.skills !== undefined) data.skills = normalizeSkills(patch.skills);
-  if (patch.roles !== undefined) data.roles = normalizeRoles(patch.roles);
+  if (patch.roles !== undefined) data.roles = roles;
   if (patch.engagement !== undefined) data.engagement = pickEngagement(patch.engagement);
   if (patch.supplierName !== undefined) data.supplierName = trimOrNull(patch.supplierName);
   if (patch.callSign !== undefined) data.callSign = trimOrNull(patch.callSign);

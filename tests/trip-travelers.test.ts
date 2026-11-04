@@ -9,19 +9,41 @@ const { tx, $queryRaw, transaction } = vi.hoisted(() => {
     customer: { findUnique: vi.fn() },
     tripItineraryItem: { createMany: vi.fn(), createManyAndReturn: vi.fn(), update: vi.fn() },
     tripItemTraveler: { createMany: vi.fn(), deleteMany: vi.fn() },
+    tripDay: { createMany: vi.fn() },
   };
   // The running reference number is reserved with raw SQL.
   const $queryRaw = vi.fn();
   return { tx, $queryRaw, transaction: vi.fn((fn: (client: typeof tx) => unknown) => fn({ ...tx, $queryRaw } as typeof tx)) };
 });
 
-vi.mock('server-only', () => ({}));
-vi.mock('../lib/prisma', () => ({
-  // Outside a transaction the trip is read through the same mock.
-  prisma: { $transaction: transaction, trip: { findUnique: (...args: unknown[]) => tx.trip.findUnique(...args) } },
-}));
+const { syncCrewGapNotifications } = vi.hoisted(() => ({ syncCrewGapNotifications: vi.fn() }));
 
-import { TripTravelerError, addTripItems, createTrip, updateTrip, updateTripItem } from '../lib/trips';
+vi.mock('server-only', () => ({}));
+vi.mock('../lib/trip-notifications', () => ({ syncCrewGapNotifications }));
+vi.mock('../lib/prisma', () => {
+  // Every driver, CPO and vehicle picked is on the Task Assignment register.
+  const registered = { count: async (args: { where: { id: { in: number[] } } }) => args.where.id.in.length };
+  return {
+    // Outside a transaction the trip is read through the same mock.
+    prisma: {
+      $transaction: transaction,
+      trip: { findUnique: (...args: unknown[]) => tx.trip.findUnique(...args) },
+      driver: registered,
+      officer: registered,
+      vehicle: registered,
+    },
+  };
+});
+
+import {
+  TripTravelerError,
+  addTripItems,
+  createTrip,
+  tripDatesWithoutDay,
+  tripDayKeys,
+  updateTrip,
+  updateTripItem,
+} from '../lib/trips';
 
 const tripRecord = {
   id: 7,
@@ -191,6 +213,78 @@ describe('createTrip references', () => {
   });
 });
 
+describe('createTrip itinerary days', () => {
+  beforeEach(() => {
+    for (const delegate of Object.values(tx)) {
+      for (const fn of Object.values(delegate)) fn.mockReset();
+    }
+    numbersFrom(2660, 2661);
+    tx.trackingSequence.upsert.mockResolvedValue({ year: 2026, lastNumber: 1 });
+    tx.trip.create.mockResolvedValue(tripRecord);
+    tx.trip.findUnique.mockResolvedValue(tripRecord);
+  });
+
+  it('opens the itinerary with one day per date from the start to the end', async () => {
+    await createTrip({ ...baseInput(), clientCode: 'ACME', startDate: '2026-11-29', endDate: '2026-12-02' });
+
+    expect(tx.tripDay.createMany).toHaveBeenCalledWith({
+      data: [
+        { tripId: 7, dateKey: '2026-11-29', dayNumber: 1 },
+        { tripId: 7, dateKey: '2026-11-30', dayNumber: 2 },
+        { tripId: 7, dateKey: '2026-12-01', dayNumber: 3 },
+        { tripId: 7, dateKey: '2026-12-02', dayNumber: 4 },
+      ],
+    });
+  });
+
+  it('adds no days while the dates are still TBD', async () => {
+    await createTrip({ ...baseInput(), clientCode: 'ACME', startDate: '2026-11-29', endDate: null });
+
+    expect(tx.tripDay.createMany).not.toHaveBeenCalled();
+  });
+
+  it('lists the dates of a trip in UTC, like the trip dates themselves, and never past the cap', () => {
+    expect(tripDayKeys('2026-11-03', '2026-11-03')).toEqual(['2026-11-03']);
+    expect(tripDayKeys(new Date('2026-02-27T00:00:00.000Z'), new Date('2026-03-01T00:00:00.000Z'))).toEqual([
+      '2026-02-27',
+      '2026-02-28',
+      '2026-03-01',
+    ]);
+    expect(tripDayKeys('2026-11-05', '2026-11-03')).toEqual([]);
+    expect(tripDayKeys(null, '2026-11-03')).toEqual([]);
+    expect(tripDayKeys('not a date', '2026-11-03')).toEqual([]);
+    expect(tripDayKeys('2026-01-01', '2026-12-31')).toHaveLength(60);
+  });
+});
+
+describe('trip dates after a day is deleted', () => {
+  const trip = { startDate: new Date('2026-11-10T00:00:00.000Z'), endDate: new Date('2026-11-13T00:00:00.000Z') };
+  const day = (dateKey: string | null) => ({ dateKey });
+
+  it('pulls the start in when the first day goes', () => {
+    expect(tripDatesWithoutDay(trip, day('2026-11-10'), [day('2026-11-11'), day('2026-11-12'), day('2026-11-13')])).toEqual({
+      startDate: new Date('2026-11-11T00:00:00.000Z'),
+    });
+  });
+
+  it('pulls the end in when the last day goes, even past a gap', () => {
+    expect(tripDatesWithoutDay(trip, day('2026-11-13'), [day('2026-11-10'), day('2026-11-11')])).toEqual({
+      endDate: new Date('2026-11-11T00:00:00.000Z'),
+    });
+  });
+
+  it('changes nothing for a middle day, an undated day, or the only dated day left', () => {
+    expect(tripDatesWithoutDay(trip, day('2026-11-11'), [day('2026-11-10'), day('2026-11-13')])).toBeNull();
+    expect(tripDatesWithoutDay(trip, day(null), [day('2026-11-11')])).toBeNull();
+    expect(tripDatesWithoutDay(trip, day('2026-11-10'), [])).toBeNull();
+    expect(tripDatesWithoutDay(trip, day('2026-11-10'), [day(null)])).toBeNull();
+  });
+
+  it('keeps the start when another day still has that date', () => {
+    expect(tripDatesWithoutDay(trip, day('2026-11-10'), [day('2026-11-10'), day('2026-11-13')])).toBeNull();
+  });
+});
+
 describe('event travellers', () => {
   // Lead Person (traveller 11) is on the trip through link 100.
   const dinner = {
@@ -262,6 +356,39 @@ describe('event travellers', () => {
     expect(tx.tripItineraryItem.createManyAndReturn).toHaveBeenCalled();
     expect(tx.tripTraveler.create).not.toHaveBeenCalled();
     expect(tx.tripItemTraveler.createMany).not.toHaveBeenCalled();
+  });
+
+  it('saves a movement without its crew and tells the desk what is missing', async () => {
+    syncCrewGapNotifications.mockClear();
+    const result = await addTripItems({
+      tripId: 7,
+      userId: 1,
+      isAdmin: false,
+      items: [{ description: 'Airport pick-up', quantity: 1, category: 'transportation', driverId: 1 }],
+    });
+
+    expect(result).not.toHaveProperty('error');
+    expect(syncCrewGapNotifications).toHaveBeenCalledWith({
+      trip: onTrip,
+      item: { id: 900, description: 'Airport pick-up' },
+      gaps: ['vehicle', 'CPO'],
+    });
+
+    syncCrewGapNotifications.mockClear();
+    await addTripItems({ tripId: 7, userId: 1, isAdmin: false, items: [{ description: 'Dinner', quantity: 1, category: 'activity' }] });
+    expect(syncCrewGapNotifications).not.toHaveBeenCalled();
+  });
+
+  it('follows the crew through an edit, withdrawing the note once it is complete', async () => {
+    const pickup = { ...dinner, id: 6, category: 'transportation', description: 'Airport pick-up', driverId: 1, details: null };
+    tx.trip.findUnique.mockResolvedValue({ ...onTrip, items: [dinner, pickup] });
+    syncCrewGapNotifications.mockClear();
+
+    await updateTripItem({ tripId: 7, itemId: 6, userId: 1, isAdmin: false, input: { vehicleId: 30, officerId: 7 } });
+
+    expect(syncCrewGapNotifications).toHaveBeenCalledWith(
+      expect.objectContaining({ item: { id: 6, description: 'Airport pick-up' }, gaps: [], before: ['vehicle', 'CPO'] }),
+    );
   });
 
   it("turns away another client's traveller", async () => {

@@ -156,8 +156,9 @@ function ResourcePicker({
 
 /**
  * Driver, vehicle and CPO for a movement, picked from Task Assignment's
- * registers. A driver and a vehicle are needed; the CPO isn't. An imported
- * record that only has them as text keeps working without being re-linked.
+ * registers. None is required to save: whatever is still missing is raised
+ * in the notification bell and on the ops dashboard until it's assigned. An
+ * imported record that only has them as text keeps working without being re-linked.
  */
 export function CrewFields({
   options,
@@ -186,7 +187,7 @@ export function CrewFields({
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <ResourcePicker
           label="Driver"
-          required={!legacyDriver}
+          required={false}
           placeholder="Choose a driver"
           options={options.drivers}
           value={driverId}
@@ -194,7 +195,7 @@ export function CrewFields({
         />
         <ResourcePicker
           label="Vehicle"
-          required={!legacyVehicle}
+          required={false}
           placeholder="Choose a vehicle"
           options={options.vehicles}
           value={vehicleId}

@@ -1903,7 +1903,7 @@ model Personnel {
   /// Operational roles this person can be assigned in. A person may hold
   /// several, e.g. ["CPO", "Driver"]. See PERSONNEL_ROLES in lib/personnel.ts.
   roles          String[]        @default([])
-  /// How this person is engaged: Employee | Vendor | Consultant | Contractor.
+  /// How this person is engaged: Employee | Vendor (older rows may still say Consultant or Contractor).
   engagement     String          @default("Employee")
   /// Vendor/consultancy that supplied them, when engagement is not Employee.
   supplierName   String?

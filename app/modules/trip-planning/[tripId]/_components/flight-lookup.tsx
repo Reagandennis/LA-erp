@@ -41,10 +41,13 @@ type LookupState =
  */
 export function FlightNumberLookup({
   value,
+  date,
   onChange,
   onPick,
 }: {
   value: string;
+  /** The event's "YYYY-MM-DD": FR24 is asked about the flight on that day. */
+  date: string | null;
   onChange: (value: string) => void;
   onPick: (candidate: FlightCandidate) => void;
 }) {
@@ -66,7 +69,9 @@ export function FlightNumberLookup({
     request.current = controller;
     setLookup({ state: 'loading' });
     try {
-      const response = await fetch(`/api/flight-radar/lookup?q=${encodeURIComponent(value.trim())}`, {
+      const params = new URLSearchParams({ q: value.trim() });
+      if (date) params.set('date', date);
+      const response = await fetch(`/api/flight-radar/lookup?${params}`, {
         credentials: 'include',
         signal: controller.signal,
         // The form shows the outcome itself.
@@ -109,7 +114,7 @@ export function FlightNumberLookup({
             type="button"
             onClick={() => void find()}
             disabled={!ready || lookup.state === 'loading'}
-            title="Fill the airline, airports, time and duration from FlightRadar24"
+            title={date ? 'Fill the airline, airports, times and duration from FlightRadar24 for the flight on this day' : 'Fill the airline, airports, time and duration from FlightRadar24'}
             className="shrink-0 rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
           >
             {lookup.state === 'loading' ? 'Looking…' : 'Look up'}
@@ -138,7 +143,9 @@ export function FlightNumberLookup({
         </ul>
       )}
       {lookup.state === 'none' && (
-        <p className="mt-1.5 text-xs text-amber-700">FlightRadar24 hasn’t seen {lookup.query} fly in the last ten days. Fill the flight in by hand.</p>
+        <p className="mt-1.5 text-xs text-amber-700">
+          FlightRadar24 hasn’t seen {lookup.query} fly{date ? ' on that day or' : ''} in the last ten days. Fill the flight in by hand.
+        </p>
       )}
       {lookup.state === 'error' && <p className="mt-1.5 text-xs text-rose-600">{lookup.message}</p>}
     </div>

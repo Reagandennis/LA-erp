@@ -154,7 +154,7 @@ function buildToastTitle(source: NotificationSource, type: string): string {
     return 'Invoice update';
   }
   if (source === 'trip') {
-    return 'Trip reminder';
+    return type === 'trip.item.crew-gap' ? 'Crew to assign' : 'Trip reminder';
   }
   if (source === 'escalation') {
     return 'Trip escalated';

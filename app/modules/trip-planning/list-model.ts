@@ -1,6 +1,6 @@
 import { APP_LOCALE } from '@/lib/locale';
 
-import { TRIP_SORTS, TRIP_STATUSES, type TripSort, type TripStatus, type TripStatusFilter, type TripSummary } from './types';
+import { TRIP_SORTS, type TripSort, type TripStatusFilter, type TripSummary } from './types';
 
 /**
  * What the Trips list is showing: the search box (settled), the status pill
@@ -13,7 +13,8 @@ export interface TripListQuery {
   sort: TripSort;
 }
 
-export const DEFAULT_LIST_QUERY: TripListQuery = { q: '', status: 'All', sort: 'updated' };
+/** The list opens on drafts: the trips still being put together. */
+export const DEFAULT_LIST_QUERY: TripListQuery = { q: '', status: 'Draft', sort: 'updated' };
 
 export const TRIP_SORT_OPTIONS: { value: TripSort; label: string }[] = [
   { value: 'updated', label: 'Recently updated' },
@@ -21,7 +22,8 @@ export const TRIP_SORT_OPTIONS: { value: TripSort; label: string }[] = [
   { value: 'start-desc', label: 'Starting latest' },
 ];
 
-export const STATUS_FILTERS: TripStatusFilter[] = ['All', ...TRIP_STATUSES];
+/** The status pills in order; "All" sits between the closed trips and the called-off ones. */
+export const STATUS_FILTERS: TripStatusFilter[] = ['Draft', 'Planned', 'Active', 'Completed', 'All', 'Cancelled'];
 
 type ParamSource = { get(name: string): string | null } | Record<string, string | string[] | undefined>;
 
@@ -40,7 +42,7 @@ export function parseListQuery(source: ParamSource): TripListQuery {
   const sort = readParam(source, 'sort');
   return {
     q,
-    status: status && (TRIP_STATUSES as string[]).includes(status) ? (status as TripStatus) : 'All',
+    status: status && (STATUS_FILTERS as string[]).includes(status) ? (status as TripStatusFilter) : DEFAULT_LIST_QUERY.status,
     sort: sort && (TRIP_SORTS as string[]).includes(sort) ? (sort as TripSort) : 'updated',
   };
 }
@@ -49,16 +51,19 @@ export function parseListQuery(source: ParamSource): TripListQuery {
 export function applyListQuery(params: URLSearchParams, query: TripListQuery): URLSearchParams {
   if (query.q) params.set('q', query.q);
   else params.delete('q');
-  if (query.status !== 'All') params.set('status', query.status);
+  if (query.status !== DEFAULT_LIST_QUERY.status) params.set('status', query.status);
   else params.delete('status');
   if (query.sort !== 'updated') params.set('sort', query.sort);
   else params.delete('sort');
   return params;
 }
 
-/** The `/api/trips` query string for one page of this query. */
+/** The `/api/trips` query string for one page of this query. The API has no "All": it is simply no status. */
 export function listPageSearchParams(query: TripListQuery, page: number): URLSearchParams {
-  const params = applyListQuery(new URLSearchParams(), query);
+  const params = new URLSearchParams();
+  if (query.q) params.set('q', query.q);
+  if (query.status !== 'All') params.set('status', query.status);
+  if (query.sort !== 'updated') params.set('sort', query.sort);
   params.set('page', String(page));
   return params;
 }

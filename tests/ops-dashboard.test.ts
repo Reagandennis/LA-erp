@@ -39,6 +39,7 @@ import {
   tripHealth,
 } from '../app/modules/ops-dashboard/ops-model';
 import { describeMutation } from '../app/ui/banner';
+import type { CrewRole } from '../lib/crew-gaps';
 import type { FleetVehicleRef, MaintenanceDto } from '../lib/fleet';
 import {
   type OpsMovement,
@@ -415,6 +416,7 @@ function movement(overrides: Partial<OpsMovement>): OpsMovement {
     scheduledAt: minutes(0),
     placeName: null,
     crew: null,
+    crewGaps: [],
     flightNumber: null,
     completed: false,
     canEdit: true,
@@ -507,6 +509,29 @@ describe('buildAttention', () => {
       ['info', '3 unread WhatsApp chats'],
     ]);
     expect(items[2]!.detail).toBe('40 min overdue · MCF-KEN-OCT-2661');
+  });
+
+  it('points out movements still ahead with crew to assign, once, by what is missing', () => {
+    const sections: Partial<OpsSections> = {
+      movements: [
+        movement({ description: 'Airport pickup', scheduledAt: minutes(60), crewGaps: ['vehicle', 'CPO'] }),
+        movement({ description: 'Hotel run', scheduledAt: minutes(120), crewGaps: ['CPO'] }),
+        // Done: nobody needs assigning any more.
+        movement({ scheduledAt: minutes(-90), completed: true, crewGaps: ['driver', 'vehicle', 'CPO'] }),
+      ],
+    };
+
+    const items = buildAttention(sections, NOW);
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        tone: 'warn',
+        panel: 'movements',
+        title: '2 movements with crew still to assign',
+        detail: 'No vehicle or CPO assigned · Airport pickup and 1 more',
+        href: '#ops-movements',
+      }),
+    ]);
   });
 
   it('has nothing to say about a quiet board', () => {
@@ -604,6 +629,7 @@ describe('trip health on the board', () => {
     scheduledAt: at,
     placeName: null,
     crew: null,
+    crewGaps: [] as CrewRole[],
     flightNumber: null,
     completed,
   });

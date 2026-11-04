@@ -103,6 +103,54 @@ export function nextDateKey(days: TripDaySummary[]): string | null {
   return parsed ? dateKey(addDays(parsed, 1)) : null;
 }
 
+/** Where an event with a date goes: a day the trip already has, or one to make for it first. */
+export interface EventDayPlan {
+  /** The day it lands on; null until `newDay` has been created. */
+  dayId: number | null;
+  /** No day has this date yet: add one here (the days API's placement options). */
+  newDay: { dateKey: string; afterDayId: number | null; atStart: boolean } | null;
+  /** The date is earlier than the trip starts or later than it ends. */
+  outside: 'before' | 'after' | null;
+  /** The trip date that has to move so the event is inside the trip. */
+  widen: { startDate: string } | { endDate: string } | null;
+}
+
+/**
+ * An event follows its date. The day the planner is on keeps it when the date
+ * matches, or when the itinerary is undated (those days aren't date-driven).
+ * Otherwise the event goes to the day with that date, and when there is none
+ * a day is to be made, in date order; a date outside the trip's own dates
+ * is flagged so the planner can be asked, and the trip widened to cover it.
+ */
+export function planEventDay(
+  trip: { startDate: string | null; endDate: string | null; days: TripDaySummary[] },
+  dateKey: string | null,
+  currentDayId: number | null,
+): EventDayPlan {
+  const stay: EventDayPlan = { dayId: currentDayId, newDay: null, outside: null, widen: null };
+  if (!dateKey) return stay;
+  const current = currentDayId != null ? trip.days.find((day) => day.id === currentDayId) : null;
+  if (current && (current.dateKey === dateKey || current.dateKey === null)) return stay;
+
+  const existing = trip.days.find((day) => day.dateKey === dateKey);
+  if (existing) return { ...stay, dayId: existing.id };
+
+  // Trip dates are UTC midnight, so the first ten characters are the calendar day.
+  const start = trip.startDate?.slice(0, 10) ?? null;
+  const end = trip.endDate?.slice(0, 10) ?? null;
+  const outside = start && dateKey < start ? 'before' : end && dateKey > end ? 'after' : null;
+  const widen = outside === 'before' ? { startDate: dateKey } : outside === 'after' ? { endDate: dateKey } : null;
+
+  const dated = [...trip.days].sort((a, b) => a.dayNumber - b.dayNumber).filter((day) => day.dateKey);
+  const before = [...dated].reverse().find((day) => (day.dateKey as string) < dateKey) ?? null;
+  return {
+    dayId: null,
+    newDay: { dateKey, afterDayId: before?.id ?? null, atStart: before === null && dated.length > 0 },
+    outside,
+    widen,
+  };
+}
+
 /** Distinct item types on a day, in first-appearance order — the rail's chips. */
 export function dayTypeChips(items: TripItineraryItemSummary[], cap = 6): string[] {
   const seen: string[] = [];

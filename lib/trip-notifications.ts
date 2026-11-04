@@ -3,8 +3,12 @@ import 'server-only';
 
 import { Prisma } from '@prisma/client';
 
+import { type CrewRole, crewGapLabel } from './crew-gaps';
 import { notifyNotificationsChanged } from './notification-events';
 import { prisma } from './prisma';
+
+/** A movement saved with a driver, vehicle or CPO still to assign. */
+export const CREW_GAP_TYPE = 'trip.item.crew-gap';
 
 export interface TripItineraryItemNotificationSummary {
   id: number;
@@ -79,6 +83,41 @@ export async function materializeDueTripReminders(userId: number): Promise<numbe
   });
 
   return due.length;
+}
+
+/**
+ * Tells the trip's owner and creator that a movement has crew still to assign,
+ * since the form no longer insists on it. The unread note is replaced when the
+ * gap changes and withdrawn once the crew is complete. Never throws: the event
+ * itself has already saved.
+ */
+export async function syncCrewGapNotifications(params: {
+  trip: { id: number; reference: string; ownerId: number | null; createdById: number };
+  item: { id: number; description: string };
+  gaps: CrewRole[];
+  /** What was missing before an edit; a new event has nothing before. */
+  before?: CrewRole[];
+}): Promise<void> {
+  const { trip, item, gaps } = params;
+  const before = params.before ?? [];
+  if (gaps.join() === before.join()) return;
+  try {
+    const recipients = [...new Set([trip.ownerId, trip.createdById].filter((id): id is number => id != null))];
+    await prisma.tripItineraryItemNotification.deleteMany({
+      where: { itemId: item.id, type: CREW_GAP_TYPE, readAt: null },
+    });
+    if (gaps.length > 0) {
+      // "No vehicle or CPO assigned" → "… — no vehicle or CPO assigned".
+      const label = crewGapLabel(gaps);
+      const message = `${trip.reference}: ${item.description} — ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+      await prisma.tripItineraryItemNotification.createMany({
+        data: recipients.map((userId) => ({ userId, itemId: item.id, type: CREW_GAP_TYPE, message })),
+      });
+    }
+    notifyNotificationsChanged(recipients);
+  } catch (error) {
+    console.error('[trip-notifications] crew gap note failed:', error);
+  }
 }
 
 type NotificationRow = {
