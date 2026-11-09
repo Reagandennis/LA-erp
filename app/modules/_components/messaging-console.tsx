@@ -169,6 +169,9 @@ function ArchiveIcon({ className = 'h-4 w-4' }: { className?: string }) {
 
 const KIND_LABEL: Record<Chat['kind'], string | null> = { dm: null, group: 'Group', channel: 'Channel' };
 
+type KindFilter = 'all' | Chat['kind'];
+const KIND_FILTER_LABEL: Record<Chat['kind'], string> = { dm: 'Chats', group: 'Groups', channel: 'Channels' };
+
 /** A mute that has not run out yet. The server drops expired ones, but a tab can outlive one. */
 function isMutedNow(mutedUntil: string | null): boolean {
   return mutedUntil !== null && new Date(mutedUntil).getTime() > Date.now();
@@ -313,6 +316,8 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
   const [creatingChat, setCreatingChat] = useState(false);
   /** The "Archived" section is folded away until opened. */
   const [showArchived, setShowArchived] = useState(false);
+  /** Which kinds of conversation the list shows: everything, or one of chats / groups / channels. */
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   /** Chat whose archive/pin/mute request is in flight. */
   const [stateBusy, setStateBusy] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -411,11 +416,32 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return sorted;
-    return sorted.filter((c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
-  }, [sorted, search]);
+    const ofKind = kindFilter === 'all' ? sorted : sorted.filter((c) => c.kind === kindFilter);
+    if (!q) return ofKind;
+    return ofKind.filter((c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+  }, [sorted, search, kindFilter]);
   const inbox = useMemo(() => filtered.filter((c) => !c.archived), [filtered]);
   const archived = useMemo(() => filtered.filter((c) => c.archived), [filtered]);
+
+  // The filter bar: every kind the account actually has, with a dot for unread
+  // activity that isn't muted or archived. Only shown once there is more than
+  // one kind to choose between.
+  const kindTabs = useMemo(() => {
+    const tabs: Array<{ key: KindFilter; label: string; unread: boolean }> = [];
+    for (const key of ['dm', 'group', 'channel'] as const) {
+      const ofKind = chats.filter((c) => c.kind === key);
+      if (ofKind.length === 0) continue;
+      tabs.push({
+        key,
+        label: KIND_FILTER_LABEL[key],
+        unread: ofKind.some((c) => c.unread && !c.archived && !isMutedNow(c.mutedUntil)),
+      });
+    }
+    if (tabs.length < 2) return [];
+    return [{ key: 'all' as const, label: 'All', unread: false }, ...tabs];
+  }, [chats]);
+  // A kind that disappears (last channel unfollowed) must not leave an empty filter behind.
+  const shownFilter: KindFilter = kindTabs.some((t) => t.key === kindFilter) ? kindFilter : 'all';
 
   const effectiveSelected = selectedId ?? sorted.find((c) => !c.archived)?.id ?? null;
   const activeChat = sorted.find((c) => c.id === effectiveSelected) ?? null;
@@ -958,6 +984,27 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                 {newChatError && <p className="mt-2 text-xs text-rose-600">{newChatError}</p>}
               </div>
             )}
+
+            {kindTabs.length > 0 && (
+              <div role="tablist" aria-label="Conversation type" className="mt-2 flex gap-1">
+                {kindTabs.map((tab) => {
+                  const selected = tab.key === shownFilter;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      onClick={() => setKindFilter(tab.key)}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${selected ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900'}`}
+                    >
+                      {tab.label}
+                      {tab.unread && !selected && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-label="unread" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {filtered.length === 0 ? (
@@ -965,7 +1012,9 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                 {status?.authenticated
                   ? search.trim()
                     ? 'No chats match that search.'
-                    : 'No conversations yet. Messages appear here as they arrive.'
+                    : shownFilter !== 'all'
+                      ? `No ${KIND_FILTER_LABEL[shownFilter].toLowerCase()} yet.`
+                      : 'No conversations yet. Messages appear here as they arrive.'
                   : `Configure ${config.title} on the server to load conversations.`}
               </p>
             ) : (
