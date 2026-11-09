@@ -5,6 +5,7 @@ import { startVisibleInterval } from '@/lib/visible-interval';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { setViewingChat } from '@/app/ui/messaging-alerts-store';
+import type { ChatStateAction, MuteDuration } from '@/lib/wacli';
 
 import AlertsMenu from './alerts-menu';
 import MessageMediaView, { type MessageMedia } from './message-media';
@@ -33,6 +34,12 @@ export interface MessagingConsoleConfig {
    * account switcher, "Add number" and "Unlink".
    */
   multiAccount?: boolean;
+  /**
+   * Chats can be archived, pinned and muted from here, through
+   * /api/<service>/chat-state (WhatsApp). The change is made on the account
+   * itself, so the phone shows it too.
+   */
+  chatActions?: boolean;
 }
 
 export interface MessagingConsoleProps {
@@ -71,10 +78,15 @@ interface Status {
 
 interface Chat {
   id: string;
-  kind: 'dm' | 'group';
+  /** `channel`: a WhatsApp Channel — followed, read-only. */
+  kind: 'dm' | 'group' | 'channel';
   name: string;
   lastMessageTs: string;
   unread: boolean;
+  archived: boolean;
+  pinned: boolean;
+  /** ISO instant the mute ends (year 9999 for an open-ended one); null when not muted. */
+  mutedUntil: string | null;
 }
 
 interface Message {
@@ -122,6 +134,162 @@ function GroupIcon() {
   );
 }
 
+function ChannelIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73" />
+    </svg>
+  );
+}
+
+/** Icons for a chat's state, small enough to sit beside its name. */
+function MutedIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.143 17.082a24.248 24.248 0 003.844.148m-3.844-.148a23.856 23.856 0 01-5.455-1.31 8.964 8.964 0 002.3-5.542m3.155 6.852a3 3 0 005.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 003.536-1.003A8.967 8.967 0 0118 9.75V9A6 6 0 006.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53" />
+    </svg>
+  );
+}
+
+function PinIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M16 3a1 1 0 01.78 1.625L15.5 6.22V11l2.5 2.5V15h-5v6l-1 1-1-1v-6H6v-1.5L8.5 11V6.22L7.22 4.625A1 1 0 018 3h8z" />
+    </svg>
+  );
+}
+
+function ArchiveIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+    </svg>
+  );
+}
+
+const KIND_LABEL: Record<Chat['kind'], string | null> = { dm: null, group: 'Group', channel: 'Channel' };
+
+/** A mute that has not run out yet. The server drops expired ones, but a tab can outlive one. */
+function isMutedNow(mutedUntil: string | null): boolean {
+  return mutedUntil !== null && new Date(mutedUntil).getTime() > Date.now();
+}
+
+/** "Muted" for an open-ended mute, otherwise when it lifts. */
+function muteLabel(mutedUntil: string): string {
+  const until = new Date(mutedUntil);
+  if (until.getUTCFullYear() >= 9999) return 'Muted';
+  const sameDay = until.toDateString() === new Date().toDateString();
+  return `Muted until ${sameDay ? timeOf(mutedUntil) : dayOf(mutedUntil)}`;
+}
+
+/**
+ * The "⋯" menu on a chat: mute (for a while or for good), pin, archive. Each
+ * choice is one request; the list updates from the server's reply.
+ */
+function ChatActionsMenu({
+  chat,
+  busy,
+  onAction,
+}: {
+  chat: Chat;
+  busy: boolean;
+  onAction: (action: ChatStateAction, duration?: MuteDuration) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const act = (action: ChatStateAction, duration?: MuteDuration) => {
+    setOpen(false);
+    onAction(action, duration);
+  };
+  const muted = isMutedNow(chat.mutedUntil);
+  const itemClass = 'flex w-full items-center px-3 py-1.5 text-left text-gray-700 transition hover:bg-gray-50';
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Options for ${chat.name}`}
+        title="Chat options"
+        disabled={busy}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
+      >
+        {busy ? (
+          <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+          </svg>
+        ) : (
+          <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="5" cy="12" r="2" />
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="19" cy="12" r="2" />
+          </svg>
+        )}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-xl border border-gray-100 bg-white py-1 text-sm shadow-lg"
+        >
+          {muted ? (
+            <button type="button" role="menuitem" onClick={() => act('unmute')} className={itemClass}>
+              Unmute
+            </button>
+          ) : (
+            <>
+              <p className="px-3 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Mute for</p>
+              <button type="button" role="menuitem" onClick={() => act('mute', '8h')} className={itemClass}>
+                8 hours
+              </button>
+              <button type="button" role="menuitem" onClick={() => act('mute', '1w')} className={itemClass}>
+                1 week
+              </button>
+              <button type="button" role="menuitem" onClick={() => act('mute', 'forever')} className={itemClass}>
+                Always
+              </button>
+            </>
+          )}
+          <div className="my-1 border-t border-gray-100" />
+          <button type="button" role="menuitem" onClick={() => act(chat.pinned ? 'unpin' : 'pin')} className={itemClass}>
+            {chat.pinned ? 'Unpin' : 'Pin'}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => act(chat.archived ? 'unarchive' : 'archive')}
+            className={itemClass}
+          >
+            {chat.archived ? 'Unarchive' : 'Archive'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MessagingConsole({ config, signIn, initialAccountId, initialChatId }: MessagingConsoleProps) {
   const base = `/api/${config.service}`;
   /** The account picked in the switcher; null means the server's default (the first linked). */
@@ -143,6 +311,10 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
   const [newChatTarget, setNewChatTarget] = useState('');
   const [newChatError, setNewChatError] = useState<string | null>(null);
   const [creatingChat, setCreatingChat] = useState(false);
+  /** The "Archived" section is folded away until opened. */
+  const [showArchived, setShowArchived] = useState(false);
+  /** Chat whose archive/pin/mute request is in flight. */
+  const [stateBusy, setStateBusy] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   /** Mirrors the open chat so the SSE handler doesn't need to re-subscribe. */
@@ -230,8 +402,11 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
   const shownAccountId = accountId ?? status?.accountId ?? null;
   const shownAccount = accounts.find((a) => a.id === shownAccountId) ?? null;
 
+  // Pinned chats stay on top, as on the phone; the rest follow by activity.
   const sorted = useMemo(() => {
-    return [...chats].sort((a, b) => +new Date(b.lastMessageTs) - +new Date(a.lastMessageTs));
+    return [...chats].sort(
+      (a, b) => Number(b.pinned) - Number(a.pinned) || +new Date(b.lastMessageTs) - +new Date(a.lastMessageTs),
+    );
   }, [chats]);
 
   const filtered = useMemo(() => {
@@ -239,9 +414,14 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
     if (!q) return sorted;
     return sorted.filter((c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
   }, [sorted, search]);
+  const inbox = useMemo(() => filtered.filter((c) => !c.archived), [filtered]);
+  const archived = useMemo(() => filtered.filter((c) => c.archived), [filtered]);
 
-  const effectiveSelected = selectedId ?? sorted[0]?.id ?? null;
+  const effectiveSelected = selectedId ?? sorted.find((c) => !c.archived)?.id ?? null;
   const activeChat = sorted.find((c) => c.id === effectiveSelected) ?? null;
+  // A search that only matches archived chats, or an archived chat on screen,
+  // opens the section so what's relevant isn't hidden.
+  const archivedOpen = showArchived || (search.trim() !== '' && archived.length > 0) || Boolean(activeChat?.archived);
 
   const loadThread = useCallback(
     async (id: string) => {
@@ -454,6 +634,37 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
     }
   };
 
+  /**
+   * Archive, pin or mute a chat. The server changes it on the account itself
+   * and returns the chat as the mirror now has it; a failure leaves the list
+   * as it was and explains why.
+   */
+  const changeChatState = async (chatId: string, action: ChatStateAction, duration?: MuteDuration) => {
+    if (stateBusy) return;
+    setStateBusy(chatId);
+    setError(null);
+    try {
+      const r = await fetch(scoped(`${base}/chat-state`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: chatId, action, ...(duration ? { duration } : {}) }),
+      });
+      const d = (await r.json().catch(() => null)) as { chat?: Chat | null; error?: string } | null;
+      if (!r.ok) {
+        setError(d?.error ?? `Could not ${action} the chat.`);
+        return;
+      }
+      const updated = d?.chat;
+      if (updated) setChats((prev) => prev.map((c) => (c.id === chatId ? updated : c)));
+      else await loadChats();
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setStateBusy(null);
+    }
+  };
+
   /** Unlink the account on screen, after the user confirms. */
   const unlinkAccount = async () => {
     if (!shownAccount || unlinking) return;
@@ -501,7 +712,77 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
   })();
 
   const isGroupThread = activeChat?.kind === 'group';
-  const canSend = Boolean(status?.authenticated);
+  // A channel is followed, not talked to: WhatsApp only lets its admins post.
+  const isChannelThread = activeChat?.kind === 'channel';
+  const canSend = Boolean(status?.authenticated) && !isChannelThread;
+  const activeMuted = activeChat ? isMutedNow(activeChat.mutedUntil) : false;
+
+  /** One row of the chat list, used by the inbox and the archived section alike. */
+  const renderChat = (c: Chat) => {
+    const active = c.id === effectiveSelected;
+    const muted = isMutedNow(c.mutedUntil);
+    const kindLabel = KIND_LABEL[c.kind];
+    const avatarClass =
+      c.kind === 'group'
+        ? 'bg-amber-100 text-amber-700'
+        : c.kind === 'channel'
+          ? 'bg-sky-100 text-sky-700'
+          : 'bg-primary/10 text-primary';
+    return (
+      <div
+        key={c.id}
+        className={`group flex items-center border-b border-gray-50 transition-colors ${active ? 'bg-primary/5' : 'hover:bg-gray-50'}`}
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedId(c.id)}
+          className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left"
+        >
+          <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${avatarClass}`}>
+            {c.kind === 'group' ? <GroupIcon /> : c.kind === 'channel' ? <ChannelIcon /> : initials(c.name)}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className={`truncate font-semibold ${muted ? 'text-gray-600' : 'text-gray-900'}`}>{c.name}</span>
+              {muted && (
+                <span className="shrink-0 text-gray-400" title={muteLabel(c.mutedUntil!)}>
+                  <MutedIcon />
+                  <span className="sr-only">{muteLabel(c.mutedUntil!)}</span>
+                </span>
+              )}
+              <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-gray-400">
+                {c.pinned && (
+                  <span title="Pinned">
+                    <PinIcon className="h-3 w-3" />
+                    <span className="sr-only">Pinned</span>
+                  </span>
+                )}
+                {dayOf(c.lastMessageTs)}
+              </span>
+            </span>
+            <span className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
+              {kindLabel && (
+                <span
+                  className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold ${c.kind === 'channel' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}
+                >
+                  {kindLabel}
+                </span>
+              )}
+              {c.unread && <span className={`h-2 w-2 shrink-0 rounded-full ${muted ? 'bg-gray-300' : 'bg-emerald-500'}`} />}
+              <span className="truncate">{c.id}</span>
+            </span>
+          </span>
+        </button>
+        {config.chatActions && (
+          <div
+            className={`pr-2 ${active ? '' : 'md:opacity-0 md:transition-opacity md:focus-within:opacity-100 md:group-hover:opacity-100'}`}
+          >
+            <ChatActionsMenu chat={c} busy={stateBusy === c.id} onAction={(a, d) => void changeChatState(c.id, a, d)} />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="screen-fit flex flex-col bg-gray-50/50">
@@ -682,48 +963,47 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
             {filtered.length === 0 ? (
               <p className="px-4 py-12 text-center text-sm text-gray-400">
                 {status?.authenticated
-                  ? 'No conversations yet. Messages appear here as they arrive.'
+                  ? search.trim()
+                    ? 'No chats match that search.'
+                    : 'No conversations yet. Messages appear here as they arrive.'
                   : `Configure ${config.title} on the server to load conversations.`}
               </p>
             ) : (
-              filtered.map((c) => {
-                const active = c.id === effectiveSelected;
-                const group = c.kind === 'group';
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setSelectedId(c.id)}
-                    className={`flex w-full items-center gap-3 border-b border-gray-50 px-4 py-3 text-left transition-colors ${active ? 'bg-primary/5' : 'hover:bg-gray-50'}`}
-                  >
-                    <span
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${group ? 'bg-amber-100 text-amber-700' : 'bg-primary/10 text-primary'}`}
+              <>
+                {inbox.map(renderChat)}
+                {inbox.length === 0 && (
+                  <p className="px-4 py-8 text-center text-sm text-gray-400">Everything here is archived.</p>
+                )}
+                {archived.length > 0 && (
+                  <div className="border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setShowArchived((v) => !v)}
+                      aria-expanded={archivedOpen}
+                      className="flex w-full items-center gap-2 px-4 py-2.5 text-xs font-semibold text-gray-500 transition hover:bg-gray-50"
                     >
-                      {group ? <GroupIcon /> : initials(c.name)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5">
-                        <span className="truncate font-semibold text-gray-900">{c.name}</span>
-                        <span className="ml-auto shrink-0 text-[11px] text-gray-400">{dayOf(c.lastMessageTs)}</span>
-                      </span>
-                      <span className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
-                        {group && (
-                          <span className="inline-flex items-center gap-0.5 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                            Group
-                          </span>
-                        )}
-                        {c.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />}
-                        <span className="truncate">{c.id}</span>
-                      </span>
-                    </span>
-                  </button>
-                );
-              })
+                      <ArchiveIcon />
+                      Archived
+                      <span className="ml-auto tabular-nums">{archived.length}</span>
+                      <svg
+                        className={`h-3.5 w-3.5 transition-transform ${archivedOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {archivedOpen && archived.map(renderChat)}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </aside>
 
-        <section className={`${selectedId ? 'flex' : 'hidden md:flex'} min-h-0 flex-1 flex-col bg-gray-50`}>
+        <section className={`${selectedId ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 flex-col bg-gray-50`}>
           {activeChat ? (
             <>
               <div className="flex items-center gap-3 border-b border-gray-100 bg-white px-4 py-3">
@@ -738,17 +1018,46 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                   </svg>
                 </button>
                 <span
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${isGroupThread ? 'bg-amber-100 text-amber-700' : 'bg-primary/10 text-primary'}`}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${isGroupThread ? 'bg-amber-100 text-amber-700' : isChannelThread ? 'bg-sky-100 text-sky-700' : 'bg-primary/10 text-primary'}`}
                 >
-                  {isGroupThread ? <GroupIcon /> : initials(activeChat.name)}
+                  {isGroupThread ? <GroupIcon /> : isChannelThread ? <ChannelIcon /> : initials(activeChat.name)}
                 </span>
-                <div className="min-w-0">
-                  <p className="flex items-center gap-1.5 truncate font-semibold text-gray-900">
-                    {activeChat.name}
-                    {isGroupThread && <span className="text-xs font-normal text-amber-700">· group</span>}
+                <div className="min-w-0 flex-1">
+                  <p className="flex min-w-0 items-center gap-1.5 font-semibold text-gray-900">
+                    <span className="truncate">{activeChat.name}</span>
+                    {isGroupThread && <span className="shrink-0 text-xs font-normal text-amber-700">· group</span>}
+                    {isChannelThread && <span className="shrink-0 text-xs font-normal text-sky-700">· channel</span>}
+                    {activeChat.pinned && (
+                      <span className="text-gray-400" title="Pinned">
+                        <PinIcon className="h-3 w-3" />
+                      </span>
+                    )}
                   </p>
-                  <p className="truncate text-xs text-gray-500">{activeChat.id}</p>
+                  <p className="flex items-center gap-1.5 truncate text-xs text-gray-500">
+                    {activeMuted && (
+                      <span className="inline-flex items-center gap-1 text-gray-400">
+                        <MutedIcon className="h-3 w-3" />
+                        {muteLabel(activeChat.mutedUntil!)}
+                        <span aria-hidden="true">·</span>
+                      </span>
+                    )}
+                    {activeChat.archived && (
+                      <span className="inline-flex items-center gap-1 text-gray-400">
+                        <ArchiveIcon className="h-3 w-3" />
+                        Archived
+                        <span aria-hidden="true">·</span>
+                      </span>
+                    )}
+                    <span className="truncate">{activeChat.id}</span>
+                  </p>
                 </div>
+                {config.chatActions && (
+                  <ChatActionsMenu
+                    chat={activeChat}
+                    busy={stateBusy === activeChat.id}
+                    onAction={(a, d) => void changeChatState(activeChat.id, a, d)}
+                  />
+                )}
               </div>
 
               <div ref={scrollRef} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-4 py-4 sm:px-6">
@@ -789,6 +1098,12 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                 )}
               </div>
 
+              {isChannelThread ? (
+                <div className="flex items-center justify-center gap-2 border-t border-gray-100 bg-white px-4 py-3.5 text-sm text-gray-500">
+                  <ChannelIcon />
+                  Channels are read-only here — only the channel&apos;s admins can post.
+                </div>
+              ) : (
               <div className="flex items-center gap-2 border-t border-gray-100 bg-white p-3">
                 <input
                   ref={fileRef}
@@ -836,6 +1151,7 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                   {sending ? '…' : 'Send'}
                 </button>
               </div>
+              )}
             </>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">

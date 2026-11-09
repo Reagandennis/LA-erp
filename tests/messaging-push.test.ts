@@ -6,7 +6,7 @@ const { create, upsert } = vi.hoisted(() => ({ create: vi.fn(), upsert: vi.fn() 
 vi.mock('../lib/prisma', () => ({
   prisma: {
     messagingMessage: { create, findMany: vi.fn(), count: vi.fn(), findFirst: vi.fn() },
-    messagingChat: { upsert, findMany: vi.fn(), count: vi.fn(), updateMany: vi.fn() },
+    messagingChat: { upsert, findMany: vi.fn(async () => []), count: vi.fn(), updateMany: vi.fn() },
   },
 }));
 

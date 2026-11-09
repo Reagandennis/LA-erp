@@ -36,7 +36,7 @@ interface Preview {
   messageId: string;
   chatId: string;
   chatName: string;
-  chatKind: 'dm' | 'group';
+  chatKind: 'dm' | 'group' | 'channel';
   senderName: string;
   text: string;
   mediaKind: string | null;

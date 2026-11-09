@@ -15,7 +15,7 @@ import {
   upsertChats,
   type IngestMessage,
 } from './messaging-repo';
-import type { MediaKind, StoredMedia, StoredMessage } from './messaging-store';
+import { type ChatKind, type MediaKind, MUTED_FOREVER, type StoredMedia, type StoredMessage } from './messaging-store';
 import { getMedia, markChatRead } from './wacli';
 import { runWacli } from './wacli-runtime';
 
@@ -265,8 +265,10 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
   const chatId = raw.ChatJID || raw.Chat;
   const messageId = raw.MsgID || raw.ID;
   if (!messageId || !chatId || raw.DeletedForMe) return null;
+  // Status updates arrive as a pseudo-chat; they are not a conversation.
+  if (chatId.endsWith('@broadcast')) return null;
 
-  const isGroup = chatId.endsWith('@g.us');
+  const kind = whatsappChatKind(chatId);
   const caption = raw.MediaCaption || raw.Media?.Caption || '';
   const text = raw.Text || caption;
   const mediaType = (raw.MediaType || raw.Media?.Type || '').toLowerCase();
@@ -287,24 +289,47 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
   // the bare JID when there is none. The sender's name is only a usable chat
   // name for a direct chat *they* sent — on our own messages it would be us.
   const chatLabel = raw.ChatName && raw.ChatName !== chatId ? raw.ChatName : '';
-  const senderLabel = !isGroup && !raw.FromMe ? raw.SenderName || '' : '';
+  const senderLabel = kind === 'dm' && !raw.FromMe ? raw.SenderName || '' : '';
   const local = chatId.split('@')[0] || chatId;
-  const numberLabel = !isGroup && /^\d+$/.test(local) ? `+${local}` : local;
+  const numberLabel = kind === 'dm' && /^\d+$/.test(local) ? `+${local}` : local;
 
   const realName = chatName || chatLabel || senderLabel;
+
+  // A channel post carries no sender of its own: it is the channel speaking.
+  const sender = kind === 'channel' ? realName || 'Channel' : raw.SenderName || raw.SenderJID || 'Unknown';
 
   return {
     chatId,
     chatName: realName || numberLabel,
     chatNameIsFallback: !realName,
-    chatKind: isGroup ? 'group' : 'dm',
+    chatKind: kind,
     messageId,
-    senderName: raw.FromMe ? 'You' : raw.SenderName || raw.SenderJID || 'Unknown',
+    senderName: raw.FromMe ? 'You' : sender,
     fromMe: Boolean(raw.FromMe),
     text: raw.Revoked ? 'This message was deleted' : text,
     at: raw.Timestamp ? new Date(raw.Timestamp) : new Date(),
     media,
   };
+}
+
+/** What a WhatsApp JID's server part says the chat is. Channels are `@newsletter`. */
+export function whatsappChatKind(jid: string): ChatKind {
+  if (jid.endsWith('@g.us')) return 'group';
+  if (jid.endsWith('@newsletter')) return 'channel';
+  return 'dm';
+}
+
+/** wacli's chat kinds that the mirror carries. Status, broadcast lists and bots are left out. */
+const WACLI_KINDS: Record<string, ChatKind> = { dm: 'dm', group: 'group', newsletter: 'channel' };
+
+/**
+ * wacli's `muted_until` as the mirror stores it: 0 is not muted, -1 is muted
+ * with no end, anything else is the unix second the mute lifts.
+ */
+export function wacliMutedUntil(value: number | undefined): Date | null {
+  if (!value) return null;
+  if (value < 0) return MUTED_FOREVER;
+  return new Date(value * 1000);
 }
 
 /** Run a read-only wacli query for one account and unwrap its JSON envelope. */
@@ -377,7 +402,7 @@ async function backfillWhatsApp(account: LinkedAccount): Promise<void> {
 
   for (const chat of coverage?.coverage ?? []) {
     const chatId = chat.chat_jid;
-    if (!chatId || (chat.kind !== 'dm' && chat.kind !== 'group')) continue;
+    if (!chatId || !WACLI_KINDS[chat.kind ?? '']) continue;
     const ignored = skipped.get(chatId) ?? new Set<string>();
     const missing = (chat.message_count ?? 0) - (mirrored.get(chatId) ?? 0) - ignored.size;
     if (missing <= 0) continue;
@@ -468,6 +493,10 @@ interface WacliRawChat {
   /** True for counted unread messages and for a chat marked unread by hand. */
   unread?: boolean;
   unread_count?: number;
+  archived?: boolean;
+  pinned?: boolean;
+  /** 0 not muted, -1 muted indefinitely, otherwise a unix second. */
+  muted_until?: number;
 }
 
 declare global {
@@ -497,35 +526,40 @@ export function syncReadToPhone(account: { id: number; handle: string }, chatId:
 }
 
 /**
- * Mirror wacli's chat list: names, kind, last activity and unread state.
- * wacli reports an unsaved number's name as its bare JID; show the number
- * instead. Archived chats are included: their messages are mirrored, so their
- * names and read state should be too.
+ * Mirror wacli's chat list: names, kind, last activity, unread state and the
+ * archived/pinned/muted flags. wacli reports an unsaved number's name as its
+ * bare JID; show the number instead. Archived chats are included: their
+ * messages are mirrored, so their names and read state should be too.
  */
 async function refreshWhatsAppChats(account: LinkedAccount): Promise<void> {
   const observedAt = new Date();
   const chats = (await wacliQuery<WacliRawChat[]>(account, ['chats', 'list', '--limit', '2000'], 60_000)) ?? [];
+  const mirrored = chats.filter(
+    (c): c is WacliRawChat & { jid: string } => Boolean(c.jid) && Boolean(WACLI_KINDS[c.kind ?? '']),
+  );
   await upsertChats(
     account.id,
-    chats
-      .filter((c): c is WacliRawChat & { jid: string } => Boolean(c.jid) && (c.kind === 'dm' || c.kind === 'group'))
-      .map((c) => {
-        const at = c.last_message_ts ? new Date(c.last_message_ts) : null;
-        return {
-          chatId: c.jid,
-          name: whatsappDisplayName(c.jid, c.name),
-          kind: c.kind === 'group' ? ('group' as const) : ('dm' as const),
-          lastMessageAt: at && !Number.isNaN(at.getTime()) ? at : undefined,
-        };
-      }),
+    mirrored.map((c) => {
+      const at = c.last_message_ts ? new Date(c.last_message_ts) : null;
+      return {
+        chatId: c.jid,
+        name: whatsappDisplayName(c.jid, c.name),
+        kind: WACLI_KINDS[c.kind!]!,
+        lastMessageAt: at && !Number.isNaN(at.getTime()) ? at : undefined,
+        state: {
+          archived: Boolean(c.archived),
+          pinned: Boolean(c.pinned),
+          mutedUntil: wacliMutedUntil(c.muted_until),
+        },
+      };
+    }),
   );
 
   // wacli keeps the phone's unread state: live arrivals add to it, and a read
   // on the phone clears it. A chat marked unread by hand has no count, so it
   // shows as one.
   const unread = new Map<string, number>();
-  for (const c of chats) {
-    if (!c.jid || (c.kind !== 'dm' && c.kind !== 'group')) continue;
+  for (const c of mirrored) {
     unread.set(c.jid, Math.max(c.unread_count ?? 0, c.unread ? 1 : 0));
   }
   const recent = new Set<string>();

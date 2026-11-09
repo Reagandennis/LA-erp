@@ -495,7 +495,7 @@ const searchers: Searcher[] = [
         return {
           id: `chat-${r.accountId}-${r.chatId}`,
           title: r.name,
-          subtitle: join(account.name, r.kind === 'group' ? 'Group' : null, account.label),
+          subtitle: join(account.name, r.kind === 'group' ? 'Group' : r.kind === 'channel' ? 'Channel' : null, account.label),
           href: chatHref(account.provider, r.accountId, r.chatId),
         };
       });

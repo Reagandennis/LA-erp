@@ -364,6 +364,9 @@ export async function listChats(userId: number, limit = 200): Promise<StoredChat
       name: dialog.title || dialog.name || String(id),
       lastMessageTs: ts.toISOString(),
       unread: (dialog.unreadCount ?? 0) > 0,
+      archived: Boolean(dialog.archived),
+      pinned: Boolean(dialog.pinned),
+      mutedUntil: null,
     });
   }
   return chats;

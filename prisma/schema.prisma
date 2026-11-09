@@ -840,10 +840,19 @@ model MessagingChat {
   accountId     Int
   /// Provider-side chat id (JID, phone number, `group:<id>`, Telegram peer id).
   chatId        String
+  /// 'dm' | 'group' | 'channel' (a WhatsApp Channel, which wacli calls a newsletter)
   kind          String           @default("dm")
   name          String
   lastMessageAt DateTime
   unreadCount   Int              @default(0)
+  /// Chat state mirrored from the phone and changed from the console. Muted
+  /// chats are kept out of the unread badges and raise no alerts; archived
+  /// chats are listed under a collapsed "Archived" heading.
+  archived      Boolean          @default(false)
+  pinned        Boolean          @default(false)
+  /// Null when not muted. A mute with no end date is stored as 9999-12-31
+  /// (`MUTED_FOREVER` in lib/messaging-store.ts).
+  mutedUntil    DateTime?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   account       MessagingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)

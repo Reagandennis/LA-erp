@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { publish } from './chat-bus';
-import type { StoredChat, StoredMedia, StoredMessage } from './messaging-store';
+import { type ChatKind, isMuted, type StoredChat, type StoredMedia, type StoredMessage } from './messaging-store';
 import { prisma } from './prisma';
 
 /**
@@ -22,7 +22,7 @@ export interface IngestMessage {
    * the name an existing one already has.
    */
   chatNameIsFallback?: boolean;
-  chatKind: 'dm' | 'group';
+  chatKind: ChatKind;
   messageId: string;
   senderName: string;
   fromMe: boolean;
@@ -40,6 +40,20 @@ export interface IngestOptions {
    * actually unread, and that is adopted separately (`applyProviderUnread`).
    */
   history?: boolean;
+}
+
+/** The stored `kind` column back to the shared union; anything unexpected is a direct chat. */
+export function toChatKind(kind: string | null | undefined): ChatKind {
+  return kind === 'group' || kind === 'channel' ? kind : 'dm';
+}
+
+/**
+ * Chats whose unread messages count towards badges and alerts. A muted chat
+ * stays quiet until its mute ends, and an archived one is out of the way by
+ * choice — both still show their own unread marker in the list.
+ */
+export function countsTowardsUnread(now = new Date()) {
+  return { archived: false, OR: [{ mutedUntil: null }, { mutedUntil: { lte: now } }] };
 }
 
 function toStoredMessage(row: {
@@ -94,7 +108,7 @@ export async function ingestMessages(
   // carry hundreds of messages for the same conversation.
   const touched = new Map<
     string,
-    { kind: 'dm' | 'group'; newest: Date; name: string | null; fallbackName: string; unread: number }
+    { kind: ChatKind; newest: Date; name: string | null; fallbackName: string; unread: number }
   >();
 
   for (const item of batch) {
@@ -168,10 +182,19 @@ export async function ingestMessages(
       count: fresh.length,
       // History and catch-up update badges quietly; only a live arrival alerts.
       live: !options.history,
-      preview: options.history ? null : previewOf(fresh, touched),
+      preview: options.history ? null : previewOf(fresh, touched, await mutedAmong(accountId, chatIds)),
     });
   }
   return fresh;
+}
+
+/** Which of these chats are muted right now — a live message in one raises no alert. */
+async function mutedAmong(accountId: number, chatIds: string[]): Promise<Set<string>> {
+  const rows = await prisma.messagingChat.findMany({
+    where: { accountId, chatId: { in: chatIds }, mutedUntil: { not: null } },
+    select: { chatId: true, mutedUntil: true },
+  });
+  return new Set(rows.filter((r) => isMuted(r.mutedUntil)).map((r) => r.chatId));
 }
 
 /** What an alert shows for a live batch: the newest message someone else sent. */
@@ -180,7 +203,7 @@ export interface MessagePreview {
   messageId: string;
   chatId: string;
   chatName: string;
-  chatKind: 'dm' | 'group';
+  chatKind: ChatKind;
   senderName: string;
   text: string;
   mediaKind: StoredMedia['kind'] | null;
@@ -190,9 +213,10 @@ const PREVIEW_CHARS = 140;
 
 function previewOf(
   fresh: StoredMessage[],
-  chats: Map<string, { kind: 'dm' | 'group'; name: string | null; fallbackName: string }>,
+  chats: Map<string, { kind: ChatKind; name: string | null; fallbackName: string }>,
+  muted: Set<string> = new Set(),
 ): MessagePreview | null {
-  const inbound = fresh.filter((m) => !m.fromMe);
+  const inbound = fresh.filter((m) => !m.fromMe && !muted.has(m.chatId));
   const newest = inbound.reduce<StoredMessage | null>(
     (best, m) => (!best || m.timestamp >= best.timestamp ? m : best),
     null,
@@ -231,7 +255,7 @@ export async function recordOutgoing(
     {
       chatId: message.chatId,
       chatName: chat?.name ?? message.chatId.split('@')[0] ?? message.chatId,
-      chatKind: chat?.kind === 'group' ? 'group' : 'dm',
+      chatKind: toChatKind(chat?.kind),
       messageId: message.messageId,
       senderName: 'You',
       fromMe: true,
@@ -251,21 +275,38 @@ export async function recordOutgoing(
  * written, and last activity only ever moves forward: a provider's view can
  * lag a message we already mirrored.
  */
+export interface ChatState {
+  archived: boolean;
+  pinned: boolean;
+  /** Null when not muted; `MUTED_FOREVER` for a mute with no end. */
+  mutedUntil: Date | null;
+}
+
 export async function upsertChats(
   accountId: number,
-  chats: Array<{ chatId: string; name: string; kind: 'dm' | 'group'; lastMessageAt?: Date }>,
+  chats: Array<{ chatId: string; name: string; kind: ChatKind; lastMessageAt?: Date; state?: ChatState }>,
 ): Promise<void> {
   if (chats.length === 0) return;
   const rows = await prisma.messagingChat.findMany({
     where: { accountId, chatId: { in: chats.map((c) => c.chatId) } },
-    select: { chatId: true, name: true, kind: true, lastMessageAt: true },
+    select: { chatId: true, name: true, kind: true, lastMessageAt: true, archived: true, pinned: true, mutedUntil: true },
   });
   const existing = new Map(rows.map((r) => [r.chatId, r]));
 
   for (const chat of chats) {
     const row = existing.get(chat.chatId);
     const newer = Boolean(chat.lastMessageAt && (!row || chat.lastMessageAt > row.lastMessageAt));
-    if (row && row.name === chat.name && row.kind === chat.kind && !newer) continue;
+    // The provider's view of archived/pinned/muted is authoritative when it
+    // reports one: the phone is where most of those changes are made.
+    const state = chat.state;
+    const stateChanged = Boolean(
+      state &&
+        row &&
+        (row.archived !== state.archived ||
+          row.pinned !== state.pinned ||
+          (row.mutedUntil?.getTime() ?? null) !== (state.mutedUntil?.getTime() ?? null)),
+    );
+    if (row && row.name === chat.name && row.kind === chat.kind && !newer && !stateChanged) continue;
 
     await prisma.messagingChat.upsert({
       where: { accountId_chatId: { accountId, chatId: chat.chatId } },
@@ -275,29 +316,68 @@ export async function upsertChats(
         kind: chat.kind,
         name: chat.name,
         lastMessageAt: chat.lastMessageAt ?? new Date(0),
+        ...(state ?? {}),
       },
       update: {
         name: chat.name,
         kind: chat.kind,
         ...(newer ? { lastMessageAt: chat.lastMessageAt } : {}),
+        ...(state ?? {}),
       },
     });
   }
 }
 
-export async function listChats(accountId: number, limit = 500): Promise<StoredChat[]> {
-  const rows = await prisma.messagingChat.findMany({
-    where: { accountId },
-    orderBy: { lastMessageAt: 'desc' },
-    take: limit,
-  });
-  return rows.map((r) => ({
+/**
+ * Record a state change made from the console, so the list reflects it at
+ * once rather than on the next provider refresh (which then agrees).
+ */
+export async function setChatState(
+  accountId: number,
+  chatId: string,
+  patch: Partial<ChatState>,
+  ownerUserId?: number,
+): Promise<StoredChat | null> {
+  const { count } = await prisma.messagingChat.updateMany({ where: { accountId, chatId }, data: patch });
+  if (count === 0) return null;
+  if (ownerUserId) {
+    publish(ownerUserId, 'messaging', { accountId, chatIds: [chatId], count: 0, live: false, preview: null });
+  }
+  const row = await prisma.messagingChat.findUnique({ where: { accountId_chatId: { accountId, chatId } } });
+  return row ? toStoredChat(row) : null;
+}
+
+function toStoredChat(r: {
+  chatId: string;
+  kind: string;
+  name: string;
+  lastMessageAt: Date;
+  unreadCount: number;
+  archived: boolean;
+  pinned: boolean;
+  mutedUntil: Date | null;
+}): StoredChat {
+  return {
     id: r.chatId,
-    kind: r.kind === 'group' ? 'group' : 'dm',
+    kind: toChatKind(r.kind),
     name: r.name,
     lastMessageTs: r.lastMessageAt.toISOString(),
     unread: r.unreadCount > 0,
-  }));
+    archived: r.archived,
+    pinned: r.pinned,
+    // A mute that has run out is simply not a mute.
+    mutedUntil: isMuted(r.mutedUntil) ? r.mutedUntil!.toISOString() : null,
+  };
+}
+
+/** Every chat of one account, pinned ones first, then by latest activity. */
+export async function listChats(accountId: number, limit = 500): Promise<StoredChat[]> {
+  const rows = await prisma.messagingChat.findMany({
+    where: { accountId },
+    orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }],
+    take: limit,
+  });
+  return rows.map(toStoredChat);
 }
 
 /**
@@ -387,12 +467,15 @@ export async function counts(accountId: number): Promise<{ chats: number; messag
   return { chats, messages };
 }
 
-/** How many chats have unread messages, per account — the account switcher's badges. */
+/**
+ * How many chats have unread messages, per account — the account switcher's
+ * badges. Muted and archived chats are left out, as on the phone.
+ */
 export async function unreadChatCounts(accountIds: number[]): Promise<Map<number, number>> {
   if (accountIds.length === 0) return new Map();
   const rows = await prisma.messagingChat.groupBy({
     by: ['accountId'],
-    where: { accountId: { in: accountIds }, unreadCount: { gt: 0 } },
+    where: { accountId: { in: accountIds }, unreadCount: { gt: 0 }, ...countsTowardsUnread() },
     _count: { _all: true },
   });
   return new Map(rows.map((r) => [r.accountId, r._count._all]));

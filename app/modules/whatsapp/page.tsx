@@ -33,11 +33,12 @@ export default async function WhatsappPage({
       config={{
         service: 'whatsapp',
         title: 'WhatsApp',
-        subtitle: 'Client & group conversations',
-        searchPlaceholder: 'Search chats & groups…',
+        subtitle: 'Client, group & channel conversations',
+        searchPlaceholder: 'Search chats, groups & channels…',
         connectionNoun: 'Account',
         newChatPlaceholder: '+254712345678',
         multiAccount: true,
+        chatActions: true,
       }}
     />
   );

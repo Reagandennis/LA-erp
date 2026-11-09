@@ -18,6 +18,7 @@ import { listFleetVehicles, listMaintenance, listVehicleOdometers } from './flee
 import { getMapWorkspace } from './map-store';
 import type { MapCategoryDto, MapDeviceTagDto, MapGeofenceDto, TrackedDevice } from './map-types';
 import { listAccounts } from './messaging-accounts';
+import { countsTowardsUnread, toChatKind } from './messaging-repo';
 import { OPS_PANELS, type OpsPanelKey, PANEL_MODULE } from './ops-panels';
 import { getOrganizationSettings } from './organization';
 import { prisma } from './prisma';
@@ -169,7 +170,7 @@ export interface OpsChat {
   accountId: number;
   chatId: string;
   name: string;
-  kind: 'dm' | 'group';
+  kind: 'dm' | 'group' | 'channel';
   lastMessageAt: string;
   unread: number;
   preview: { text: string; fromMe: boolean; senderName: string; mediaKind: string | null } | null;
@@ -627,7 +628,9 @@ async function loadWhatsapp(user: AccessUser): Promise<OpsWhatsapp> {
       orderBy: { lastMessageAt: 'desc' },
       take: CHAT_LIMIT,
     }),
-    prisma.messagingChat.count({ where: { accountId: { in: accountIds }, unreadCount: { gt: 0 } } }),
+    prisma.messagingChat.count({
+      where: { accountId: { in: accountIds }, unreadCount: { gt: 0 }, ...countsTowardsUnread() },
+    }),
   ]);
 
   // Each chat's newest message in one round trip: an index lookup per chat
@@ -656,7 +659,7 @@ async function loadWhatsapp(user: AccessUser): Promise<OpsWhatsapp> {
         accountId: c.accountId,
         chatId: c.chatId,
         name: c.name || c.chatId,
-        kind: c.kind === 'group' ? 'group' : 'dm',
+        kind: toChatKind(c.kind),
         lastMessageAt: c.lastMessageAt.toISOString(),
         unread: c.unreadCount,
         preview: m ? { text: m.text.slice(0, 140), fromMe: m.fromMe, senderName: m.senderName, mediaKind: m.mediaKind } : null,

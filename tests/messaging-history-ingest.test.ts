@@ -56,6 +56,8 @@ describe('ingestMessages', () => {
     for (const fn of [create, upsert, updateMany, findMany, publish]) fn.mockReset();
     insertSucceeds();
     upsert.mockResolvedValue({});
+    // No chat is muted unless a test says so.
+    findMany.mockResolvedValue([]);
     updateMany.mockResolvedValue({ count: 0 });
   });
 

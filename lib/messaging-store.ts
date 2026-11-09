@@ -13,7 +13,20 @@ import 'server-only';
  * process manager), not on a serverless platform. History resets on restart.
  */
 
-export type ChatKind = 'dm' | 'group';
+/** `channel` is a WhatsApp Channel (a "newsletter" in wacli): read-only, broadcast to followers. */
+export type ChatKind = 'dm' | 'group' | 'channel';
+
+/**
+ * A mute with no end date. wacli reports it as `muted_until: -1`; the mirror
+ * stores this far-future instant so one nullable column covers every case.
+ */
+export const MUTED_FOREVER = new Date('9999-12-31T00:00:00.000Z');
+
+/** Whether a stored `mutedUntil` is still in force. */
+export function isMuted(mutedUntil: Date | string | null | undefined, now = Date.now()): boolean {
+  if (!mutedUntil) return false;
+  return new Date(mutedUntil).getTime() > now;
+}
 
 export interface StoredChat {
   id: string;
@@ -21,6 +34,10 @@ export interface StoredChat {
   name: string;
   lastMessageTs: string;
   unread: boolean;
+  archived: boolean;
+  pinned: boolean;
+  /** ISO instant the mute ends (`MUTED_FOREVER` for an open-ended one); null when not muted. */
+  mutedUntil: string | null;
 }
 
 export type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker';

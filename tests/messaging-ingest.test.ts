@@ -297,6 +297,7 @@ describe('wacliToIngest', () => {
 
   it('drops deleted-for-me and id-less rows', async () => {
     const { wacliToIngest } = await import('../lib/messaging-ingest');
+    expect(wacliToIngest({ ChatJID: 'status@broadcast', MsgID: 'S1', Text: 'status' })).toBeNull();
     expect(wacliToIngest({ ChatJID: '1@s.whatsapp.net', MsgID: 'X', DeletedForMe: true })).toBeNull();
     expect(wacliToIngest({ ChatJID: '1@s.whatsapp.net', Text: 'no id' })).toBeNull();
   });
@@ -461,6 +462,40 @@ describe('whatsapp catch-up', () => {
     // Archived chats are refreshed too: their messages are mirrored.
     const list = execFile.mock.calls.map((c) => c[1] as string[]).find((a) => a.includes('chats'))!;
     expect(list).not.toContain('--no-archived');
+  });
+
+  it('mirrors channels alongside chats, with the archived, pinned and muted flags', async () => {
+    wacli((args) => {
+      if (args.includes('coverage')) return { coverage: [] };
+      return [
+        { jid: CHAT, kind: 'dm', name: 'Ada', archived: true, pinned: false, muted_until: 0 },
+        { jid: '3@g.us', kind: 'group', name: 'Ops', archived: false, pinned: true, muted_until: -1 },
+        { jid: '9@newsletter', kind: 'newsletter', name: 'News', muted_until: 1_900_000_000, unread: true, unread_count: 4 },
+        { jid: '5@bot', kind: 'unknown', name: 'Meta AI' },
+        { jid: 'status@broadcast', kind: 'broadcast' },
+      ];
+    });
+
+    await pass();
+
+    const [, chats] = upsertChats.mock.calls[0]!;
+    expect(chats).toEqual([
+      expect.objectContaining({ chatId: CHAT, kind: 'dm', state: { archived: true, pinned: false, mutedUntil: null } }),
+      expect.objectContaining({
+        chatId: '3@g.us',
+        kind: 'group',
+        state: { archived: false, pinned: true, mutedUntil: new Date('9999-12-31T00:00:00.000Z') },
+      }),
+      expect.objectContaining({
+        chatId: '9@newsletter',
+        kind: 'channel',
+        name: 'News',
+        state: { archived: false, pinned: false, mutedUntil: new Date(1_900_000_000 * 1000) },
+      }),
+    ]);
+    // A channel's unread state is adopted like any other chat's.
+    const counts = applyProviderUnread.mock.calls[0]![2] as Map<string, number>;
+    expect(counts.get('9@newsletter')).toBe(4);
   });
 
   it('keeps a chat just read in the app from being re-marked unread by a stale count', async () => {

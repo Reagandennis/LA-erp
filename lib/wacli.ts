@@ -292,6 +292,50 @@ export async function markChatRead(account: string, jid: string): Promise<void> 
   }
 }
 
+// ---- Chat state (archive / pin / mute) ----
+
+export type ChatStateAction = 'archive' | 'unarchive' | 'pin' | 'unpin' | 'mute' | 'unmute';
+
+export const CHAT_STATE_ACTIONS: readonly ChatStateAction[] = ['archive', 'unarchive', 'pin', 'unpin', 'mute', 'unmute'];
+
+/**
+ * How long a mute lasts, as the console offers it. wacli takes a Go duration;
+ * `0` means no end, which is also what it does with no duration at all.
+ */
+export const MUTE_DURATIONS = {
+  '8h': 8 * 60 * 60,
+  '1w': 7 * 24 * 60 * 60,
+  forever: 0,
+} as const;
+
+export type MuteDuration = keyof typeof MUTE_DURATIONS;
+
+/**
+ * Archive, pin or mute a chat on the WhatsApp account itself, exactly as the
+ * phone would, so every device agrees. wacli hands the change to the running
+ * `sync --follow` over its delegate socket; it needs no store lock of its own.
+ *
+ * `--chat` also resolves names and numbers, but a full JID matches one chat
+ * only, so there is never an ambiguous pick. wacli's own `--timeout` sits a
+ * little inside ours so a slow app-state write fails with a reason rather
+ * than being killed mid-flight.
+ */
+export async function setChatState(
+  account: string,
+  jid: string,
+  action: ChatStateAction,
+  duration: MuteDuration = 'forever',
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const args = ['--timeout', '25s', 'chats', action, '--chat', jid];
+  if (action === 'mute') args.push('--duration', `${MUTE_DURATIONS[duration]}s`);
+  try {
+    await run<unknown>(args, 30_000, account);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : `wacli chats ${action} failed` };
+  }
+}
+
 /** Send a text message to a chat or group by JID. */
 export function sendText(account: string, jid: string, message: string): Promise<SendResult> {
   return send(account, ['text', '--to', jid, '--message', message], 60_000);
