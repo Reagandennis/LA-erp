@@ -185,20 +185,20 @@ describe('trips collection route', () => {
     expect(createTrip).not.toHaveBeenCalled();
   });
 
-  it('requires at least one traveller', async () => {
+  it('opens a trip before its travellers are known', async () => {
     requireRequestAuth.mockResolvedValue({
       auth: { user: { id: 1, roles: [] } },
       response: null,
     });
+    createTrip.mockResolvedValue({ id: 100, reference: 'TR-2026-0100', trackingCode: 'LA-2026-0100', items: [] });
 
-    const req = new NextRequest('http://localhost/api/trips', {
-      method: 'POST',
-      body: JSON.stringify({ customerId: 1, country: 'Kenya', travelers: [], title: 'X', items: [] }),
-    });
-    const r = await POST(req);
-    expect(r.status).toBe(400);
-    expect((await r.json()).error).toBe('Add at least one traveller');
-    expect(createTrip).not.toHaveBeenCalled();
+    // Sent empty, or not at all: either way the trip is created with nobody on it yet.
+    for (const body of [{ customerId: 1, country: 'Kenya', travelers: [], title: 'X', items: [] }, { customerId: 1, country: 'Kenya', title: 'X', items: [] }]) {
+      createTrip.mockClear();
+      const r = await POST(new NextRequest('http://localhost/api/trips', { method: 'POST', body: JSON.stringify(body) }));
+      expect(r.status).toBe(201);
+      expect(createTrip).toHaveBeenCalledWith(expect.objectContaining({ travelers: [] }));
+    }
   });
 
   it("returns 400 when a traveller isn't the client's", async () => {

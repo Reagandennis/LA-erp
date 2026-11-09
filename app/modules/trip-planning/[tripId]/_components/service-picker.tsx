@@ -4,10 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { APP_LOCALE } from '@/lib/locale';
 import {
+  MAX_SERVICES_PER_EVENT,
   SERVICE_CATEGORIES,
   SERVICE_COUNTRIES,
   defaultServiceCategory,
+  joinServices,
   serviceMatches,
+  splitServices,
   transportTypeForService,
   type ServiceOption,
 } from '@/lib/service-catalog';
@@ -49,7 +52,16 @@ function rememberCountry(country: string) {
   }
 }
 
-/** Copies the picked service onto the event; a transport event takes its Type from it too. */
+/** The services already on the event. */
+export function pickedServices(editor: EditorState) {
+  return splitServices(editor.details.service, editor.details.serviceCode);
+}
+
+/**
+ * Adds the picked service to the event (an event can sell several); `null`
+ * clears them all. A transport event takes its Type from the service just
+ * picked. Picking a service that is already on the event changes nothing.
+ */
 export function servicePatch(editor: EditorState, service: ServiceOption | null): Partial<EditorState> {
   const details = { ...editor.details };
   if (!service) {
@@ -57,17 +69,39 @@ export function servicePatch(editor: EditorState, service: ServiceOption | null)
     delete details.serviceCode;
     return { details };
   }
-  details.service = service.name;
-  details.serviceCode = service.code ?? '';
+  const current = pickedServices(editor);
+  const already = current.some((s) => (service.code ? s.code === service.code : s.name === service.name));
+  const next = already || current.length >= MAX_SERVICES_PER_EVENT ? current : [...current, { name: service.name, code: service.code ?? '' }];
+  const joined = joinServices(next);
+  details.service = joined.service;
+  if (joined.serviceCode) details.serviceCode = joined.serviceCode;
+  else delete details.serviceCode;
   const type = editor.category === 'transportation' ? transportTypeForService(service) : null;
   if (type) details.mode = type;
   return { details };
 }
 
+/** Takes one service off the event, leaving the others in order. */
+export function removeServicePatch(editor: EditorState, index: number): Partial<EditorState> {
+  const details = { ...editor.details };
+  const next = pickedServices(editor).filter((_, i) => i !== index);
+  if (next.length === 0) {
+    delete details.service;
+    delete details.serviceCode;
+    return { details };
+  }
+  const joined = joinServices(next);
+  details.service = joined.service;
+  if (joined.serviceCode) details.serviceCode = joined.serviceCode;
+  else delete details.serviceCode;
+  return { details };
+}
+
 /**
- * The standardized service an event sells, picked from Products & Services,
+ * The standardized services an event sells, picked from Products & Services,
  * so the itinerary uses the catalog's names: "Airport Transfer - SUV Executive
- * - Nairobi (NBO)" rather than whatever was typed.
+ * - Nairobi (NBO)" rather than whatever was typed. One event can carry
+ * several — a transfer and the meet-and-greet that goes with it.
  */
 export default function ServicePicker({
   editor,
@@ -88,8 +122,10 @@ export default function ServicePicker({
   const [country, setCountry] = useState('');
   const [category, setCategory] = useState<string>(() => defaultServiceCategory(editor.category) ?? '');
 
-  const name = editor.details.service ?? '';
-  const code = editor.details.serviceCode ?? '';
+  const picked = pickedServices(editor);
+  const pickedCodes = new Set(picked.map((s) => s.code).filter(Boolean));
+  const pickedNames = new Set(picked.map((s) => s.name));
+  const full = picked.length >= MAX_SERVICES_PER_EVENT;
 
   useEffect(() => {
     if (!open || services) return;
@@ -116,10 +152,7 @@ export default function ServicePicker({
   const matches = useMemo(
     () =>
       (services ?? []).filter(
-        (s) =>
-          (!country || s.country === country) &&
-          (!category || s.category === category) &&
-          serviceMatches(s, query),
+        (s) => (!country || s.country === country) && (!category || s.category === category) && serviceMatches(s, query),
       ),
     [services, country, category, query],
   );
@@ -137,43 +170,49 @@ export default function ServicePicker({
     setOpen(false);
   };
 
-  const fieldClass =
-    'w-full rounded-lg bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30';
+  const isPicked = (service: ServiceOption) => (service.code ? pickedCodes.has(service.code) : pickedNames.has(service.name));
+
+  const fieldClass = 'w-full rounded-lg bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30';
 
   return (
     <div className="block">
-      <span className="text-xs font-medium text-gray-500">Service</span>
-      {name ? (
-        <div className="mt-1 flex items-start gap-3 rounded-lg border border-primary/15 bg-primary/5 px-3 py-2">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-gray-900">{name}</p>
-            {code && <p className="font-mono text-[11px] text-gray-500">{code}</p>}
-          </div>
-          <button type="button" onClick={openPicker} className="text-xs font-medium text-primary hover:underline">
-            Change
-          </button>
-          <button
-            type="button"
-            onClick={() => patch(servicePatch(editor, null))}
-            className="text-xs font-medium text-gray-500 hover:text-gray-700"
-          >
-            Remove
-          </button>
-        </div>
-      ) : (
-        !open && (
-          <button
-            type="button"
-            onClick={openPicker}
-            className="mt-1 flex w-full items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-2.5 text-left text-sm text-gray-500 transition hover:border-primary/40 hover:text-primary"
-          >
-            <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
-            </svg>
-            Pick the service from Products &amp; Services
-          </button>
-        )
+      <span className="text-xs font-medium text-gray-500">{picked.length > 1 ? 'Services' : 'Service'}</span>
+
+      {picked.length > 0 && (
+        <ul className="mt-1 space-y-1.5">
+          {picked.map((service, index) => (
+            <li key={`${service.code || service.name}-${index}`} className="flex items-start gap-3 rounded-lg border border-primary/15 bg-primary/5 px-3 py-2">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">{index + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900">{service.name}</p>
+                {service.code && <p className="font-mono text-[11px] text-gray-500">{service.code}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={() => patch(removeServicePatch(editor, index))}
+                aria-label={`Remove ${service.name}`}
+                className="text-xs font-medium text-gray-500 hover:text-rose-600"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {!open && !full && (
+        <button
+          type="button"
+          onClick={openPicker}
+          className={`flex w-full items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-2.5 text-left text-sm text-gray-500 transition hover:border-primary/40 hover:text-primary ${picked.length > 0 ? 'mt-1.5' : 'mt-1'}`}
+        >
+          <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+          </svg>
+          {picked.length > 0 ? 'Add another service' : 'Pick the service from Products & Services'}
+        </button>
+      )}
+      {full && !open && <p className="mt-1.5 text-[11px] text-gray-400">An event can carry up to {MAX_SERVICES_PER_EVENT} services.</p>}
 
       {open && (
         <div className="mt-2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -228,27 +267,32 @@ export default function ServicePicker({
             <p className="px-3 py-4 text-sm text-gray-500">Loading the catalog…</p>
           ) : (
             <ul className="max-h-64 divide-y divide-gray-50 overflow-y-auto">
-              {matches.slice(0, SHOWN).map((service) => (
-                <li key={service.id}>
-                  <button
-                    type="button"
-                    onClick={() => pick(service)}
-                    className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-primary/5"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-gray-900">{service.name}</span>
-                      <span className="block text-[11px] text-gray-500">
-                        {[service.code, service.unitOfMeasure, country ? null : service.country].filter(Boolean).join(' · ')}
+              {matches.slice(0, SHOWN).map((service) => {
+                const taken = isPicked(service);
+                return (
+                  <li key={service.id}>
+                    <button
+                      type="button"
+                      disabled={taken}
+                      onClick={() => pick(service)}
+                      className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-primary/5 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900">{service.name}</span>
+                        <span className="block text-[11px] text-gray-500">
+                          {[service.code, service.unitOfMeasure, country ? null : service.country].filter(Boolean).join(' · ')}
+                          {taken && ' · on this event'}
+                        </span>
                       </span>
-                    </span>
-                    {showCost && service.defaultUnitPrice && service.currency ? (
-                      <span className="shrink-0 text-xs tabular-nums text-gray-600">
-                        {service.defaultUnitPrice.toLocaleString(APP_LOCALE, { style: 'currency', currency: service.currency })}
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
+                      {showCost && service.defaultUnitPrice && service.currency ? (
+                        <span className="shrink-0 text-xs tabular-nums text-gray-600">
+                          {service.defaultUnitPrice.toLocaleString(APP_LOCALE, { style: 'currency', currency: service.currency })}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
               {matches.length === 0 && (
                 <li className="px-3 py-4 text-center text-sm text-gray-500">
                   {services.length === 0 ? 'Products & Services has no active services yet.' : 'No service matches.'}

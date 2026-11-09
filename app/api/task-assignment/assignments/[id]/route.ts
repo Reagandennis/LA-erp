@@ -47,7 +47,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ item });
   } catch (error) {
     if (error instanceof ResourceConflictError) {
-      return NextResponse.json({ error: error.message, conflict: true }, { status: 409 });
+      return NextResponse.json({ error: error.message, conflict: true, conflicts: error.conflicts }, { status: 409 });
     }
     const message = error instanceof Error ? error.message : 'Could not update assignment';
     return NextResponse.json({ error: message }, { status: 400 });

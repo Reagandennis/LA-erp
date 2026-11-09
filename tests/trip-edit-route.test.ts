@@ -96,11 +96,12 @@ describe('editing a trip', () => {
     expect(actions()).toEqual(['trip.status.changed']);
   });
 
-  it('refuses to empty the trip of travellers', async () => {
+  it('lets the planner take everyone off a trip whose party is not settled', async () => {
+    updateTrip.mockResolvedValue(trip('Draft'));
+
     const response = await patch({ travelers: [] });
 
-    expect(response.status).toBe(400);
-    expect((await response.json()).error).toBe('Keep at least one traveller');
-    expect(updateTrip).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(updateTrip.mock.calls[0]![0].input).toMatchObject({ travelers: [] });
   });
 });

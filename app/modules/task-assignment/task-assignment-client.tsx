@@ -1,6 +1,19 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+
+import Link from 'next/link';
+
+import { addDays, dateKey, dayDiff, parseDateKey, rangeOfDays, startOfWeek } from '@/lib/date-grid';
+import {
+  conflictsFor,
+  describeConflict,
+  type Engagement,
+  engagementHref,
+  formatWindow,
+  occupiedDays,
+  type ResourceKind,
+} from '@/lib/resource-availability';
 
 import {
   ASSIGNMENT_STATUSES,
@@ -10,15 +23,18 @@ import {
   type AssignmentSummary,
   type DriverSummary,
   type OfficerSummary,
+  type ResourceConflict,
   type TaskAssignmentData,
+  type TripOption,
   type VehicleSummary,
 } from './types';
 
-type Tab = 'dashboard' | 'assignments' | 'vehicles' | 'drivers' | 'officers';
+type Tab = 'dashboard' | 'availability' | 'assignments' | 'vehicles' | 'drivers' | 'officers';
 type ResourceTab = 'vehicles' | 'drivers' | 'officers';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
+  { key: 'availability', label: 'Availability' },
   { key: 'assignments', label: 'Assignments' },
   { key: 'vehicles', label: 'Cars' },
   { key: 'drivers', label: 'Drivers' },
@@ -63,6 +79,8 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
   const [error, setError] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<Tab | null>(null);
   const [editAssignment, setEditAssignment] = useState<AssignmentSummary | null>(null);
+  /** What the server refused on the last save: the resources that were already booked. */
+  const [serverConflicts, setServerConflicts] = useState<ResourceConflict[]>([]);
 
   const reload = async () => {
     try {
@@ -82,6 +100,7 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
   ): Promise<boolean> => {
     setBusy(true);
     setError(null);
+    setServerConflicts([]);
     try {
       const res = await fetch(url, {
         method,
@@ -90,7 +109,16 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
         body: body ? JSON.stringify(body) : undefined,
       });
       if (!res.ok) {
-        const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await res.json().catch(() => null)) as
+          | { error?: string; conflict?: boolean; conflicts?: ResourceConflict[] }
+          | null;
+        // A double booking is shown beside the pickers, not as a general error.
+        if (res.status === 409 && payload?.conflicts?.length) {
+          setServerConflicts(payload.conflicts);
+          // The screen's data may be behind: refresh so the pickers agree with the server.
+          await reload();
+          return false;
+        }
         setError(payload?.error ?? 'Something went wrong.');
         return false;
       }
@@ -196,7 +224,8 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
           <button
             onClick={() => {
               setError(null);
-              setOpenForm(tab === 'dashboard' ? 'assignments' : tab);
+              setServerConflicts([]);
+              setOpenForm(tab === 'dashboard' || tab === 'availability' ? 'assignments' : tab);
             }}
             className="self-start md:self-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors"
             style={{ backgroundColor: BRAND }}
@@ -204,7 +233,7 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            {tab === 'assignments' || tab === 'dashboard'
+            {tab === 'assignments' || tab === 'dashboard' || tab === 'availability'
               ? 'New assignment'
               : `Add ${TABS.find((t) => t.key === tab)?.label.toLowerCase()}`}
           </button>
@@ -251,6 +280,7 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
         </div>
 
         {tab === 'dashboard' && <Dashboard data={data} view={assignmentView} q={q} />}
+        {tab === 'availability' && <AvailabilityGrid data={data} q={q} />}
 
         {error && (
           <div className="mb-4 flex items-start gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-700">
@@ -274,6 +304,7 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
             send={send}
             onEdit={(a) => {
               setError(null);
+              setServerConflicts([]);
               setEditAssignment(a);
             }}
           />
@@ -296,12 +327,14 @@ export default function TaskAssignmentClient({ initialData }: { initialData: Tas
           data={data}
           busy={busy}
           error={error}
+          serverConflicts={serverConflicts}
           send={send}
           existing={editAssignment}
           onClose={() => {
             setOpenForm(null);
             setEditAssignment(null);
             setError(null);
+            setServerConflicts([]);
           }}
         />
       )}
@@ -426,11 +459,11 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-function SubmitButton({ busy, label }: { busy: boolean; label: string }) {
+function SubmitButton({ busy, label, disabled = false }: { busy: boolean; label: string; disabled?: boolean }) {
   return (
     <button
       type="submit"
-      disabled={busy}
+      disabled={busy || disabled}
       className="w-full py-3 rounded-xl text-sm font-semibold text-white shadow-sm disabled:opacity-60"
       style={{ backgroundColor: BRAND }}
     >
@@ -570,7 +603,11 @@ function AssignmentList({
                 </span>
                 {a.trip && <span className="text-xs text-gray-400">{a.trip.reference}</span>}
               </div>
-              {a.trip && <p className="text-xs text-gray-500 mt-0.5">{a.trip.customerName}</p>}
+              {a.trip && (
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {a.trip.customerName} · {formatWindow({ from: a.trip.startDate, to: a.trip.endDate })}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <StatusSelect
@@ -613,10 +650,14 @@ function ResourceChip({ label, value }: { label: string; value: string | null })
   );
 }
 
+/** Assignments in these states hold their resources; the others free them. */
+const HOLDING_STATUSES = new Set(['Planned', 'Confirmed', 'Active']);
+
 function AssignmentForm({
   data,
   busy,
   error,
+  serverConflicts,
   send,
   existing,
   onClose,
@@ -624,6 +665,7 @@ function AssignmentForm({
   data: TaskAssignmentData;
   busy: boolean;
   error: string | null;
+  serverConflicts: ResourceConflict[];
   send: Sender;
   existing?: AssignmentSummary | null;
   onClose: () => void;
@@ -639,19 +681,69 @@ function AssignmentForm({
 
   // When editing a trip that is no longer in the active list (e.g. completed),
   // keep it selectable so the assignment can still be edited.
-  const tripOptions = [...data.trips];
+  const tripOptions: TripOption[] = [...data.trips];
   if (existing?.trip && !tripOptions.some((t) => t.id === existing.trip!.id)) {
-    tripOptions.unshift({
-      id: existing.trip.id,
-      reference: existing.trip.reference,
-      title: existing.trip.title,
-      status: existing.trip.status,
-      customerName: existing.trip.customerName,
-    });
+    tripOptions.unshift(existing.trip);
   }
+
+  // Who is already booked on the chosen trip's days. Worked out here from the
+  // same rules the server applies, so the prompt appears as soon as a busy
+  // car or person is picked rather than after a failed save.
+  const trip = tripOptions.find((t) => t.id === form.tripId) ?? null;
+  const window = { from: trip?.startDate ?? null, to: trip?.endDate ?? null };
+  const holds = HOLDING_STATUSES.has(form.status);
+  const clashes = (kind: ResourceKind, resourceId: number): Engagement[] =>
+    holds && resourceId && trip
+      ? conflictsFor(data.engagements, {
+          kind,
+          resourceId,
+          tripId: trip.id,
+          window,
+          excludeAssignmentId: existing?.id ?? null,
+        })
+      : [];
+  const busyNote = (kind: ResourceKind, id: number): string => {
+    const found = clashes(kind, id);
+    return found.length > 0 ? ` — busy ${formatWindow(found[0]!)} on ${found[0]!.reference}` : '';
+  };
+  const picked = {
+    vehicle: {
+      id: form.vehicleId,
+      label: (() => {
+        const v = data.vehicles.find((x) => x.id === form.vehicleId);
+        return v ? `Car ${v.registration}` : 'This car';
+      })(),
+    },
+    driver: {
+      id: form.driverId,
+      label: (() => {
+        const d = data.drivers.find((x) => x.id === form.driverId);
+        return d ? `Driver ${d.name}` : 'This driver';
+      })(),
+    },
+    officer: {
+      id: form.officerId,
+      label: (() => {
+        const o = data.officers.find((x) => x.id === form.officerId);
+        return o ? `Officer ${o.name}` : 'This officer';
+      })(),
+    },
+  };
+  /** The prompt under a picker: what we can see locally, or what the server just refused. */
+  const noticeFor = (kind: ResourceKind): string | null => {
+    const { id, label } = picked[kind];
+    if (!id) return null;
+    const local = clashes(kind, id);
+    if (local.length > 0) return describeConflict(label, kind, local);
+    const refused = serverConflicts.find((c) => c.kind === kind && c.resourceId === id);
+    return refused?.message ?? null;
+  };
+  const notices = { vehicle: noticeFor('vehicle'), driver: noticeFor('driver'), officer: noticeFor('officer') };
+  const blocked = Boolean(notices.vehicle || notices.driver || notices.officer);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (blocked) return;
     const payload = {
       tripId: form.tripId || undefined,
       vehicleId: form.vehicleId || null,
@@ -683,39 +775,64 @@ function AssignmentForm({
                 </option>
               ))}
             </select>
+            {trip && (
+              <p className="mt-1.5 text-xs text-gray-500">
+                {trip.startDate && trip.endDate
+                  ? `Occupies ${formatWindow(window)}. Busy cars and people are marked in the lists below.`
+                  : 'This trip has no dates yet, so anyone booked elsewhere counts as busy until it does.'}
+              </p>
+            )}
           </div>
           <div>
             {fieldLabel('Car')}
-            <select className={inputClass} value={form.vehicleId} onChange={(e) => setForm({ ...form, vehicleId: Number(e.target.value) })}>
+            <select
+              className={`${inputClass} ${notices.vehicle ? 'border-amber-300 bg-amber-50/40' : ''}`}
+              value={form.vehicleId}
+              onChange={(e) => setForm({ ...form, vehicleId: Number(e.target.value) })}
+            >
               <option value={0}>— None —</option>
               {data.vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.registration} · {v.type} {v.status !== 'Available' ? `(${v.status})` : ''}
+                  {busyNote('vehicle', v.id)}
                 </option>
               ))}
             </select>
+            <ConflictNotice message={notices.vehicle} />
           </div>
           <div>
             {fieldLabel('Driver')}
-            <select className={inputClass} value={form.driverId} onChange={(e) => setForm({ ...form, driverId: Number(e.target.value) })}>
+            <select
+              className={`${inputClass} ${notices.driver ? 'border-amber-300 bg-amber-50/40' : ''}`}
+              value={form.driverId}
+              onChange={(e) => setForm({ ...form, driverId: Number(e.target.value) })}
+            >
               <option value={0}>— None —</option>
               {data.drivers.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name} {d.status !== 'Available' ? `(${d.status})` : ''}
+                  {busyNote('driver', d.id)}
                 </option>
               ))}
             </select>
+            <ConflictNotice message={notices.driver} />
           </div>
           <div>
             {fieldLabel('Close protection officer')}
-            <select className={inputClass} value={form.officerId} onChange={(e) => setForm({ ...form, officerId: Number(e.target.value) })}>
+            <select
+              className={`${inputClass} ${notices.officer ? 'border-amber-300 bg-amber-50/40' : ''}`}
+              value={form.officerId}
+              onChange={(e) => setForm({ ...form, officerId: Number(e.target.value) })}
+            >
               <option value={0}>— None —</option>
               {data.officers.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name} · {o.grade} {o.status !== 'Available' ? `(${o.status})` : ''}
+                  {busyNote('officer', o.id)}
                 </option>
               ))}
             </select>
+            <ConflictNotice message={notices.officer} />
           </div>
           <div>
             {fieldLabel('Status')}
@@ -733,10 +850,365 @@ function AssignmentForm({
           </div>
           <p className="text-xs text-gray-400">Assign at least one of car, driver, or officer.</p>
           {error && <p className="text-xs text-rose-500">{error}</p>}
-          <SubmitButton busy={busy} label={existing ? 'Save changes' : 'Create assignment'} />
+          {blocked && (
+            <p className="text-xs font-medium text-amber-700">
+              Someone picked above is not available on these dates. Choose another before saving.
+            </p>
+          )}
+          <SubmitButton busy={busy} disabled={blocked} label={existing ? 'Save changes' : 'Create assignment'} />
         </form>
       )}
     </Modal>
+  );
+}
+
+/** The prompt under a picker when its choice is already booked elsewhere. */
+function ConflictNotice({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div role="alert" className="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      <span>{message}</span>
+    </div>
+  );
+}
+
+// --- Availability: who is booked on which days ------------------------------
+
+/** How many days are on screen at once, and how wide one day is for each. */
+const SCALES = [
+  { days: 14, col: 64, label: '2 weeks' },
+  { days: 28, col: 40, label: '4 weeks' },
+  { days: 56, col: 26, label: '8 weeks' },
+] as const;
+const LABEL_W = 232;
+const LANE_H = 30;
+const ROW_PAD = 8;
+
+type GridRow = { kind: ResourceKind; id: number; label: string; sub: string | null; status: string };
+
+/** One booking drawn across the columns it covers, in the lane it was given. */
+type Bar = { engagement: Engagement; start: number; end: number; lane: number };
+
+/**
+ * Lay a resource's bookings out as bars: clipped to the visible days, merged
+ * when they are the same trip and source, and stacked into lanes so two trips
+ * on one day sit one under the other instead of hiding each other.
+ */
+function barsFor(engagements: Engagement[], kind: ResourceKind, id: number, gridStart: Date, days: number): Bar[] {
+  const spans = new Map<string, { engagement: Engagement; start: number; end: number }>();
+  for (const e of engagements) {
+    if (e.kind !== kind || e.resourceId !== id || !e.from || !e.to) continue;
+    const from = parseDateKey(e.from);
+    const to = parseDateKey(e.to);
+    if (!from || !to) continue;
+    const start = Math.max(0, dayDiff(gridStart, from));
+    const end = Math.min(days - 1, dayDiff(gridStart, to));
+    if (end < 0 || start > days - 1 || end < start) continue;
+    const key = `${e.tripId}:${e.source}:${e.itemId ?? ''}`;
+    const existing = spans.get(key);
+    if (existing) {
+      existing.start = Math.min(existing.start, start);
+      existing.end = Math.max(existing.end, end);
+    } else {
+      spans.set(key, { engagement: e, start, end });
+    }
+  }
+  const sorted = [...spans.values()].sort((a, b) => a.start - b.start || b.end - a.end);
+  const laneEnds: number[] = [];
+  return sorted.map((span) => {
+    let lane = laneEnds.findIndex((endAt) => endAt < span.start);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(span.end);
+    } else {
+      laneEnds[lane] = span.end;
+    }
+    return { ...span, lane };
+  });
+}
+
+/** "Nov 2026" bands across the day header, one per month in view. */
+function monthBands(days: Date[]): Array<{ label: string; span: number }> {
+  const bands: Array<{ label: string; span: number }> = [];
+  for (const d of days) {
+    const label = d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    const last = bands[bands.length - 1];
+    if (last && last.label === label) last.span++;
+    else bands.push({ label, span: 1 });
+  }
+  return bands;
+}
+
+function AvailabilityGrid({ data, q }: { data: TaskAssignmentData; q: string }) {
+  const [scaleIndex, setScaleIndex] = useState(1);
+  const scale = SCALES[scaleIndex]!;
+  const [start, setStart] = useState(() => startOfWeek(new Date()));
+  /** Show only cars and people with a booking in the days on screen. */
+  const [bookedOnly, setBookedOnly] = useState(false);
+  const days = useMemo(() => rangeOfDays(start, scale.days), [start, scale.days]);
+  const keys = useMemo(() => days.map(dateKey), [days]);
+  const today = dateKey(new Date());
+  const todayIndex = keys.indexOf(today);
+  const bands = useMemo(() => monthBands(days), [days]);
+
+  const matches = (text: string) => !q || text.toLowerCase().includes(q);
+  const booked = (kind: ResourceKind, id: number) => !bookedOnly || occupiedDays(data.engagements, kind, id, keys).size > 0;
+  const allSections: Array<{ title: string; rows: GridRow[] }> = [
+    {
+      title: 'Cars',
+      rows: data.vehicles
+        .filter((v) => matches([v.registration, v.make, v.model, v.type].filter(Boolean).join(' ')))
+        .map((v) => ({ kind: 'vehicle', id: v.id, label: v.registration, sub: [v.make, v.model].filter(Boolean).join(' ') || v.type, status: v.status })),
+    },
+    {
+      title: 'Drivers',
+      rows: data.drivers.filter((d) => matches(d.name)).map((d) => ({ kind: 'driver', id: d.id, label: d.name, sub: d.phone, status: d.status })),
+    },
+    {
+      title: 'Protection officers',
+      rows: data.officers
+        .filter((o) => matches([o.name, o.callSign, o.grade].filter(Boolean).join(' ')))
+        .map((o) => ({ kind: 'officer', id: o.id, label: o.name, sub: [o.grade, o.callSign].filter(Boolean).join(' · '), status: o.status })),
+    },
+  ];
+  const sections = allSections.map((s) => ({ ...s, rows: s.rows.filter((r) => booked(r.kind, r.id)) }));
+  const total = sections.reduce((n, s) => n + s.rows.length, 0);
+
+  // Free today: not booked on today's date and not out of service.
+  const freeToday = allSections.map((s) => ({
+    title: s.title,
+    free: s.rows.filter((r) => r.status === 'Available' && occupiedDays(data.engagements, r.kind, r.id, [today]).size === 0).length,
+    total: s.rows.length,
+  }));
+
+  const rangeLabel = formatWindow({ from: keys[0]!, to: keys[keys.length - 1]! });
+  const trackWidth = scale.days * scale.col;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center rounded-xl border border-gray-200 bg-white p-0.5">
+            <button type="button" onClick={() => setStart((s) => addDays(s, -7))} className="rounded-lg px-2.5 py-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900" aria-label="Previous week">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            </button>
+            <button type="button" onClick={() => setStart(startOfWeek(new Date()))} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100">
+              Today
+            </button>
+            <button type="button" onClick={() => setStart((s) => addDays(s, 7))} className="rounded-lg px-2.5 py-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900" aria-label="Next week">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+          <span className="text-sm font-semibold text-gray-900">{rangeLabel}</span>
+          <div role="radiogroup" aria-label="Days on screen" className="ml-1 flex items-center gap-1 rounded-xl bg-gray-100 p-0.5">
+            {SCALES.map((s, i) => (
+              <button
+                key={s.days}
+                type="button"
+                role="radio"
+                aria-checked={i === scaleIndex}
+                onClick={() => setScaleIndex(i)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${i === scaleIndex ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+          {freeToday.map((f) => (
+            <span key={f.title} className="inline-flex items-baseline gap-1">
+              <span className="text-base font-bold text-gray-900">{f.free}</span>
+              <span>/ {f.total} {f.title.toLowerCase()} free today</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4 px-1 text-xs text-gray-500">
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded-md" style={{ backgroundColor: BRAND }} /> Trip allocation</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded-md" style={{ backgroundColor: ACCENT }} /> Itinerary event</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded-md bg-[repeating-linear-gradient(135deg,#e5e7eb_0,#e5e7eb_3px,#f9fafb_3px,#f9fafb_6px)]" /> Out of service</span>
+        <span className="text-gray-400">Click a bar to open the trip on that event.</span>
+        <label className="ml-auto inline-flex cursor-pointer items-center gap-2 text-gray-600">
+          <input type="checkbox" checked={bookedOnly} onChange={(e) => setBookedOnly(e.target.checked)} className="h-3.5 w-3.5 rounded border-gray-300" />
+          Only booked in this period
+        </label>
+      </div>
+
+      {total === 0 ? (
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-white py-16 text-center text-sm text-gray-500">
+          {bookedOnly ? 'Nobody is booked between these dates.' : q ? 'No matching cars or people.' : 'No cars or people to plan yet.'}
+        </div>
+      ) : (
+        <div className="relative max-h-[70vh] overflow-auto rounded-2xl border border-gray-200 bg-white shadow-[0_10px_30px_-20px_rgba(15,23,42,0.25)]">
+          <div style={{ minWidth: LABEL_W + trackWidth }}>
+            {/* Header: month bands over day cells */}
+            <div className="sticky top-0 z-30 flex bg-white/95 backdrop-blur">
+              <div className="sticky left-0 z-40 flex shrink-0 items-end border-b border-r border-gray-200 bg-white px-4 pb-2" style={{ width: LABEL_W }}>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Resource</span>
+              </div>
+              <div style={{ width: trackWidth }}>
+                <div className="flex border-b border-gray-100" style={{ height: 22 }}>
+                  {bands.map((b) => (
+                    <div key={b.label} className="flex items-center overflow-hidden border-r border-gray-200 px-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 last:border-r-0" style={{ width: b.span * scale.col }}>
+                      <span className="truncate">{b.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex border-b border-gray-200" style={{ height: 44 }}>
+                  {days.map((d, i) => {
+                    const weekend = d.getDay() === 0 || d.getDay() === 6;
+                    const isToday = i === todayIndex;
+                    return (
+                      <div key={keys[i]} className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100 last:border-r-0 ${weekend ? 'bg-gray-50' : ''}`} style={{ width: scale.col }}>
+                        <span className={`text-[9px] font-medium uppercase ${isToday ? 'text-[#03458f]' : weekend ? 'text-gray-400' : 'text-gray-500'}`}>
+                          {d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, scale.col < 30 ? 1 : 3)}
+                        </span>
+                        <span className={`mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-bold ${isToday ? 'text-white' : weekend ? 'text-gray-400' : 'text-gray-800'}`} style={isToday ? { backgroundColor: BRAND } : undefined}>
+                          {d.getDate()}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Rows */}
+            {sections
+              .filter((s) => s.rows.length > 0)
+              .map((s) => (
+                <React.Fragment key={s.title}>
+                  <div className="flex">
+                    <div className="sticky left-0 z-20 shrink-0 border-b border-r border-gray-100 bg-gray-50 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500" style={{ width: LABEL_W }}>
+                      {s.title}
+                      <span className="ml-1.5 font-medium normal-case tracking-normal text-gray-400">{s.rows.length}</span>
+                    </div>
+                    <div className="border-b border-gray-100 bg-gray-50" style={{ width: trackWidth }} />
+                  </div>
+                  {s.rows.map((r) => (
+                    <AvailabilityRow key={`${r.kind}-${r.id}`} row={r} days={days} gridStart={start} col={scale.col} todayIndex={todayIndex} engagements={data.engagements} />
+                  ))}
+                </React.Fragment>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AvailabilityRow({
+  row,
+  days,
+  gridStart,
+  col,
+  todayIndex,
+  engagements,
+}: {
+  row: GridRow;
+  days: Date[];
+  gridStart: Date;
+  col: number;
+  todayIndex: number;
+  engagements: Engagement[];
+}) {
+  const bars = useMemo(() => barsFor(engagements, row.kind, row.id, gridStart, days.length), [engagements, row.kind, row.id, gridStart, days.length]);
+  const lanes = Math.max(1, ...bars.map((b) => b.lane + 1));
+  const height = lanes * LANE_H + ROW_PAD;
+  const outOfService = row.status !== 'Available' && row.status !== 'Assigned';
+  const trackWidth = days.length * col;
+
+  return (
+    <div className="group flex" style={{ height }}>
+      <div className="sticky left-0 z-20 flex shrink-0 items-center gap-3 border-b border-r border-gray-100 bg-white px-4 group-hover:bg-gray-50" style={{ width: LABEL_W }}>
+        <ResourceAvatar row={row} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-gray-900">{row.label}</p>
+          {row.sub && <p className="truncate text-[11px] text-gray-400">{row.sub}</p>}
+        </div>
+        {outOfService && (
+          <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${statusTone(row.status)}`}>{row.status}</span>
+        )}
+      </div>
+      <div className="relative border-b border-gray-100" style={{ width: trackWidth }}>
+        {/* Day cells */}
+        <div className="absolute inset-0 flex" aria-hidden="true">
+          {days.map((d, i) => {
+            const weekend = d.getDay() === 0 || d.getDay() === 6;
+            return (
+              <div
+                key={i}
+                className={`h-full shrink-0 border-r border-gray-100 last:border-r-0 ${i === todayIndex ? 'bg-blue-50/60' : weekend ? 'bg-gray-50/70' : ''} ${
+                  outOfService ? 'bg-[repeating-linear-gradient(135deg,#e5e7eb_0,#e5e7eb_3px,#f9fafb_3px,#f9fafb_6px)]' : ''
+                }`}
+                style={{ width: col }}
+              />
+            );
+          })}
+        </div>
+        {todayIndex >= 0 && <div className="pointer-events-none absolute inset-y-0 z-[1] w-px" style={{ left: todayIndex * col + col / 2, backgroundColor: BRAND, opacity: 0.35 }} aria-hidden="true" />}
+        {/* Bookings */}
+        {bars.map((b) => {
+          const e = b.engagement;
+          const movement = e.source === 'movement';
+          const width = (b.end - b.start + 1) * col - 6;
+          const label = `${e.reference} · ${e.title} (${formatWindow(e)})`;
+          return (
+            <Link
+              key={`${e.tripId}-${e.source}-${e.itemId ?? 'trip'}-${b.start}`}
+              href={engagementHref(e)}
+              title={`${label}\nOpen the trip${e.itemId ? ' on this event' : ''}`}
+              className="absolute z-[2] flex items-center gap-1.5 overflow-hidden rounded-lg px-2 text-[11px] font-semibold shadow-sm ring-1 ring-black/5 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-offset-1"
+              style={{
+                left: b.start * col + 3,
+                top: ROW_PAD / 2 + b.lane * LANE_H,
+                width,
+                height: LANE_H - 6,
+                backgroundColor: movement ? ACCENT : BRAND,
+                color: movement ? '#3b2a05' : '#fff',
+              }}
+            >
+              {movement && width >= 60 && (
+                <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6v6l4 2" />
+                  <circle cx="12" cy="12" r="9" strokeWidth={2} />
+                </svg>
+              )}
+              <span className="truncate">{width > 90 ? label : e.reference}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** A small badge for the row: a car glyph, or the person's initials. */
+function ResourceAvatar({ row }: { row: GridRow }) {
+  if (row.kind === 'vehicle') {
+    return (
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white" style={{ backgroundColor: BRAND }}>
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 13l2-5a2 2 0 011.9-1.3h10.2A2 2 0 0119 8l2 5m-18 0h18m-18 0v4a1 1 0 001 1h1a1 1 0 001-1v-1m14 1v-4m0 4a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1M6 16h.01M18 16h.01" />
+        </svg>
+      </span>
+    );
+  }
+  const initials = row.label
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0] ?? '')
+    .join('')
+    .toUpperCase();
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold text-white" style={{ backgroundColor: row.kind === 'driver' ? ACCENT : BRAND }}>
+      {initials || '?'}
+    </span>
   );
 }
 

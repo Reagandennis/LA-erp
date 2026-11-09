@@ -41,24 +41,38 @@ export type OfficerSummary = {
   createdAt: string;
 };
 
-export type AssignmentSummary = {
-  id: number;
-  tripId: number;
-  status: string;
-  notes: string | null;
-  createdAt: string;
-  trip: { id: number; reference: string; title: string; status: string; customerName: string } | null;
-  vehicle: { id: number; registration: string; type: string } | null;
-  driver: { id: number; name: string } | null;
-  officer: { id: number; name: string; grade: string } | null;
-};
-
+/** A trip with the days it occupies ("YYYY-MM-DD", or null while its dates are TBD). */
 export type TripOption = {
   id: number;
   reference: string;
   title: string;
   status: string;
   customerName: string;
+  startDate: string | null;
+  endDate: string | null;
+};
+
+export type AssignmentSummary = {
+  id: number;
+  tripId: number;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+  trip: TripOption | null;
+  vehicle: { id: number; registration: string; type: string } | null;
+  driver: { id: number; name: string } | null;
+  officer: { id: number; name: string; grade: string } | null;
+};
+
+export type { Engagement } from '@/lib/resource-availability';
+
+/** One resource the server refused, with the bookings in the way (a 409's `conflicts`). */
+export type ResourceConflict = {
+  kind: 'vehicle' | 'driver' | 'officer';
+  resourceId: number;
+  label: string;
+  message: string;
+  conflicts: import('@/lib/resource-availability').Engagement[];
 };
 
 export type TaskAssignmentStats = {
@@ -78,5 +92,7 @@ export type TaskAssignmentData = {
   /** Completed and cancelled assignments, searchable via GET /api/task-assignment/assignments?q=. */
   pastAssignments: number;
   trips: TripOption[];
+  /** Every current booking of every car, driver and officer: the availability grid and the pickers' warnings. */
+  engagements: import('@/lib/resource-availability').Engagement[];
   stats: TaskAssignmentStats;
 };

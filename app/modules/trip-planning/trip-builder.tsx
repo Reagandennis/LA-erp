@@ -94,11 +94,6 @@ export default function TripBuilder({
       return;
     }
     const travelersChanged = travelersKey(pickedTravelers) !== travelersKey(originalTravelers);
-    // An imported trip with no one on it can still be edited without adding someone.
-    if (pickedTravelers.length === 0 && (!trip || travelersChanged)) {
-      setError(trip ? 'Keep at least one traveller' : 'Add at least one traveller');
-      return;
-    }
     if (!trip && !isServiceCountry(country)) {
       setError('Pick the country');
       return;
@@ -315,7 +310,7 @@ export default function TripBuilder({
                   </p>
                 </Field>
               )}
-              <Field label="Travellers" wide>
+              <Field label="Travellers (optional)" wide>
                 {selectedCustomer ? (
                   <TravelerPicker
                     key={selectedCustomer.id}
@@ -330,12 +325,12 @@ export default function TripBuilder({
                   </p>
                 )}
               </Field>
-              <Field label="Task number" wide>
+              <Field label="Client task number" wide>
                 <input
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Optional — the task number for this trip"
+                  placeholder="Optional — the client's task number for this trip"
                   className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary"
                 />
               </Field>

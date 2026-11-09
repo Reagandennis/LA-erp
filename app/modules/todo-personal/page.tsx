@@ -6,7 +6,6 @@ import React, { use, useCallback, useEffect, useEffectEvent, useRef, useState } 
 import CalendarClient, { type CalendarExtraEvent } from '@/app/modules/calendar/calendar-client';
 import { useBanner } from '@/app/ui/banner';
 import { dateKeyFromIso, dayFromIso, isoFromDateKey } from '@/lib/date-grid';
-import GanttChart from './gantt-chart';
 import KanbanBoard from './kanban-board';
 
 
@@ -25,6 +24,72 @@ type MentionUser = {
 };
 
 const USER_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500'];
+
+/** The people an "@" can pick, filtered as the name is typed. */
+function MentionSuggestions({
+  users,
+  query,
+  onPick,
+  placement = 'below',
+}: {
+  users: MentionUser[];
+  query: string;
+  onPick: (name: string) => void;
+  /** Above the box when it sits at the bottom of a drawer, so the footer never hides it. */
+  placement?: 'above' | 'below';
+}) {
+  const matches = users.filter((user) => user.name.toLowerCase().includes(query.toLowerCase()));
+  const position = placement === 'above' ? 'absolute bottom-full left-0 right-0 z-30 mb-2' : 'mt-2';
+  return (
+    <div role="listbox" aria-label="People to mention" className={`${position} max-h-48 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg`}>
+      <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+        {matches.length > 0 ? 'Mention and share with' : 'No one matches'}
+      </p>
+      {matches.map((user) => (
+        <button
+          key={user.id}
+          type="button"
+          role="option"
+          aria-selected={false}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onPick(user.name)}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-primary/5"
+        >
+          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold uppercase text-white ${user.color}`}>{user.initials}</span>
+          <span className="text-sm font-medium text-gray-800">{user.name}</span>
+        </button>
+      ))}
+      {users.length <= 1 ? (
+        <p className="border-t border-gray-100 px-3 py-2 text-[11px] text-gray-500">
+          Only you have a login so far. Colleagues appear here once they have an account (Admin → Users); a personnel record alone is not enough.
+        </p>
+      ) : (
+        matches.length > 0 && <p className="border-t border-gray-100 px-3 py-1.5 text-[11px] text-gray-400">They get the task in their Tasks and on their calendar.</p>
+      )}
+    </div>
+  );
+}
+
+/** Comment text with each @Name of a known colleague picked out. */
+function renderMentions(text: string, users: MentionUser[]): React.ReactNode {
+  const names = users.map((u) => u.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (names.length === 0) return text;
+  const pattern = new RegExp(`@(${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'g');
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const at = match.index ?? 0;
+    if (at > last) parts.push(text.slice(last, at));
+    parts.push(
+      <span key={`${at}-${match[0]}`} className="rounded bg-primary/10 px-1 font-semibold text-primary">
+        {match[0]}
+      </span>,
+    );
+    last = at + match[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
 
 const getInitials = (name: string) => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -52,7 +117,7 @@ const formatFileSize = (size: number) => {
   return `${gb.toFixed(1)} GB`;
 };
 
-type ViewType = 'list' | 'kanban' | 'gantt' | 'calendar' | 'dashboard';
+type ViewType = 'list' | 'kanban' | 'calendar' | 'dashboard';
 
 type Task = {
   id: string;
@@ -556,6 +621,23 @@ export default function TodoPersonalPage({
       setShowCreateMentions(false);
     }
   };
+  /** Enter while the picker is open takes its first match; otherwise it sends. */
+  const commentKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape' && showMentions) {
+      setShowMentions(false);
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (showMentions) {
+      const first = availableUsers.find((user) => user.name.toLowerCase().includes(mentionQuery.toLowerCase()));
+      if (first) {
+        applyMention(first.name);
+        return;
+      }
+    }
+    void handleSendComment();
+  };
   const applyMention = (name: string) => {
     setCommentInput((current) => current.replace(/@[\w-]*$/, `@${name} `));
     setShowMentions(false);
@@ -899,31 +981,41 @@ export default function TodoPersonalPage({
     };
   }, [selectedTask]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  /**
+   * Move a task to another column. Shown at once; if the server refuses, the
+   * task goes back where it was and the reason is shown, rather than the next
+   * poll quietly undoing the move.
+   */
   const updateTaskStatus = async (task: Task, nextStatus: string) => {
+    const previousStatus = task.status;
+    writeEpochRef.current += 1;
     setTasks((current) =>
-      current.map((item) =>
-        item.id === task.id
-          ? {
-              ...item,
-              status: nextStatus,
-            }
-          : item,
-      ),
+      current.map((item) => (item.id === task.id ? { ...item, status: nextStatus } : item)),
     );
 
     if (!task.dbId) {
       return;
     }
+    pendingWritesRef.current.add(task.id);
 
     try {
-      await fetch(`/api/planning/tasks/${task.dbId}`, {
+      const response = await fetch(`/api/planning/tasks/${task.dbId}`, {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),
       });
-    } catch {
-      // ignore
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Could not move the task.');
+      }
+    } catch (error) {
+      setTasks((current) =>
+        current.map((item) => (item.id === task.id ? { ...item, status: previousStatus } : item)),
+      );
+      banner.error(error instanceof Error ? error.message : 'Could not move the task.');
+    } finally {
+      pendingWritesRef.current.delete(task.id);
     }
   };
   const handleEditTitleChange = (value: string) => {
@@ -1062,10 +1154,6 @@ export default function TodoPersonalPage({
     startOfToday.setHours(0, 0, 0, 0);
     return due < startOfToday;
   };
-  const handleTaskOpenById = (taskId: string) => {
-    const task = tasks.find((item) => item.id === taskId);
-    if (task) openTaskDrawer(task);
-  };
 
   /**
    * Ids with a write in flight. The 10s poll below replaces the whole task
@@ -1098,7 +1186,7 @@ export default function TodoPersonalPage({
 
       // Keep the old array when nothing visible changed. Without this the poll
       // hands every view a fresh array every 10s and the whole page re-renders
-      // on a timer, defeating the memoised timeline geometry.
+      // on a timer, defeating every view's memoised work.
       if (
         merged.length === current.length &&
         merged.every((task, index) => taskFingerprint(task) === taskFingerprint(current[index]))
@@ -1109,54 +1197,6 @@ export default function TodoPersonalPage({
     });
   }, []);
 
-  const handleGanttReschedule = (taskId: string, startKey: string, dueKey: string) => {
-    const task = tasks.find((item) => item.id === taskId);
-    if (!task) return;
-
-    const startIso = isoFromDateKey(startKey);
-    const dueIso = isoFromDateKey(dueKey);
-    if (!startIso || !dueIso) return;
-
-    const previous = {
-      startDateIso: task.startDateIso ?? null,
-      dueDateIso: task.dueDateIso ?? null,
-      dueDate: task.dueDate,
-    };
-    const optimistic = {
-      startDateIso: startIso,
-      dueDateIso: dueIso,
-      dueDate: dayFromIso(dueIso)?.toLocaleDateString(APP_LOCALE) ?? null,
-    };
-
-    writeEpochRef.current += 1;
-    setTasks((current) =>
-      current.map((item) => (item.id === taskId ? { ...item, ...optimistic } : item)),
-    );
-
-    if (!task.dbId) return;
-    pendingWritesRef.current.add(taskId);
-
-    void (async () => {
-      try {
-        const response = await fetch(`/api/planning/tasks/${task.dbId}`, {
-          method: 'PUT',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ startDate: startIso, dueDate: dueIso }),
-        });
-        if (!response.ok) {
-          throw new Error('Save failed');
-        }
-      } catch {
-        setTasks((current) =>
-          current.map((item) => (item.id === taskId ? { ...item, ...previous } : item)),
-        );
-        banner.error('Could not save the new dates — the task has been put back.');
-      } finally {
-        pendingWritesRef.current.delete(taskId);
-      }
-    })();
-  };
   useEffect(() => {
     const controller = new AbortController();
     fetchTasks(controller.signal)
@@ -1353,7 +1393,6 @@ export default function TodoPersonalPage({
   const views: Array<{ id: ViewType; label: string; icon: string }> = [
     { id: 'list', label: 'List', icon: '≡' },
     { id: 'kanban', label: 'Kanban', icon: '⊞' },
-    { id: 'gantt', label: 'Gantt', icon: '⊢' },
     { id: 'calendar', label: 'Calendar', icon: '📅' },
     { id: 'dashboard', label: 'Dashboard', icon: '▦' },
   ];
@@ -1729,18 +1768,19 @@ export default function TodoPersonalPage({
                             <p className="text-xs text-gray-500">{comment.time}</p>
                           </div>
                         </div>
-                        <p className="text-sm text-gray-600 ml-11">{comment.text}</p>
+                        <p className="text-sm text-gray-600 ml-11">{renderMentions(comment.text, availableUsers)}</p>
                       </div>
                     ))
                   )}
                 </div>
                 <div className="mt-4">
-                  <div className="flex items-center gap-2">
+                  <div className="relative flex items-center gap-2">
                     <input
                       value={commentInput}
                       onChange={(e) => handleNotesChange(e.target.value)}
-                      placeholder="Write a comment..."
+                      placeholder="Write a comment... type @ to share with someone"
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                      onKeyDown={commentKeyDown}
                     />
                     <button
                       type="button"
@@ -1752,33 +1792,8 @@ export default function TodoPersonalPage({
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12l16-8-4 8 4 8-16-8z" />
                       </svg>
                     </button>
+                    {showMentions && <MentionSuggestions users={availableUsers} query={mentionQuery} onPick={applyMention} placement="above" />}
                   </div>
-                  {showMentions && (
-                    <div className="mt-2 border border-gray-200 rounded-lg bg-white shadow-sm max-h-40 overflow-y-auto">
-                      {availableUsers
-                        .filter((user: MentionUser) =>
-                          user.name.toLowerCase().includes(mentionQuery.toLowerCase()),
-                        )
-                        .map((user: MentionUser) => (
-                          <button
-                            key={user.id}
-                            type="button"
-                            onClick={() => applyMention(user.name)}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50"
-                          >
-                            <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
-                              {user.initials}
-                            </div>
-                            <span className="text-sm text-gray-700">{user.name}</span>
-                          </button>
-                        ))}
-                      {availableUsers.filter((user: MentionUser) =>
-                        user.name.toLowerCase().includes(mentionQuery.toLowerCase()),
-                      ).length === 0 && (
-                        <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -2007,9 +2022,7 @@ export default function TodoPersonalPage({
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      {/* The timeline wants every pixel it can get; the other views read
-          better in a fixed column. */}
-      <div className={`mx-auto ${activeView === 'gantt' ? 'max-w-none' : 'max-w-7xl'}`}>
+      <div className="mx-auto max-w-7xl">
         {notifications.length > 0 && (
           <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/5 px-5 py-4 text-primary">
             <p className="text-sm font-semibold mb-2">Shared with you</p>
@@ -2102,20 +2115,10 @@ export default function TodoPersonalPage({
         {/* Content Area */}
         {activeView === 'kanban' && renderKanbanView(tasks.filter((t) => taskMatchesScope(t, scope)))}
         {activeView === 'list' && renderListView(tasks.filter((t) => taskMatchesScope(t, scope)))}
-        {activeView === 'gantt' && (
-          <GanttChart
-            tasks={orderedKanbanTasks(tasks.filter((t) => taskMatchesScope(t, scope)))}
-            columns={kanbanColumns}
-            columnColors={columnColors}
-            isTaskOverdue={(task) => isTaskOverdue(task as Task)}
-            onOpenTask={handleTaskOpenById}
-            onReschedule={handleGanttReschedule}
-          />
-        )}
         {activeView === 'calendar' && renderCalendarView(tasks.filter((t) => taskMatchesScope(t, scope)))}
         {activeView === 'dashboard' && renderDashboardView(tasks.filter((t) => !t.deletedAt))}
 
-        {/* ── Shared task drawer (Kanban / Gantt / Calendar views) ── */}
+        {/* ── Shared task drawer (Kanban / Calendar views) ── */}
         {activeView !== 'list' && selectedTask && editedTask && (
           <>
             <button
@@ -2286,22 +2289,23 @@ export default function TodoPersonalPage({
                               <p className="text-xs text-gray-500">{c.time}</p>
                             </div>
                           </div>
-                          <p className="text-sm text-gray-600 ml-10">{c.text}</p>
+                          <p className="text-sm text-gray-600 ml-10">{renderMentions(c.text, availableUsers)}</p>
                         </div>
                       ))
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="relative flex items-center gap-2">
                     <input
                       value={commentInput}
                       onChange={(e) => handleNotesChange(e.target.value)}
-                      placeholder="Write a comment..."
+                      placeholder="Write a comment... type @ to share with someone"
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                      onKeyDown={(e) => { if (e.key === 'Enter') void handleSendComment(); }}
+                      onKeyDown={commentKeyDown}
                     />
                     <button type="button" onClick={handleSendComment} className="p-2 bg-primary text-white rounded-lg hover:bg-primary/90" aria-label="Send comment">
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12l16-8-4 8 4 8-16-8z" /></svg>
                     </button>
+                    {showMentions && <MentionSuggestions users={availableUsers} query={mentionQuery} onPick={applyMention} placement="above" />}
                   </div>
                 </div>
 
@@ -2632,32 +2636,7 @@ export default function TodoPersonalPage({
                     rows={4}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                   />
-                  {showCreateMentions && (
-                    <div className="mt-2 border border-gray-200 rounded-lg bg-white shadow-sm max-h-40 overflow-y-auto">
-                      {availableUsers
-                        .filter((user: MentionUser) =>
-                          user.name.toLowerCase().includes(createMentionQuery.toLowerCase()),
-                        )
-                        .map((user: MentionUser) => (
-                        <button
-                          key={user.id}
-                          type="button"
-                          onClick={() => applyCreateMention(user.name)}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50"
-                        >
-                          <div className={`w-5 h-5 rounded-full ${user.color} flex items-center justify-center text-[8px] font-bold text-white uppercase`}>
-                            {user.initials}
-                          </div>
-                          <span className="text-sm text-gray-700">{user.name}</span>
-                        </button>
-                      ))}
-                      {availableUsers.filter((user: MentionUser) =>
-                        user.name.toLowerCase().includes(createMentionQuery.toLowerCase()),
-                      ).length === 0 && (
-                        <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
-                      )}
-                    </div>
-                  )}
+                  {showCreateMentions && <MentionSuggestions users={availableUsers} query={createMentionQuery} onPick={applyCreateMention} />}
                 </div>
               </div>
 

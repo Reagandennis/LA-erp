@@ -1,6 +1,14 @@
 import 'server-only';
 
 import { prisma } from '@/lib/prisma';
+import {
+  conflictsFor,
+  dateKeyOf,
+  describeConflict,
+  type DateWindow,
+  type Engagement,
+  type ResourceKind as EngagementKind,
+} from '@/lib/resource-availability';
 
 // --- Option sets -----------------------------------------------------------
 
@@ -12,9 +20,26 @@ export const ASSIGNMENT_STATUSES = ['Planned', 'Confirmed', 'Active', 'Completed
 // assignment in one of these statuses. Completed/Cancelled assignments free it.
 export const ACTIVE_ASSIGNMENT_STATUSES = ['Planned', 'Confirmed', 'Active'] as const;
 
-/** Thrown when a car/driver/officer is already committed to another active assignment. */
+/** One resource that cannot take the trip, and the bookings in the way. */
+export interface ResourceConflict {
+  kind: EngagementKind;
+  resourceId: number;
+  /** Registration or name, as the pickers show it. */
+  label: string;
+  message: string;
+  conflicts: Engagement[];
+}
+
+/**
+ * Thrown when a car/driver/officer is already booked on another trip for days
+ * this trip needs. Carries the detail so the screen can say who, where and
+ * when, and offer the pickers again.
+ */
 export class ResourceConflictError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    public readonly conflicts: ResourceConflict[] = [],
+  ) {
     super(message);
     this.name = 'ResourceConflictError';
   }
@@ -98,25 +123,30 @@ export type OfficerSummary = {
   createdAt: string;
 };
 
+/** A trip as the assignment screen names it, with the days it occupies ("YYYY-MM-DD", or null while TBD). */
+export type AssignmentTrip = {
+  id: number;
+  reference: string;
+  title: string;
+  status: string;
+  customerName: string;
+  startDate: string | null;
+  endDate: string | null;
+};
+
 export type AssignmentSummary = {
   id: number;
   tripId: number;
   status: string;
   notes: string | null;
   createdAt: string;
-  trip: { id: number; reference: string; title: string; status: string; customerName: string } | null;
+  trip: AssignmentTrip | null;
   vehicle: { id: number; registration: string; type: string } | null;
   driver: { id: number; name: string } | null;
   officer: { id: number; name: string; grade: string } | null;
 };
 
-export type TripOption = {
-  id: number;
-  reference: string;
-  title: string;
-  status: string;
-  customerName: string;
-};
+export type TripOption = AssignmentTrip;
 
 export type TaskAssignmentStats = {
   trips: number;
@@ -166,8 +196,18 @@ const OFFICER_SELECT = {
   createdAt: true,
 } as const;
 
+const TRIP_SELECT = {
+  id: true,
+  reference: true,
+  title: true,
+  status: true,
+  startDate: true,
+  endDate: true,
+  customer: { select: { name: true } },
+} as const;
+
 const ASSIGNMENT_INCLUDE = {
-  trip: { select: { id: true, reference: true, title: true, status: true, customer: { select: { name: true } } } },
+  trip: { select: TRIP_SELECT },
   vehicle: { select: { id: true, registration: true, type: true } },
   driver: { select: { id: true, name: true } },
   officer: { select: { id: true, name: true, grade: true } },
@@ -206,9 +246,25 @@ function serializeOfficer(row: OfficerRow): OfficerSummary {
   return { ...rest, hasPhoto: Boolean(photoName), createdAt: createdAt.toISOString() };
 }
 
+type TripRow = {
+  id: number; reference: string; title: string; status: string;
+  startDate: Date | null; endDate: Date | null; customer: { name: string };
+};
+function serializeTrip(row: TripRow): AssignmentTrip {
+  return {
+    id: row.id,
+    reference: row.reference,
+    title: row.title,
+    status: row.status,
+    customerName: row.customer.name,
+    startDate: dateKeyOf(row.startDate),
+    endDate: dateKeyOf(row.endDate),
+  };
+}
+
 type AssignmentRow = {
   id: number; tripId: number; status: string; notes: string | null; createdAt: Date;
-  trip: { id: number; reference: string; title: string; status: string; customer: { name: string } } | null;
+  trip: TripRow | null;
   vehicle: { id: number; registration: string; type: string } | null;
   driver: { id: number; name: string } | null;
   officer: { id: number; name: string; grade: string } | null;
@@ -220,9 +276,7 @@ function serializeAssignment(row: AssignmentRow): AssignmentSummary {
     status: row.status,
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
-    trip: row.trip
-      ? { id: row.trip.id, reference: row.trip.reference, title: row.trip.title, status: row.trip.status, customerName: row.trip.customer.name }
-      : null,
+    trip: row.trip ? serializeTrip(row.trip) : null,
     vehicle: row.vehicle,
     driver: row.driver,
     officer: row.officer,
@@ -312,9 +366,132 @@ export async function listTripOptions(): Promise<TripOption[]> {
   const rows = await prisma.trip.findMany({
     where: { status: { notIn: ['Cancelled', 'Completed'] } },
     orderBy: [{ createdAt: 'desc' }],
-    select: { id: true, reference: true, title: true, status: true, customer: { select: { name: true } } },
+    select: TRIP_SELECT,
   });
-  return rows.map((r) => ({ id: r.id, reference: r.reference, title: r.title, status: r.status, customerName: r.customer.name }));
+  return rows.map(serializeTrip);
+}
+
+// --- Availability ----------------------------------------------------------
+
+/** Trips in these states no longer hold anyone. */
+const CLOSED_TRIP_STATUSES = ['Cancelled', 'Completed'];
+
+/** How far either side of today crewed movements are loaded for the grid. */
+export const ENGAGEMENT_WINDOW = { pastDays: 14, futureDays: 120 } as const;
+
+function engagementWindow(now = new Date()): { from: Date; to: Date } {
+  const from = new Date(now);
+  from.setUTCDate(from.getUTCDate() - ENGAGEMENT_WINDOW.pastDays);
+  from.setUTCHours(0, 0, 0, 0);
+  const to = new Date(now);
+  to.setUTCDate(to.getUTCDate() + ENGAGEMENT_WINDOW.futureDays);
+  to.setUTCHours(23, 59, 59, 999);
+  return { from, to };
+}
+
+/**
+ * Every commitment of every car, driver and officer, from two places:
+ *
+ *   - Task Assignment allocations in a live status hold the resource for the
+ *     whole of the trip's dates (all of them are loaded; there are few);
+ *   - crewed itinerary movements hold it for the day of the movement, within
+ *     `ENGAGEMENT_WINDOW` of today so years of history stay out of the page.
+ *
+ * `resources` narrows both to the given ids, for a conflict check. Movements
+ * are then loaded without the window: a clash is a clash whenever it is.
+ */
+export async function listEngagements(options: {
+  resources?: Partial<Record<EngagementKind, number[]>>;
+  now?: Date;
+} = {}): Promise<Engagement[]> {
+  const { resources } = options;
+  const ids = (kind: EngagementKind) => resources?.[kind] ?? [];
+  const narrowed = Boolean(resources);
+  const anyOf = (kind: EngagementKind, column: 'vehicleId' | 'driverId' | 'officerId') =>
+    ids(kind).length > 0 ? [{ [column]: { in: ids(kind) } }] : [];
+  const resourceFilter = narrowed
+    ? [...anyOf('vehicle', 'vehicleId'), ...anyOf('driver', 'driverId'), ...anyOf('officer', 'officerId')]
+    : null;
+  if (resourceFilter && resourceFilter.length === 0) return [];
+
+  const window = engagementWindow(options.now);
+  const [assignments, movements] = await Promise.all([
+    prisma.tripAssignment.findMany({
+      where: {
+        status: { in: [...ACTIVE_ASSIGNMENT_STATUSES] },
+        trip: { status: { notIn: CLOSED_TRIP_STATUSES } },
+        ...(resourceFilter ? { OR: resourceFilter } : {}),
+      },
+      select: {
+        id: true,
+        tripId: true,
+        status: true,
+        vehicleId: true,
+        driverId: true,
+        officerId: true,
+        trip: { select: { reference: true, title: true, startDate: true, endDate: true } },
+      },
+    }),
+    prisma.tripItineraryItem.findMany({
+      where: {
+        scheduledAt: narrowed ? { not: null } : { gte: window.from, lte: window.to },
+        trip: { status: { notIn: CLOSED_TRIP_STATUSES } },
+        OR: resourceFilter ?? [{ vehicleId: { not: null } }, { driverId: { not: null } }, { officerId: { not: null } }],
+      },
+      select: {
+        id: true,
+        tripId: true,
+        scheduledAt: true,
+        endsAt: true,
+        vehicleId: true,
+        driverId: true,
+        officerId: true,
+        trip: { select: { reference: true, title: true, status: true } },
+      },
+    }),
+  ]);
+
+  const out: Engagement[] = [];
+  const push = (base: Omit<Engagement, 'kind' | 'resourceId'>, kind: EngagementKind, resourceId: number | null) => {
+    if (!resourceId) return;
+    if (narrowed && !ids(kind).includes(resourceId)) return;
+    out.push({ ...base, kind, resourceId });
+  };
+
+  for (const a of assignments) {
+    const base = {
+      tripId: a.tripId,
+      reference: a.trip.reference,
+      title: a.trip.title,
+      from: dateKeyOf(a.trip.startDate),
+      to: dateKeyOf(a.trip.endDate),
+      source: 'assignment' as const,
+      assignmentId: a.id,
+      itemId: null,
+      status: a.status,
+    };
+    push(base, 'vehicle', a.vehicleId);
+    push(base, 'driver', a.driverId);
+    push(base, 'officer', a.officerId);
+  }
+  for (const m of movements) {
+    const from = dateKeyOf(m.scheduledAt);
+    const base = {
+      tripId: m.tripId,
+      reference: m.trip.reference,
+      title: m.trip.title,
+      from,
+      to: dateKeyOf(m.endsAt) ?? from,
+      source: 'movement' as const,
+      assignmentId: null,
+      itemId: m.id,
+      status: m.trip.status,
+    };
+    push(base, 'vehicle', m.vehicleId);
+    push(base, 'driver', m.driverId);
+    push(base, 'officer', m.officerId);
+  }
+  return out;
 }
 
 export function computeStats(args: {
@@ -572,64 +749,70 @@ async function loadAssignment(id: number): Promise<AssignmentSummary | null> {
 }
 
 /**
- * Reject the allocation if any of the given resources is already committed to
- * another active assignment. Throws ResourceConflictError with a message that
- * names the clashing resource and trip so the user knows what to pick instead.
+ * Reject the allocation if any of the given resources is booked on another
+ * trip for days this trip needs — by a Task Assignment allocation or by a
+ * crewed itinerary movement. Other bookings on the *same* trip are fine.
+ * Throws ResourceConflictError naming each clashing resource, trip and dates
+ * so the user knows what to pick instead.
  */
-async function assertNoResourceConflicts(args: {
+export async function assertNoResourceConflicts(args: {
+  tripId: number;
   vehicleId: number | null;
   driverId: number | null;
   officerId: number | null;
   excludeAssignmentId?: number;
 }): Promise<void> {
-  const exclude = args.excludeAssignmentId ? { id: { not: args.excludeAssignmentId } } : {};
-  const activeStatuses = [...ACTIVE_ASSIGNMENT_STATUSES];
-  const messages: string[] = [];
+  const wanted: Array<{ kind: EngagementKind; id: number }> = [];
+  if (args.vehicleId) wanted.push({ kind: 'vehicle', id: args.vehicleId });
+  if (args.driverId) wanted.push({ kind: 'driver', id: args.driverId });
+  if (args.officerId) wanted.push({ kind: 'officer', id: args.officerId });
+  if (wanted.length === 0) return;
 
-  if (args.vehicleId) {
-    const clash = await prisma.tripAssignment.findFirst({
-      where: { vehicleId: args.vehicleId, status: { in: activeStatuses }, ...exclude },
-      include: { trip: { select: { reference: true } }, vehicle: { select: { registration: true } } },
+  const trip = await prisma.trip.findUnique({
+    where: { id: args.tripId },
+    select: { startDate: true, endDate: true },
+  });
+  const window: DateWindow = { from: dateKeyOf(trip?.startDate), to: dateKeyOf(trip?.endDate) };
+
+  const engagements = await listEngagements({
+    resources: {
+      vehicle: args.vehicleId ? [args.vehicleId] : [],
+      driver: args.driverId ? [args.driverId] : [],
+      officer: args.officerId ? [args.officerId] : [],
+    },
+  });
+
+  const found: ResourceConflict[] = [];
+  for (const { kind, id } of wanted) {
+    const conflicts = conflictsFor(engagements, {
+      kind,
+      resourceId: id,
+      tripId: args.tripId,
+      window,
+      excludeAssignmentId: args.excludeAssignmentId ?? null,
     });
-    if (clash) {
-      messages.push(
-        `Car ${clash.vehicle?.registration ?? ''}`.trim() +
-          ` is already assigned to ${clash.trip?.reference ?? 'another trip'} (${clash.status})`,
-      );
-    }
+    if (conflicts.length === 0) continue;
+    const label = await resourceLabel(kind, id);
+    found.push({ kind, resourceId: id, label, message: describeConflict(label, kind, conflicts), conflicts });
   }
 
-  if (args.driverId) {
-    const clash = await prisma.tripAssignment.findFirst({
-      where: { driverId: args.driverId, status: { in: activeStatuses }, ...exclude },
-      include: { trip: { select: { reference: true } }, driver: { select: { name: true } } },
-    });
-    if (clash) {
-      messages.push(
-        `Driver ${clash.driver?.name ?? ''}`.trim() +
-          ` is already assigned to ${clash.trip?.reference ?? 'another trip'} (${clash.status})`,
-      );
-    }
+  if (found.length > 0) {
+    const tbd = !window.from || !window.to ? ' This trip has no dates yet, so anyone busy is held until it does.' : '';
+    throw new ResourceConflictError(`${found.map((f) => f.message).join(' ')}${tbd}`, found);
   }
+}
 
-  if (args.officerId) {
-    const clash = await prisma.tripAssignment.findFirst({
-      where: { officerId: args.officerId, status: { in: activeStatuses }, ...exclude },
-      include: { trip: { select: { reference: true } }, officer: { select: { name: true } } },
-    });
-    if (clash) {
-      messages.push(
-        `Officer ${clash.officer?.name ?? ''}`.trim() +
-          ` is already assigned to ${clash.trip?.reference ?? 'another trip'} (${clash.status})`,
-      );
-    }
+async function resourceLabel(kind: EngagementKind, id: number): Promise<string> {
+  if (kind === 'vehicle') {
+    const row = await prisma.vehicle.findUnique({ where: { id }, select: { registration: true } });
+    return `Car ${row?.registration ?? `#${id}`}`;
   }
-
-  if (messages.length > 0) {
-    throw new ResourceConflictError(
-      `${messages.join('; ')}. Please choose another asset, driver, or officer — or free this one by completing or cancelling its current assignment.`,
-    );
+  if (kind === 'driver') {
+    const row = await prisma.driver.findUnique({ where: { id }, select: { name: true } });
+    return `Driver ${row?.name ?? `#${id}`}`;
   }
+  const row = await prisma.officer.findUnique({ where: { id }, select: { name: true } });
+  return `Officer ${row?.name ?? `#${id}`}`;
 }
 
 export async function createAssignment(input: {
@@ -649,6 +832,7 @@ export async function createAssignment(input: {
   const status = pickAssignmentStatus(input.status);
   if (isActiveStatus(status)) {
     await assertNoResourceConflicts({
+      tripId: input.tripId,
       vehicleId: input.vehicleId ?? null,
       driverId: input.driverId ?? null,
       officerId: input.officerId ?? null,
@@ -675,13 +859,17 @@ export async function updateAssignment(
 ): Promise<AssignmentSummary | null> {
   const existing = await prisma.tripAssignment.findUnique({
     where: { id },
-    select: { id: true, vehicleId: true, driverId: true, officerId: true, status: true },
+    select: { id: true, tripId: true, vehicleId: true, driverId: true, officerId: true, status: true },
   });
   if (!existing) return null;
   const data: Record<string, unknown> = {};
+  let effectiveTripId = existing.tripId;
   if (patch.tripId !== undefined) {
     const trip = await prisma.trip.findUnique({ where: { id: patch.tripId }, select: { id: true } });
-    if (trip) data.tripId = patch.tripId;
+    if (trip) {
+      data.tripId = patch.tripId;
+      effectiveTripId = patch.tripId;
+    }
   }
   if (patch.vehicleId !== undefined) data.vehicleId = patch.vehicleId ?? null;
   if (patch.driverId !== undefined) data.driverId = patch.driverId ?? null;
@@ -696,6 +884,7 @@ export async function updateAssignment(
   const effectiveStatus = patch.status !== undefined ? pickAssignmentStatus(patch.status) : existing.status;
   if (isActiveStatus(effectiveStatus)) {
     await assertNoResourceConflicts({
+      tripId: effectiveTripId,
       vehicleId: effectiveVehicleId,
       driverId: effectiveDriverId,
       officerId: effectiveOfficerId,

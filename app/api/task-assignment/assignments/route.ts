@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     if (error instanceof ResourceConflictError) {
-      return NextResponse.json({ error: error.message, conflict: true }, { status: 409 });
+      return NextResponse.json({ error: error.message, conflict: true, conflicts: error.conflicts }, { status: 409 });
     }
     const message = error instanceof Error ? error.message : 'Could not create assignment';
     return NextResponse.json({ error: message }, { status: 400 });

@@ -103,7 +103,12 @@ export const uploadLimitsUpdateSchema = z.object({
 });
 
 export const personalTodoPrioritySchema = z.enum(['low', 'medium', 'high']);
-export const personalTodoStatusSchema = z.enum(['Backlog', 'In progress', 'In review']);
+/**
+ * A task's column. Boards start with Backlog / In progress / In review, but
+ * people add their own columns, so any name a column may have is a status.
+ * Kept to the same length as a column name (personalTodoBoardSchema).
+ */
+export const personalTodoStatusSchema = z.string().trim().min(1, 'Status is required').max(40, 'Status is too long');
 
 export const personalTodoCreateSchema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(160, 'Title is too long'),
@@ -393,9 +398,16 @@ const detailShapes = {
 
 const detailValue = z.string().trim().max(200);
 
+// Several catalog services can be sold on one event, joined into these two
+// fields (lib/service-catalog.ts), so they take more than one value's worth.
+const serviceValue = z.string().trim().max(1200);
+const serviceCodeValue = z.string().trim().max(400);
+
 function detailSchemaFor(keys: Record<string, true>): z.ZodType<Record<string, string>> {
-  const shape: Record<string, z.ZodOptional<typeof detailValue>> = {};
-  for (const key of Object.keys(keys)) shape[key] = detailValue.optional();
+  const shape: Record<string, z.ZodOptional<z.ZodString>> = {};
+  for (const key of Object.keys(keys)) {
+    shape[key] = (key === 'service' ? serviceValue : key === 'serviceCode' ? serviceCodeValue : detailValue).optional();
+  }
   // Every value is a trimmed string and unknown keys are rejected, so the
   // output is a plain string map; only the index-signature inference needs help.
   return z.strictObject(shape) as unknown as z.ZodType<Record<string, string>>;
@@ -488,13 +500,11 @@ export const tripCreateSchema = z.object({
     .regex(/^[A-Za-z0-9]{1,12}$/, 'The client code is letters and digits, up to 12')
     .optional()
     .nullable(),
-  // The first entry is the lead traveller.
-  travelers: z
-    .array(tripTravelerInputSchema)
-    .min(1, 'Add at least one traveller')
-    .max(50, 'A trip can have at most 50 travellers'),
+  // The first entry is the lead traveller. A trip can be opened before the
+  // party is known and have its travellers added from the itinerary page.
+  travelers: z.array(tripTravelerInputSchema).max(50, 'A trip can have at most 50 travellers').default([]),
   ownerId: z.number().int().positive().optional().nullable(),
-  /** The task number; a trip can be opened without one. */
+  /** The client's task number; a trip can be opened without one. */
   title: z.string().trim().max(200).optional().nullable(),
   description: z.string().trim().max(10000).optional().nullable(),
   status: tripStatusSchema.optional(),
@@ -518,12 +528,8 @@ export const tripUpdateSchema = z
     endDate: z.string().trim().optional().nullable(),
     currency: currencySchema.optional(),
     notes: z.string().trim().max(10000).optional().nullable(),
-    /** Replaces who's on the trip, lead first. Left out, they stay as they are. */
-    travelers: z
-      .array(tripTravelerInputSchema)
-      .min(1, 'Keep at least one traveller')
-      .max(50, 'A trip can have at most 50 travellers')
-      .optional(),
+    /** Replaces who's on the trip, lead first (an empty list clears it). Left out, they stay as they are. */
+    travelers: z.array(tripTravelerInputSchema).max(50, 'A trip can have at most 50 travellers').optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated');
 

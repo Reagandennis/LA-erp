@@ -1,6 +1,7 @@
 'use client';
 
 import { APP_LOCALE } from '@/lib/locale';
+import { plainText } from '@/lib/rich-text';
 import { useMemo, useState } from 'react';
 
 import HandoverDetailDrawer from './handover-detail-drawer';
@@ -150,7 +151,7 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
                   <p className="truncate text-sm font-semibold text-gray-900">
                     {h.post ?? 'General'} · {h.shiftPeriod} shift
                   </p>
-                  <p className="truncate text-sm text-gray-500">{h.summary}</p>
+                  <p className="truncate text-sm text-gray-500">{plainText(h.summary)}</p>
                 </div>
                 <StatusBadge status={h.status} />
               </div>
@@ -193,7 +194,7 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm text-gray-700">{h.post ?? 'General'}</p>
-                    <p className="mt-0.5 max-w-xs truncate text-xs text-gray-400">{h.summary}</p>
+                    <p className="mt-0.5 max-w-xs truncate text-xs text-gray-400">{plainText(h.summary)}</p>
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm text-gray-500">{h.createdBy?.name ?? '—'}</p>

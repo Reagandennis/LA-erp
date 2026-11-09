@@ -13,8 +13,10 @@ export const dynamic = 'force-dynamic';
 
 export default async function TripItineraryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ tripId: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const auth = await getServerAuth();
   if (!auth) redirect('/auth/login');
@@ -35,6 +37,10 @@ export default async function TripItineraryPage({
     listTravelerOptions(trip.customer.id),
   ]);
 
+  // `?event=<id>` (from the availability grid and elsewhere) opens the page on that event.
+  const { event } = await searchParams;
+  const eventId = Number(Array.isArray(event) ? event[0] : event);
+
   return (
     <ItineraryPageClient
       trip={tripForViewer(trip, auth.user)}
@@ -42,6 +48,7 @@ export default async function TripItineraryPage({
       clientTravelers={clientTravelers}
       currentUser={{ id: auth.user.id, name: auth.user.name, email: auth.user.email }}
       isAdmin={isAdmin}
+      focusItemId={Number.isInteger(eventId) && eventId > 0 ? eventId : null}
     />
   );
 }

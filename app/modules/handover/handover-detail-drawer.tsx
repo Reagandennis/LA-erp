@@ -3,6 +3,7 @@
 import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useState } from 'react';
 
+import RichText from '../_components/rich-text';
 import type { HandoverDetail } from './types';
 
 interface HandoverDetailDrawerProps {
@@ -36,7 +37,7 @@ function Field({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
       <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">{label}</h3>
-      <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{value}</p>
+      <RichText value={value} className="mt-1.5 text-sm leading-relaxed text-gray-700" />
     </div>
   );
 }

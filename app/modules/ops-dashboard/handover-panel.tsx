@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 
-import { HANDOVER_STATUSES, SHIFT_PERIODS } from '@/app/modules/handover/types';
+import RichTextEditor from '@/app/modules/_components/rich-text-editor';
+import { SHIFT_PERIODS } from '@/app/modules/handover/types';
 import { useNow } from '@/app/ui/use-client';
 import type { OpsHandover } from '@/lib/ops-dashboard';
+import { plainText } from '@/lib/rich-text';
 
 import { Empty, HeaderButton, Panel, type PanelFrame, Pill, RowButton, type Tone, fieldClass, formClass, primaryButton, rowClass, send, shortDate } from './ops-ui';
 
@@ -13,12 +15,10 @@ const STATUS_TONE: Record<string, Tone> = { Urgent: 'danger', Attention: 'warn',
 /** The night shift runs from 18:00 to 06:00, so those are the shift changes. */
 const isNight = (hours: number) => hours >= 18 || hours < 6;
 
-type HandoverForm = { shiftPeriod: string; status: string; post: string; summary: string; watchItems: string };
+type HandoverForm = { shiftPeriod: string; summary: string; watchItems: string };
 
 const blankForm = (): HandoverForm => ({
   shiftPeriod: isNight(new Date().getHours()) ? 'Night' : 'Day',
-  status: 'Normal',
-  post: '',
   summary: '',
   watchItems: '',
 });
@@ -48,8 +48,6 @@ export default function HandoverPanel({
     try {
       const ok = await send('/api/handover', 'POST', {
         shiftPeriod: form.shiftPeriod,
-        status: form.status,
-        post: form.post.trim() || null,
         summary: form.summary.trim(),
         watchItems: form.watchItems.trim() || null,
       });
@@ -92,26 +90,19 @@ export default function HandoverPanel({
             void save();
           }}
         >
-          <div className="grid grid-cols-3 gap-2">
-            <select value={form.shiftPeriod} onChange={(e) => setForm({ ...form, shiftPeriod: e.target.value })} aria-label="Shift" className={fieldClass}>
-              {SHIFT_PERIODS.map((p) => (
-                <option key={p} value={p}>
-                  {p} shift
-                </option>
-              ))}
-            </select>
-            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} aria-label="Status" className={fieldClass}>
-              {HANDOVER_STATUSES.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <input value={form.post} onChange={(e) => setForm({ ...form, post: e.target.value })} placeholder="Post (optional)" aria-label="Post" className={fieldClass} />
-          </div>
-          <textarea
+          <select value={form.shiftPeriod} onChange={(e) => setForm({ ...form, shiftPeriod: e.target.value })} aria-label="Shift" className={fieldClass}>
+            {SHIFT_PERIODS.map((p) => (
+              <option key={p} value={p}>
+                {p} shift
+              </option>
+            ))}
+          </select>
+          <RichTextEditor
             autoFocus
+            compact
             rows={3}
             value={form.summary}
-            onChange={(e) => setForm({ ...form, summary: e.target.value })}
+            onChange={(summary) => setForm({ ...form, summary })}
             placeholder="How the shift went, what is still open"
             aria-label="Summary"
             className={`${fieldClass} resize-none`}
@@ -136,7 +127,7 @@ export default function HandoverPanel({
           {data.items.map((h) => (
             <li key={h.id} className={`${rowClass} items-start`}>
               <div className="min-w-0 flex-1">
-                <p className="line-clamp-2 text-sm font-medium text-gray-900">{h.summary}</p>
+                <p className="line-clamp-2 text-sm font-medium text-gray-900">{plainText(h.summary)}</p>
                 <p className="mt-0.5 truncate text-xs text-gray-500" suppressHydrationWarning>
                   {h.shiftPeriod} shift · {shortDate(h.shiftDate)}
                   {h.post && ` · ${h.post}`}
@@ -146,7 +137,7 @@ export default function HandoverPanel({
                 {h.watchItems && (
                   <p className="mt-1 line-clamp-2 text-xs text-amber-800">
                     <span className="font-bold">Watch: </span>
-                    {h.watchItems}
+                    {plainText(h.watchItems)}
                   </p>
                 )}
               </div>

@@ -165,3 +165,36 @@ export function isAirportPlace(place: string | null | undefined): boolean {
 export function transportTypeForRoute(places: Array<string | null | undefined>): 'Airport Transfer' | 'Point-to-Point Transfer' {
   return places.some(isAirportPlace) ? 'Airport Transfer' : 'Point-to-Point Transfer';
 }
+
+// --- Several services on one event ------------------------------------------
+
+/**
+ * An event can sell more than one catalog service (a transfer plus a meet and
+ * greet). They live in the event's `service` and `serviceCode` details as
+ * plain text, joined with these separators, so every reader of those fields
+ * — cards, PDFs, the client's share page, search — shows them unchanged.
+ */
+export const SERVICE_NAME_JOIN = ' + ';
+export const SERVICE_CODE_JOIN = ', ';
+export const MAX_SERVICES_PER_EVENT = 8;
+
+export interface PickedService {
+  name: string;
+  code: string;
+}
+
+/** The services an event's details hold, in the order they were picked. */
+export function splitServices(service: string | null | undefined, serviceCode: string | null | undefined): PickedService[] {
+  const names = (service ?? '').split(SERVICE_NAME_JOIN).map((n) => n.trim()).filter(Boolean);
+  const codes = (serviceCode ?? '').split(SERVICE_CODE_JOIN).map((c) => c.trim());
+  return names.map((name, i) => ({ name, code: codes[i] ?? '' }));
+}
+
+/** Back into the two detail fields. A code is kept positional, so an uncoded service holds its slot. */
+export function joinServices(services: PickedService[]): { service: string; serviceCode: string } {
+  const kept = services.filter((s) => s.name.trim());
+  return {
+    service: kept.map((s) => s.name.trim()).join(SERVICE_NAME_JOIN),
+    serviceCode: kept.some((s) => s.code) ? kept.map((s) => s.code.trim()).join(SERVICE_CODE_JOIN) : '',
+  };
+}

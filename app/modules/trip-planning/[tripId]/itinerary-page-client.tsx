@@ -63,6 +63,8 @@ interface ItineraryPageClientProps {
   clientTravelers: TravelerOption[];
   currentUser: { id: number; name: string; email: string };
   isAdmin: boolean;
+  /** Open the page on this event (`?event=<id>`), when it is on the trip. */
+  focusItemId?: number | null;
 }
 
 interface ItemPayload {
@@ -465,6 +467,7 @@ export default function ItineraryPageClient({
   clientTravelers: initialClientTravelers,
   currentUser,
   isAdmin,
+  focusItemId = null,
 }: ItineraryPageClientProps) {
   const [trip, setTrip] = useState<TripDetail>(initialTrip);
   useRefreshListAfterEdits(trip, initialTrip);
@@ -473,9 +476,11 @@ export default function ItineraryPageClient({
   const [pending, setPending] = useState<string | null>(null);
   const [pendingItemId, setPendingItemId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The event the page was opened on, when the link named one that exists. */
+  const focusedItem = focusItemId ? (initialTrip.items.find((i) => i.id === focusItemId) ?? null) : null;
   /** Which day the right-hand pane is showing. `null` = the Unscheduled tray. */
   const [activeDayId, setActiveDayId] = useState<number | null>(
-    initialTrip.days[0]?.id ?? null,
+    focusedItem ? (focusedItem.dayId ?? null) : (initialTrip.days[0]?.id ?? null),
   );
   // `null` means the unscheduled bucket; a day id that no longer exists (the
   // day was deleted) falls back to the first day.
@@ -495,6 +500,23 @@ export default function ItineraryPageClient({
   const [shareOpen, setShareOpen] = useState(false);
   /** The trip form is open once its options have loaded. */
   const [editOptions, setEditOptions] = useState<TripFormOptions | null>(null);
+  /**
+   * The event a link brought the planner to (`?event=<id>`, from the
+   * availability grid and elsewhere): its day is already open, so bring it
+   * into view and ring it for a moment.
+   */
+  const [highlightItemId, setHighlightItemId] = useState<number | null>(focusedItem?.id ?? null);
+  useEffect(() => {
+    if (highlightItemId === null) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`event-${highlightItemId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    const timer = window.setTimeout(() => setHighlightItemId(null), 6000);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [highlightItemId]);
 
   const isCreator = trip.createdBy.id === currentUser.id;
   const isOwner = trip.owner?.id === currentUser.id;
@@ -1392,6 +1414,7 @@ export default function ItineraryPageClient({
                   onStartAdd={startAdd}
                   onAddEmptyRun={startEmptyRun}
                   pending={pending}
+                  highlightItemId={highlightItemId}
                 />
               </>
             )}
@@ -1488,6 +1511,8 @@ interface ItemListProps {
   /** Open the add form on the empty run for a pick-up or drop-off. */
   onAddEmptyRun: (item: TripItineraryItemSummary) => void;
   pending: string | null;
+  /** The event a link brought the planner to: ringed until they move on. */
+  highlightItemId: number | null;
 }
 
 function ItemList({
@@ -1516,6 +1541,7 @@ function ItemList({
   onStartAdd,
   onAddEmptyRun,
   pending,
+  highlightItemId,
 }: ItemListProps) {
   const nodes = items
     .filter((item) => item.id !== dragItemId)
@@ -1538,9 +1564,12 @@ function ItemList({
         ) : (
           <div
             key={item.id}
+            id={`event-${item.id}`}
             ref={registerEvent(item.id)}
             onPointerDown={canEdit ? (event) => onPointerDownItem(event, item.id) : undefined}
-            className={`rounded-xl transition ${canEdit ? 'cursor-grab touch-none select-none' : ''}`}
+            className={`rounded-xl transition ${canEdit ? 'cursor-grab touch-none select-none' : ''} ${
+              highlightItemId === item.id ? 'rounded-2xl ring-2 ring-primary ring-offset-2 ring-offset-gray-50' : ''
+            }`}
           >
             {item.category === 'flight' ? (
               <FlightCard

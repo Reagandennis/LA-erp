@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 
-import { HANDOVER_STATUSES, SHIFT_PERIODS, type HandoverDetail } from './types';
+import RichTextEditor from '../_components/rich-text-editor';
+import { SHIFT_PERIODS, type HandoverDetail } from './types';
 
 interface HandoverFormProps {
   mode: 'create' | 'edit';
@@ -25,8 +26,6 @@ function Label({ children }: { children: React.ReactNode }) {
 export default function HandoverForm({ mode, handover, onClose, onSaved }: HandoverFormProps) {
   const [shiftDate, setShiftDate] = useState(handover ? handover.shiftDate.slice(0, 10) : todayIso());
   const [shiftPeriod, setShiftPeriod] = useState(handover?.shiftPeriod ?? 'Day');
-  const [post, setPost] = useState(handover?.post ?? '');
-  const [status, setStatus] = useState(handover?.status ?? 'Normal');
   const [summary, setSummary] = useState(handover?.summary ?? '');
   const [incidents, setIncidents] = useState(handover?.incidents ?? '');
   const [watchItems, setWatchItems] = useState(handover?.watchItems ?? '');
@@ -43,8 +42,6 @@ export default function HandoverForm({ mode, handover, onClose, onSaved }: Hando
     const body = {
       shiftDate,
       shiftPeriod,
-      post: post.trim() || null,
-      status,
       summary: summary.trim(),
       incidents: incidents.trim() || null,
       watchItems: watchItems.trim() || null,
@@ -103,25 +100,14 @@ export default function HandoverForm({ mode, handover, onClose, onSaved }: Hando
                   ))}
                 </select>
               </div>
-              <div>
-                <Label>Post / location</Label>
-                <input value={post} onChange={(e) => setPost(e.target.value)} placeholder="e.g. Main gate, Residence A" className={inputClass} />
-              </div>
-              <div>
-                <Label>Priority</Label>
-                <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
-                  {HANDOVER_STATUSES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
             </div>
 
+            <p className="text-xs text-gray-400">Use the toolbar for <strong className="font-semibold">bold</strong>, <em>italic</em> and lists; Enter inside a list starts the next item.</p>
             <div>
               <Label>Situation summary</Label>
-              <textarea
+              <RichTextEditor
                 value={summary}
-                onChange={(e) => setSummary(e.target.value)}
+                onChange={setSummary}
                 rows={3}
                 placeholder="Overall status at end of shift — all normal, or the headline."
                 className={inputClass}
@@ -130,9 +116,9 @@ export default function HandoverForm({ mode, handover, onClose, onSaved }: Hando
 
             <div>
               <Label>Incidents during shift</Label>
-              <textarea
+              <RichTextEditor
                 value={incidents}
-                onChange={(e) => setIncidents(e.target.value)}
+                onChange={setIncidents}
                 rows={3}
                 placeholder="Notable events, visitors, alarms, deliveries… (optional)"
                 className={inputClass}
@@ -141,9 +127,9 @@ export default function HandoverForm({ mode, handover, onClose, onSaved }: Hando
 
             <div>
               <Label>Watch items for next shift</Label>
-              <textarea
+              <RichTextEditor
                 value={watchItems}
-                onChange={(e) => setWatchItems(e.target.value)}
+                onChange={setWatchItems}
                 rows={3}
                 placeholder="Follow-ups, pending tasks, things to keep an eye on… (optional)"
                 className={inputClass}

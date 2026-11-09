@@ -194,3 +194,44 @@ describe('serviceMatches', () => {
     expect(serviceMatches(service, 'kenya')).toBe(false);
   });
 });
+
+describe('several services on one event', () => {
+  const editor = (category: EditorState['category'], details: Record<string, string> = {}): EditorState =>
+    ({ category, details }) as EditorState;
+  const transfer: ServiceOption = {
+    id: 1, code: 'KEN-TRF-P2P-SUV-STA-NBO', name: 'Point-to-Point Transfer - SUV Standard - Nairobi',
+    category: 'Transfers', subCategory: 'Point-to-Point (P2P)', serviceClass: null, tier: 'Standard',
+    country: 'Kenya', location: 'Nairobi', unitOfMeasure: 'Per Transfer',
+  };
+  const greet: ServiceOption = {
+    id: 2, code: 'KEN-MG-ARR-NBO', name: 'Meet & Greet - Arrival - Nairobi (NBO)',
+    category: 'Meet & Greet', subCategory: 'Arrival', serviceClass: null, tier: null,
+    country: 'Kenya', location: 'Nairobi', unitOfMeasure: 'Per Pax',
+  };
+
+  it('appends a second service and keeps both names and codes in order', async () => {
+    const { removeServicePatch, servicePatch } = await import('../app/modules/trip-planning/[tripId]/_components/service-picker');
+    const { joinServices, splitServices } = await import('../lib/service-catalog');
+    const first = { ...editor('transportation'), ...servicePatch(editor('transportation'), transfer) } as EditorState;
+    const both = servicePatch(first, greet).details!;
+    expect(both.service).toBe('Point-to-Point Transfer - SUV Standard - Nairobi + Meet & Greet - Arrival - Nairobi (NBO)');
+    expect(both.serviceCode).toBe('KEN-TRF-P2P-SUV-STA-NBO, KEN-MG-ARR-NBO');
+    expect(splitServices(both.service, both.serviceCode)).toEqual([
+      { name: transfer.name, code: transfer.code },
+      { name: greet.name, code: greet.code },
+    ]);
+    expect(joinServices(splitServices(both.service, both.serviceCode))).toEqual({ service: both.service, serviceCode: both.serviceCode });
+
+    // Picking the same one again changes nothing; removing the first leaves the second.
+    expect(servicePatch({ ...first, details: both } as EditorState, greet).details).toEqual(both);
+    expect(removeServicePatch({ ...first, details: both } as EditorState, 0).details).toEqual({ mode: 'Point-to-Point Transfer', service: greet.name, serviceCode: greet.code });
+    expect(removeServicePatch(first, 0).details).toEqual({ mode: 'Point-to-Point Transfer' });
+  });
+
+  it('still fits the event details once several long names are joined', () => {
+    const service = Array.from({ length: 8 }, (_, i) => `Airport Transfer - SUV Executive - Nairobi (NBO) option ${i + 1}`).join(' + ');
+    const parsed = tripItemDetailsSchema.safeParse({ service, serviceCode: Array(8).fill('KEN-TRF-APT-SUV-EXE-NBO').join(', '), mode: 'Airport Transfer' });
+    expect(parsed.success).toBe(true);
+    expect(service.length).toBeGreaterThan(200);
+  });
+});

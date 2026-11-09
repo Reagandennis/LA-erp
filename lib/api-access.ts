@@ -17,6 +17,8 @@ import { PEOPLE_MODULE_SLUGS } from './people-views';
 export const API_ACCESS = {
   /** Accounting connections (QuickBooks, Wave) — invoices, and Wave's quote estimates. */
   accounting: ['invoices-review', 'quotes'],
+  /** Company notices: everyone who holds the board reads and posts. */
+  bulletin: ['bulletin-board'],
   calendar: ['calendar'],
   communication: ['communication'],
   contacts: ['contact-list', 'customers'],

@@ -128,8 +128,14 @@ export async function POST(
     `,
   );
 
-  if (mentionIds.length > 0) {
-    const shareValues = mentionIds.map((userId) => Prisma.sql`(${taskId}, ${userId})`);
+  // Everyone mentioned gets the task shared with them: it appears in their
+  // Tasks and on their calendar, and the bell tells them who asked.
+  const recipients = mentionIds.filter((userId) => userId !== auth.user.id);
+  if (recipients.length > 0) {
+    const [task] = await prisma.$queryRaw<Array<{ title: string }>>`
+      SELECT "title" FROM "PersonalTodo" WHERE "id" = ${taskId}
+    `;
+    const shareValues = recipients.map((userId) => Prisma.sql`(${taskId}, ${userId})`);
     await prisma.$executeRaw(
       Prisma.sql`
         INSERT INTO "PersonalTodoShare" ("todoId", "userId")
@@ -138,8 +144,8 @@ export async function POST(
       `,
     );
 
-    const message = `Task was shared with you.`;
-    const notificationValues = mentionIds.map(
+    const message = `${auth.user.name} mentioned you on "${task?.title ?? 'a task'}" and shared it with you.`;
+    const notificationValues = recipients.map(
       (userId) => Prisma.sql`(${userId}, ${taskId}, 'task_shared', ${message})`,
     );
     await prisma.$executeRaw(
@@ -148,7 +154,7 @@ export async function POST(
         VALUES ${Prisma.join(notificationValues)}
       `,
     );
-    notifyNotificationsChanged(mentionIds);
+    notifyNotificationsChanged(recipients);
   }
 
   return NextResponse.json({ success: true }, { status: 201 });

@@ -7,6 +7,7 @@ import {
   countPastAssignments,
   listCurrentAssignments,
   listDrivers,
+  listEngagements,
   listOfficers,
   listTripOptions,
   listVehicles,
@@ -20,13 +21,14 @@ export async function GET(request: NextRequest) {
   if (response || !auth) return response;
 
   // Current assignments travel with the screen; the history is searched on demand.
-  const [vehicles, drivers, officers, assignments, pastAssignments, trips] = await Promise.all([
+  const [vehicles, drivers, officers, assignments, pastAssignments, trips, engagements] = await Promise.all([
     listVehicles(),
     listDrivers(),
     listOfficers(),
     listCurrentAssignments(),
     countPastAssignments(),
     listTripOptions(),
+    listEngagements(),
   ]);
 
   return NextResponse.json({
@@ -36,6 +38,7 @@ export async function GET(request: NextRequest) {
     assignments,
     pastAssignments,
     trips,
+    engagements,
     stats: computeStats({ trips, assignments, pastAssignments, vehicles, drivers, officers }),
   });
 }

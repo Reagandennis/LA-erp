@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { PEOPLE_VIEWS } from '../people-views';
+import { plainText } from '../rich-text';
 import { prisma } from '../prisma';
 import { buildAccessFilter as quoteAccessFilter } from '../quotes';
 import { ADMIN_ROLE_NAME } from '../rbac';
@@ -383,6 +384,25 @@ const searchers: Searcher[] = [
     },
   },
   {
+    id: 'bulletin',
+    label: 'Bulletin Board',
+    modules: ['bulletin-board'],
+    async run({ term }) {
+      const rows = await prisma.bulletinPost.findMany({
+        where: { OR: [{ title: like(term) }, { body: like(term) }] },
+        select: { id: true, title: true, body: true, category: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: FETCH,
+      });
+      return rank(rows, (r) => `${r.title} ${r.body}`, term).map((r) => ({
+        id: `bulletin-${r.id}`,
+        title: r.title,
+        subtitle: join(r.category, day(r.createdAt), excerpt(r.body, term, 70)),
+        href: '/modules/bulletin-board',
+      }));
+    },
+  },
+  {
     id: 'handover',
     label: 'Handovers',
     modules: ['handover'],
@@ -396,7 +416,7 @@ const searchers: Searcher[] = [
       return rank(rows, (r) => fields(r.post, r.summary, r.incidents, r.watchItems), term).map((r) => ({
         id: `handover-${r.id}`,
         title: join(r.post ?? 'Handover', r.shiftPeriod, day(r.shiftDate)) ?? 'Handover',
-        subtitle: join(r.status, excerpt(r.summary, term, 70)),
+        subtitle: join(r.status, excerpt(plainText(r.summary), term, 70)),
         href: '/modules/handover',
       }));
     },

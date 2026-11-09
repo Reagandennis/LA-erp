@@ -89,6 +89,8 @@ model User {
   createdIntelAssessments        IntelAssessment[]                @relation("IntelAssessmentCreatedBy")
   createdHandovers               HandoverEntry[]                  @relation("HandoverCreatedBy")
   acknowledgedHandovers          HandoverEntry[]                  @relation("HandoverAcknowledgedBy")
+  bulletinPosts                  BulletinPost[]                   @relation("BulletinAuthor")
+  bulletinReads                  BulletinRead[]                   @relation("BulletinReader")
   createdContacts                Contact[]                        @relation("ContactCreatedBy")
   createdSops                    Sop[]                            @relation("SopCreatedBy")
   sopAcknowledgements            SopAcknowledgement[]
@@ -1387,6 +1389,41 @@ model HandoverEntry {
   @@index([shiftDate])
   @@index([status])
   @@index([acknowledgedById])
+}
+
+/// A notice on the Bulletin Board (lib/bulletin.ts): company-wide, read by
+/// everyone who holds the module. Pinned posts sit on top; an expired post
+/// drops off the board but is kept for the record.
+model BulletinPost {
+  id        Int            @id @default(autoincrement())
+  title     String
+  body      String
+  /// Announcement | Notice | Safety | Event | Policy | Reminder
+  category  String         @default("Announcement")
+  pinned    Boolean        @default(false)
+  /// Null means the notice stays up until taken down.
+  expiresAt DateTime?
+  authorId  Int
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  author    User           @relation("BulletinAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  reads     BulletinRead[]
+
+  @@index([pinned, createdAt])
+  @@index([expiresAt])
+}
+
+/// Who has seen a notice. One row per person per post.
+model BulletinRead {
+  id     Int          @id @default(autoincrement())
+  postId Int
+  userId Int
+  readAt DateTime     @default(now())
+  post   BulletinPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User         @relation("BulletinReader", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId])
 }
 
 model TrackingSequence {

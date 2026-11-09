@@ -102,6 +102,13 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     sortOrder: 8,
   },
   {
+    slug: 'bulletin-board',
+    name: 'Bulletin Board',
+    description: 'Company notices and announcements for everyone — pin what matters, set an expiry, and see who has read it.',
+    category: 'Communication',
+    sortOrder: 10,
+  },
+  {
     slug: 'communication',
     name: 'Communication',
     description: 'Coordinate internal and operational messaging in one place.',
