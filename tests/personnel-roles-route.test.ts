@@ -3,16 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-const { requireModuleRequest, requireAdminRequest, listPersonnel, listUserOptions, createPersonnel } =
+const { requireModuleRequest, listPersonnel, listUserOptions, createPersonnel } =
   vi.hoisted(() => ({
     requireModuleRequest: vi.fn(),
-    requireAdminRequest: vi.fn(),
     listPersonnel: vi.fn(),
     listUserOptions: vi.fn(),
     createPersonnel: vi.fn(),
   }));
 
-vi.mock('../lib/request-auth', () => ({ requireModuleRequest, requireAdminRequest }));
+vi.mock('../lib/request-auth', () => ({ requireModuleRequest }));
 vi.mock('../lib/personnel', () => ({ listPersonnel, listUserOptions, createPersonnel }));
 
 import { GET, POST } from '../app/api/personnel/route';
@@ -21,7 +20,7 @@ const authed = { auth: { user: { id: 4 } }, response: undefined };
 
 describe('personnel collection route', () => {
   beforeEach(() => {
-    [requireModuleRequest, requireAdminRequest, listPersonnel, listUserOptions, createPersonnel]
+    [requireModuleRequest, listPersonnel, listUserOptions, createPersonnel]
       .forEach((m) => m.mockReset());
     listUserOptions.mockResolvedValue([]);
     listPersonnel.mockResolvedValue([]);
@@ -70,8 +69,47 @@ describe('personnel collection route', () => {
     expect(listPersonnel).toHaveBeenCalledWith({ role: null });
   });
 
+  it('lets any people-module holder create, not only admins', async () => {
+    requireModuleRequest.mockResolvedValue(authed);
+    createPersonnel.mockResolvedValue({ id: 12, name: 'New Driver' });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/personnel', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'New Driver', roles: ['Driver'] }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(requireModuleRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      'personnel',
+      'drivers',
+      'cpos',
+      'airport-greeters',
+      'security-advisors',
+    );
+  });
+
+  it('refuses a create from a caller holding no people module', async () => {
+    requireModuleRequest.mockResolvedValue({
+      auth: null,
+      response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/personnel', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Jane Doe' }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(createPersonnel).not.toHaveBeenCalled();
+  });
+
   it('passes the multi-role array through on create', async () => {
-    requireAdminRequest.mockResolvedValue(authed);
+    requireModuleRequest.mockResolvedValue(authed);
     createPersonnel.mockResolvedValue({ id: 11, name: 'Jane Doe' });
 
     const response = await POST(

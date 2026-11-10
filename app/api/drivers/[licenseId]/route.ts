@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireAdminRequest } from '@/lib/request-auth';
+import { API_ACCESS } from '@/lib/api-access';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { deleteDriverLicense, updateDriverLicense } from '@/lib/drivers';
 
 export const dynamic = 'force-dynamic';
@@ -15,10 +16,10 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ licenseId: string }> },
 ) {
-  // Admin-only, matching POST and DELETE. This previously accepted any
-  // authenticated user, so anyone logged in could rewrite any licence's
-  // holder, number and expiry date.
-  const { auth, response } = await requireAdminRequest(request);
+  // People-module holders only, matching POST and DELETE. This previously
+  // accepted any authenticated user, so anyone logged in could rewrite any
+  // licence's holder, number and expiry date.
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.people);
   if (response || !auth) return response;
 
   const { licenseId: raw } = await params;
@@ -65,7 +66,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ licenseId: string }> },
 ) {
-  const { auth, response } = await requireAdminRequest(request);
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.people);
   if (response || !auth) return response;
 
   const { licenseId: raw } = await params;

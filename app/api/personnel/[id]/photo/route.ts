@@ -17,8 +17,9 @@ function parseId(value: string) {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-function canView(user: Parameters<typeof userHasRole>[0]) {
-  // Any of the five people modules may render this avatar.
+function canUse(user: Parameters<typeof userHasRole>[0]) {
+  // Any of the five people modules may render this avatar — and, since holding
+  // one grants editing, upload it.
   return (
     userHasRole(user, ADMIN_ROLE_NAME) || PEOPLE_MODULE_SLUGS.some((slug) => userHasModule(user, slug))
   );
@@ -27,7 +28,7 @@ function canView(user: Parameters<typeof userHasRole>[0]) {
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { auth, response } = await requireRequestAuth(request);
   if (response || !auth) return response;
-  if (!canView(auth.user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!canUse(auth.user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id: raw } = await params;
   const id = parseId(raw);
@@ -43,13 +44,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   });
 }
 
-// Upload/replace — admin only (writes are gated like the rest of the module).
+// Upload/replace — gated like the rest of the people modules' writes.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { auth, response } = await requireRequestAuth(request);
   if (response || !auth) return response;
-  if (!userHasRole(auth.user, ADMIN_ROLE_NAME)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  if (!canUse(auth.user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id: raw } = await params;
   const id = parseId(raw);

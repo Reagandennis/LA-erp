@@ -33,10 +33,12 @@ export default async function SecurityAdvisorsPage({
 
   const [items, users] = await Promise.all([listPersonnel({ role: view.role }), listUserOptions()]);
 
+  // Reaching this page already needs the module (or admin), and holding the
+  // module is what grants editing — so everyone here may add and edit.
   return (
     <PeopleDirectory
       view={view}
-      isAdmin={isAdmin}
+      canEdit
       initialItems={items}
       initialUsers={users}
       initialSelectedId={Number.isInteger(personId) && personId > 0 ? personId : null}

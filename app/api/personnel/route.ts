@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isPersonnelRole, PEOPLE_MODULE_SLUGS } from '@/lib/people-views';
 import { createPersonnel, listPersonnel, listUserOptions } from '@/lib/personnel';
-import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -22,7 +22,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireAdminRequest(request);
+  // Holding any people module grants editing as well as reading: a drivers or
+  // CPO coordinator adds their own people without needing an admin.
+  const { auth, response } = await requireModuleRequest(request, ...PEOPLE_MODULE_SLUGS);
   if (response || !auth) return response;
 
   const body = await request.json().catch(() => null);

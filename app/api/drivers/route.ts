@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { API_ACCESS } from '@/lib/api-access';
-import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { computeStats, createDriverLicense, listDriverLicenses } from '@/lib/drivers';
 import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 
@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireAdminRequest(request);
+  // Licences are added from a person's profile, so the people modules write them.
+  const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.people);
   if (response || !auth) return response;
 
   let formData: FormData;

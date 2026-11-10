@@ -59,7 +59,7 @@ function formatDate(iso: string | null) {
 
 type Props = {
   view: PeopleView;
-  isAdmin: boolean;
+  canEdit: boolean;
   /** List rows only; a card's full record is fetched when it is opened. */
   initialItems: PersonnelListItem[];
   initialUsers: UserOption[];
@@ -96,7 +96,7 @@ const BASE_FORM: Form = {
 type LicenceForm = { licenseNumber: string; category: string; expiryDate: string; document: File | null };
 const EMPTY_LICENCE: LicenceForm = { licenseNumber: '', category: 'Class A', expiryDate: '', document: null };
 
-export default function PeopleDirectory({ view, isAdmin, initialItems, initialUsers, initialSelectedId }: Props) {
+export default function PeopleDirectory({ view, canEdit, initialItems, initialUsers, initialSelectedId }: Props) {
   const [items, setItems] = useState<PersonnelListItem[]>(initialItems);
   const [users, setUsers] = useState<UserOption[]>(initialUsers);
   const [search, setSearch] = useState('');
@@ -452,7 +452,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
             <h1 className="text-2xl font-semibold text-gray-900">{view.title}</h1>
             <p className="text-gray-500 mt-1 text-sm">{view.subtitle}</p>
           </div>
-          {isAdmin && (
+          {canEdit && (
             <button onClick={openCreate} className="self-start md:self-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-95" style={{ backgroundColor: BRAND }}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -511,7 +511,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
             <p className="text-gray-900 font-medium">{items.length === 0 ? view.emptyTitle : 'No matching records'}</p>
             <p className="text-gray-500 text-sm mt-1">
               {items.length === 0
-                ? (isAdmin ? view.emptyHint : 'Nothing has been added yet.')
+                ? (canEdit ? view.emptyHint : 'Nothing has been added yet.')
                 : 'Try a different search or filter.'}
             </p>
           </div>
@@ -651,7 +651,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs text-gray-400">Driving licences</p>
-                    {isAdmin && (
+                    {canEdit && (
                       <button onClick={() => { setLicenceOpen((v) => !v); setError(null); }} className="text-xs font-semibold text-[#03458f] hover:underline">
                         {licenceOpen ? 'Cancel' : 'Add licence'}
                       </button>
@@ -679,7 +679,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
                               View document
                             </a>
                           )}
-                          {isAdmin && (
+                          {canEdit && (
                             <button onClick={() => removeLicence(l.id)} disabled={busy} className="text-xs font-semibold text-rose-600 hover:underline disabled:opacity-50">
                               Delete
                             </button>
@@ -689,7 +689,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
                     ))}
                   </div>
 
-                  {licenceOpen && isAdmin && (
+                  {licenceOpen && canEdit && (
                     <form onSubmit={addLicence} className="mt-3 border border-gray-100 rounded-xl p-3 space-y-3">
                       <div>
                         <Label>Licence number *</Label>
@@ -739,7 +739,7 @@ export default function PeopleDirectory({ view, isAdmin, initialItems, initialUs
             </div>
             )}
 
-            {isAdmin && selected && (
+            {canEdit && selected && (
               <div className="p-6 border-t border-gray-100 sticky bottom-0 bg-white flex gap-3">
                 <button onClick={() => remove(selected.id)} disabled={busy} className="px-4 py-2.5 rounded-xl border border-rose-200 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">
                   Delete

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { PEOPLE_MODULE_SLUGS } from '@/lib/people-views';
 import { deletePersonnel, getPersonnelById, updatePersonnel } from '@/lib/personnel';
-import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
+import { requireModuleRequest } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireAdminRequest(request);
+  const { auth, response } = await requireModuleRequest(request, ...PEOPLE_MODULE_SLUGS);
   if (response || !auth) return response;
 
   const { id: raw } = await params;
@@ -87,7 +87,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireAdminRequest(request);
+  const { auth, response } = await requireModuleRequest(request, ...PEOPLE_MODULE_SLUGS);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

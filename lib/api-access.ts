@@ -34,6 +34,12 @@ export const API_ACCESS = {
   intel: ['intel'],
   /** Driver licences: their own module, and the people directory's driver profiles. */
   licences: ['drivers-license-expiry', ...PEOPLE_MODULE_SLUGS],
+  /**
+   * The people directory itself. Holding any people module grants editing as
+   * well as reading — adding a driver, CPO, greeter or advisor and their
+   * licences and photos — so coordinators needn't be admins.
+   */
+  people: PEOPLE_MODULE_SLUGS,
   notes: ['notes'],
   /** The board itself; each panel on it is gated by its own module as well. */
   opsDashboard: ['ops-dashboard'],
