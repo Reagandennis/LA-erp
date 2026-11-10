@@ -17,6 +17,7 @@ import type {
   StatusFilter,
   TemplateOption,
 } from './types';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 interface QuotesClientProps {
   currentUser: { id: number; name: string; email: string };
@@ -76,12 +77,12 @@ export default function QuotesClient({
   initialBrandProfiles,
   organization,
 }: QuotesClientProps) {
-  const [quotes, setQuotes] = useState<QuoteSummary[]>(initialQuotes);
-  const [customers, setCustomers] = useState<CustomerOption[]>(initialCustomers);
-  const [approvers] = useState<ApproverOption[]>(initialApprovers);
-  const [products] = useState<ProductOption[]>(initialProducts);
-  const [templates, setTemplates] = useState<TemplateOption[]>(initialTemplates);
-  const [brandProfiles] = useState<BrandProfileOption[]>(initialBrandProfiles);
+  const [quotes, setQuotes] = useSyncedState<QuoteSummary[]>(initialQuotes);
+  const [customers, setCustomers] = useSyncedState<CustomerOption[]>(initialCustomers);
+  const [approvers] = useSyncedState<ApproverOption[]>(initialApprovers);
+  const [products] = useSyncedState<ProductOption[]>(initialProducts);
+  const [templates, setTemplates] = useSyncedState<TemplateOption[]>(initialTemplates);
+  const [brandProfiles] = useSyncedState<BrandProfileOption[]>(initialBrandProfiles);
   const [selectedQuoteId, setSelectedQuoteId] = useState<number | null>(null);
   const [builderState, setBuilderState] = useState<
     | { open: false }

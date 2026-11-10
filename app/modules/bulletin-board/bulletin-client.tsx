@@ -3,6 +3,9 @@
 import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useLiveRefresh } from '@/app/ui/use-live-refresh';
+import { MODULE_SOURCES } from '@/lib/live-sources';
+
 import BulletinForm from './bulletin-form';
 import { BULLETIN_CATEGORIES, type BulletinData, type BulletinPostDetail, type BulletinPostSummary, type BulletinReader } from './types';
 
@@ -76,6 +79,17 @@ export default function BulletinClient({ currentUser, isAdmin, initialData }: Bu
       cancelled = true;
     };
   }, [showExpired, expiredLoaded]);
+
+  // A notice posted, pinned or removed by someone else appears without a
+  // reload, keeping the expired ones on screen when the switch is on.
+  useLiveRefresh(MODULE_SOURCES['bulletin-board'] ?? [], () => {
+    fetch(showExpired ? '/api/bulletin?all=1' : '/api/bulletin', { credentials: 'include', cache: 'no-store' })
+      .then((r) => (r.ok ? (r.json() as Promise<BulletinData>) : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => setPosts(data.posts))
+      .catch(() => {
+        // The next change, or the next minute, tries again.
+      });
+  });
 
   const stats = useMemo(() => {
     const weekAgo = nowMs - 7 * 24 * 60 * 60 * 1000;

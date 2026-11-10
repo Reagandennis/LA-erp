@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import HandoverDetailDrawer from './handover-detail-drawer';
 import HandoverForm from './handover-form';
 import { HANDOVER_STATUSES, type HandoverData, type HandoverDetail, type StatusFilter } from './types';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const STATUS_FILTERS: StatusFilter[] = ['All', 'Awaiting', ...HANDOVER_STATUSES];
 
@@ -27,7 +28,7 @@ interface HandoverClientProps {
 }
 
 export default function HandoverClient({ currentUser, isAdmin, initialData }: HandoverClientProps) {
-  const [handovers, setHandovers] = useState<HandoverDetail[]>(initialData.handovers);
+  const [handovers, setHandovers] = useSyncedState<HandoverDetail[]>(initialData.handovers);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [formState, setFormState] = useState<
     { open: false } | { open: true; mode: 'create' } | { open: true; mode: 'edit'; handover: HandoverDetail }

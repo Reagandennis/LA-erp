@@ -8,6 +8,7 @@ import type {
   SopStats,
   SopSummary,
 } from '@/lib/sops';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 
@@ -70,8 +71,8 @@ const EMPTY_FORM: SopForm = {
 };
 
 export default function SopsClient({ currentUser, isAdmin, initialItems, initialStats, initialOpenId = null }: Props) {
-  const [items, setItems] = useState<SopSummary[]>(initialItems);
-  const [stats, setStats] = useState<SopStats>(initialStats);
+  const [items, setItems] = useSyncedState<SopSummary[]>(initialItems);
+  const [stats, setStats] = useSyncedState<SopStats>(initialStats);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');

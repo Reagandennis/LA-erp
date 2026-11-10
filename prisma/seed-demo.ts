@@ -18,6 +18,8 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
+import { DEFAULT_RULES, addMonths, generatedCode, monthDates } from '../lib/shift-rules';
+
 const prisma = new PrismaClient();
 
 const DEMO_DOMAIN = 'ladyaskari-demo.test';
@@ -106,7 +108,7 @@ const EDITOR_MODULES = [
   'security-advisors', 'travelers', 'vendors-suppliers', 'communication', 'notes', 'file-upload', 'ai-chatbot',
   'vehicles', 'contact-list', 'sops', 'quotes', 'customers', 'products-services', 'reports', 'feedback', 'clock',
   'notification-center', 'drivers-license-expiry', 'contract-renewal', 'invoices-review', 'sales-metrics',
-  'finance-metrics', 'clock-in-out', 'shift-planning', 'weather', 'flight-tracker', 'trip-planning',
+  'finance-metrics', 'clock-in-out', 'shift-planning', 'shift-planning-admin', 'weather', 'flight-tracker', 'trip-planning',
   'task-assignment', 'intel', 'kpis',
 ];
 const VIEWER_MODULES = [
@@ -742,45 +744,36 @@ async function main() {
   const holidays = [[`${year}-01-01`, "New Year's Day"], [`${year}-05-01`, 'Labour Day'], [`${year}-06-01`, 'Madaraka Day'], [`${year}-10-10`, 'Utamaduni Day'], [`${year}-10-20`, 'Mashujaa Day'], [`${year}-12-12`, 'Jamhuri Day'], [`${year}-12-25`, 'Christmas Day'], [`${year}-12-26`, 'Boxing Day']];
   for (const [date, name] of holidays) await prisma.publicHoliday.create({ data: { date, name, createdById: faith.id } });
 
-  // ---- teams, shift templates, schedule, leave --------------------------
-  const teams = [
-    { name: 'Alpha Detail', colour: 'emerald', members: [peter.id, amina.id] },
-    { name: 'Bravo Detail', colour: 'violet', members: [grace.id, daniel.id] },
-    { name: 'Control Room', colour: 'amber', members: [faith.id, amina.id] },
-  ];
-  const teamIds: string[] = [];
-  for (const t of teams) {
-    const row = await prisma.team.create({ data: { name: t.name, colour: t.colour, createdById: admin.id, members: { create: t.members.map((userId) => ({ userId })) } } });
-    teamIds.push(row.id);
+  // ---- shift roster: rotation, this month published, next month draft -----
+  // Five control-room lines on the default 10-day rotation, two cycle days
+  // apart, so every day has one person on each console shift and one on call.
+  const firstOfMonth = `${dateKey(at(0)).slice(0, 7)}-01`;
+  const rosterRules = { ...DEFAULT_RULES, rotationStart: firstOfMonth };
+  const rosterConfig = { ...rosterRules, codes: JSON.parse(JSON.stringify(rosterRules.codes)), updatedById: admin.id };
+  await prisma.shiftConfig.upsert({ where: { id: 1 }, create: { id: 1, ...rosterConfig }, update: rosterConfig });
+  const rosterPeople = [amina, daniel, grace, faith, peter];
+  const rosterLines = [];
+  for (const [i, person] of rosterPeople.entries()) {
+    rosterLines.push(await prisma.shiftLine.create({ data: { code: `TRC-${i + 1}`, userId: person.id, cycleOffset: i * 2, sortOrder: i + 1 } }));
   }
-  const templates = [
-    { name: 'Day detail', startTime: '06:00', endTime: '18:00', weekdays: [1, 2, 3, 4, 5], colour: 'blue', sortOrder: 0, teams: [teamIds[0]] },
-    { name: 'Night detail', startTime: '18:00', endTime: '06:00', weekdays: [1, 2, 3, 4, 5, 6, 0], colour: 'violet', sortOrder: 1, teams: [teamIds[1]] },
-    { name: 'Control room', startTime: '08:00', endTime: '17:00', weekdays: [1, 2, 3, 4, 5], colour: 'amber', sortOrder: 2, teams: [teamIds[2]] },
-  ];
-  for (const t of templates) {
-    await prisma.shiftTemplate.create({ data: { name: t.name, startTime: t.startTime, endTime: t.endTime, weekdays: t.weekdays, colour: t.colour, sortOrder: t.sortOrder, createdById: admin.id, teams: { create: t.teams.map((teamId) => ({ teamId })) } } });
-  }
-  const scheduleRows: Array<{ employeeId: number; date: string; type: string; startTime?: string; endTime?: string; timeLabel?: string; role?: string; location?: string }> = [];
-  for (let d = -7; d <= 14; d++) {
-    const date = at(d);
-    const key = dateKey(date);
-    const weekday = date.getDay();
-    if (weekday >= 1 && weekday <= 5) {
-      scheduleRows.push({ employeeId: amina.id, date: key, type: 'work-day', startTime: '08:00', endTime: '17:00', timeLabel: '08:00–17:00', role: 'Ops manager', location: 'HQ' });
-      scheduleRows.push({ employeeId: daniel.id, date: key, type: 'work-day', startTime: '08:30', endTime: '17:30', timeLabel: '08:30–17:30', role: 'Finance', location: 'HQ' });
-      scheduleRows.push({ employeeId: grace.id, date: key, type: 'work-day', startTime: '09:00', endTime: '18:00', timeLabel: '09:00–18:00', role: 'Sales', location: 'HQ / client sites' });
-      scheduleRows.push({ employeeId: faith.id, date: key, type: d >= 8 && d <= 12 ? 'vacation' : 'work-day', startTime: '08:00', endTime: '17:00', timeLabel: '08:00–17:00', role: 'Control room', location: 'HQ' });
+  const thisMonth = firstOfMonth.slice(0, 7);
+  const nextMonth = addMonths(thisMonth, 1);
+  const rosterRows = [];
+  for (const month of [thisMonth, nextMonth]) {
+    for (const line of rosterLines) {
+      for (const date of monthDates(month)) {
+        const code = generatedCode(rosterRules, line.cycleOffset ?? 0, date);
+        const def = rosterRules.codes[code];
+        rosterRows.push({ lineId: line.id, date, generatedCode: code, plannedCode: code, plannedStart: def.start, plannedEnd: def.end });
+      }
     }
-    scheduleRows.push({ employeeId: peter.id, date: key, type: weekday === 0 || weekday === 6 ? 'available' : 'work-night', startTime: '18:00', endTime: '06:00', timeLabel: '18:00–06:00', role: 'Night detail lead', location: 'Client residence, Karen' });
   }
-  for (const row of scheduleRows) {
-    await prisma.scheduleShift.create({ data: { ...row, publishedAt: at(-8), createdById: admin.id } });
-  }
-  await prisma.leaveRequest.create({ data: { userId: faith.id, type: 'annual', startDate: dateKey(at(8)), endDate: dateKey(at(12)), status: 'approved', note: 'Family trip to Kisumu.', decidedById: admin.id, decidedAt: at(-3) } });
-  await prisma.leaveRequest.create({ data: { userId: grace.id, type: 'casual', startDate: dateKey(at(4)), endDate: dateKey(at(4)), status: 'pending', note: 'Half-day for a school event.' } });
-  await prisma.leaveRequest.create({ data: { userId: daniel.id, type: 'sick', startDate: dateKey(at(-6)), endDate: dateKey(at(-5)), status: 'approved', decidedById: amina.id, decidedAt: at(-6) } });
-  console.log(`schedule shifts: ${scheduleRows.length}`);
+  await prisma.shiftRecord.createMany({ data: rosterRows });
+  await prisma.shiftMonth.create({ data: { month: thisMonth, status: 'published', generatedById: admin.id, publishedAt: at(-14), publishedById: admin.id } });
+  await prisma.shiftMonth.create({ data: { month: nextMonth, status: 'draft', generatedById: admin.id } });
+  await prisma.shiftLeave.create({ data: { lineId: rosterLines[2]!.id, type: 'annual', startDate: dateKey(at(9)), endDate: dateKey(at(11)), status: 'pending', shiftsCharged: 2, note: 'Family trip to Kisumu.', requestedById: grace.id } });
+  await prisma.shiftAudit.create({ data: { action: 'generate', actorId: admin.id, actorName: admin.name, month: thisMonth, summary: `Generated ${thisMonth} and ${nextMonth} from the rotation (demo data)` } });
+  console.log(`roster shifts: ${rosterRows.length}`);
 
   // ---- personal tasks ---------------------------------------------------
   const todos = [

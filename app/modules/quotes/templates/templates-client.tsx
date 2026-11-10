@@ -4,6 +4,7 @@ import { APP_LOCALE } from '@/lib/locale';
 import { useMemo, useState } from 'react';
 
 import type { DiscountType, TemplateOption } from '../types';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 
@@ -64,7 +65,7 @@ function money(amount: number, currency: string) {
 }
 
 export default function TemplatesClient({ initialTemplates }: TemplatesClientProps) {
-  const [templates, setTemplates] = useState<TemplateOption[]>(initialTemplates);
+  const [templates, setTemplates] = useSyncedState<TemplateOption[]>(initialTemplates);
   const [error, setError] = useState<string | null>(null);
 
   const [editorOpen, setEditorOpen] = useState(false);

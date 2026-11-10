@@ -343,9 +343,18 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
   {
     slug: 'shift-planning',
     name: 'Shift Planning',
-    description: 'Plan shifts, manage teams, approve leave, and set public holidays.',
+    description: 'Your shifts at a glance: what you are on today, what is next, your month, and your leave.',
     category: 'Time',
     sortOrder: 38,
+  },
+  // The roster's back office. Admins always have it; grant it to make someone a
+  // scheduler. Staff only ever need Shift Planning, above.
+  {
+    slug: 'shift-planning-admin',
+    name: 'Shift Planning Admin',
+    description: 'Build and publish the roster: rotation, people, overrides, call-ins, leave, holidays, rules, and the audit log.',
+    category: 'Time',
+    sortOrder: 39,
   },
   {
     slug: 'weather',

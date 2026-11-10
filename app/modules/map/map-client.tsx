@@ -16,6 +16,8 @@ import {
   type TrackedDevice,
 } from '@/lib/map-types';
 import { SILENT_BANNER_HEADER, useBanner } from '@/app/ui/banner';
+import { useLiveRefresh } from '@/app/ui/use-live-refresh';
+import { MODULE_SOURCES } from '@/lib/live-sources';
 
 import MapCanvas from './map-canvas';
 import BordersPanel from './panel-borders';
@@ -166,6 +168,13 @@ export default function MapClient() {
     const data = (await res.json()) as { items: MapFeatureDto[] };
     setFeaturesByLayer((prev) => ({ ...prev, [layerId]: data.items }));
   }, []);
+
+  // Someone else drew, moved or deleted a shape, or changed a layer or
+  // category: reload the workspace and every layer already on the map.
+  useLiveRefresh(MODULE_SOURCES.map ?? [], () => {
+    void loadWorkspace();
+    for (const layerId of requestedLayers.current) void refreshLayerFeatures(layerId);
+  }, 0);
 
   /* --------------------------------------------------------- derived lookups */
 

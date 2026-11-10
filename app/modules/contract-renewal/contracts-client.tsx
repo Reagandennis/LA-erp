@@ -4,6 +4,7 @@ import { APP_LOCALE } from '@/lib/locale';
 import React, { useMemo, useRef, useState } from 'react';
 
 import type { ContractStats, ContractSummary } from '@/lib/contracts';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 
@@ -94,8 +95,8 @@ const EMPTY_FORM: ContractForm = {
 };
 
 export default function ContractsClient({ isAdmin, initialItems, initialStats, initialOpenId = null }: Props) {
-  const [items, setItems] = useState<ContractSummary[]>(initialItems);
-  const [stats, setStats] = useState<ContractStats>(initialStats);
+  const [items, setItems] = useSyncedState<ContractSummary[]>(initialItems);
+  const [stats, setStats] = useSyncedState<ContractStats>(initialStats);
   const [selectedId, setSelectedId] = useState<number | null>(() =>
     initialOpenId !== null && initialItems.some((i) => i.id === initialOpenId) ? initialOpenId : null,
   );

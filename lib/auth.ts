@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { cache } from 'react';
 
+import { markRequest } from './live-events';
 import { PRESENCE_HEARTBEAT_MS } from './presence';
 import { prisma } from './prisma';
 import { isPrismaDatabaseUnavailableError } from './prisma-errors';
@@ -141,6 +142,8 @@ async function resolveAuthenticatedUser(token: string | null) {
 }
 
 export async function getRequestAuth(request: NextRequest) {
+  // Lets live updates tell a change someone made from the housekeeping a read does.
+  markRequest(request.method);
   return resolveAuthenticatedUser(getSessionCookieValue(request));
 }
 
@@ -150,9 +153,17 @@ export async function getRequestAuth(request: NextRequest) {
  * Wrapped in React `cache` so the root layout and the page it renders share a
  * single session lookup per request instead of each hitting the database.
  */
-export const getServerAuth = cache(async () => {
+const resolveServerAuth = cache(async () => {
   const cookieStore = await cookies();
   return resolveAuthenticatedUser(
     cookieStore.get(SESSION_COOKIE_NAME)?.value ?? null,
   );
 });
+
+export function getServerAuth() {
+  // Rendering a page is a read: anything it writes is housekeeping, not a
+  // change to announce. Marked on every call, outside the cache, because the
+  // layout and the page each render in their own context.
+  markRequest('GET');
+  return resolveServerAuth();
+}

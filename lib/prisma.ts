@@ -2,6 +2,8 @@ import 'server-only';
 
 import { PrismaClient } from '@prisma/client';
 
+import { announceWrite, isWriteOperation, tableOfRawWrite } from './live-events';
+
 declare global {
   var prismaGlobal: PrismaClient | undefined;
 }
@@ -87,11 +89,34 @@ function hasRequiredDelegates(client: PrismaClient): boolean {
 
 const cachedClient = globalThis.prismaGlobal;
 
-export const prisma =
+const baseClient =
   cachedClient && hasRequiredDelegates(cachedClient)
     ? cachedClient
     : createPrismaClient();
 
 if (process.env.NODE_ENV !== 'production') {
-  globalThis.prismaGlobal = prisma;
+  globalThis.prismaGlobal = baseClient;
 }
+
+/**
+ * The one database client. Every write made through it, by any module or
+ * background job, is reported to lib/live-events.ts, which tells open pages
+ * to refresh. That single hook is what keeps the whole app in sync without
+ * each route having to remember to announce its changes.
+ *
+ * `$extends` wraps the same client and the same connection pool; it opens
+ * nothing new, so re-evaluating this module in development stays cheap.
+ */
+export const prisma = baseClient.$extends({
+  query: {
+    async $allOperations({ model, operation, args, query }) {
+      const result = await query(args);
+      if (model) {
+        if (isWriteOperation(operation)) announceWrite(model, result);
+      } else if (operation === '$executeRaw' || operation === '$executeRawUnsafe') {
+        if (result !== 0) announceWrite(tableOfRawWrite(args));
+      }
+      return result;
+    },
+  },
+}) as unknown as PrismaClient;

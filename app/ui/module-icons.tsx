@@ -271,6 +271,14 @@ export const MODULE_ICONS: Record<string, ReactNode> = {
       <path strokeLinecap="round" d="M7.5 14h3M13.5 14h3M7.5 17.5h3" />
     </svg>
   ),
+  'shift-planning-admin': (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21H5a2 2 0 01-2-2V7a2 2 0 012-2h14a2 2 0 012 2v4" />
+      <path strokeLinecap="round" d="M3 10h18M8 3v4M16 3v4" />
+      <circle cx="17.5" cy="17.5" r="2" />
+      <path strokeLinecap="round" d="M17.5 13.5v1.2M17.5 20.3v1.2M21.5 17.5h-1.2M14.7 17.5h-1.2M20.3 14.7l-.85.85M15.55 19.45l-.85.85M20.3 20.3l-.85-.85M15.55 15.55l-.85-.85" />
+    </svg>
+  ),
   'clock-in-out': (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />

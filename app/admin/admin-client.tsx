@@ -23,6 +23,7 @@ import SessionsPanel from './_components/sessions-panel';
 import SettingsPanel from './_components/settings-panel';
 import UserDrawer from './_components/user-drawer';
 import UsersPanel, { QUICK_FILTERS } from './_components/users-panel';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 interface AdminClientProps {
   currentUserId: number;
@@ -62,12 +63,12 @@ export default function AdminClient({
   renderedAt,
 }: AdminClientProps) {
   const [tab, setTab] = useState<AdminTab>(initialTab);
-  const [users, setUsers] = useState(initialUsers);
-  const [roles, setRoles] = useState(initialRoles);
-  const [modules, setModules] = useState(initialModules);
-  const [overview, setOverview] = useState(initialOverview);
-  const [sessions, setSessions] = useState(initialSessions);
-  const [recentAudit, setRecentAudit] = useState(initialAudit);
+  const [users, setUsers] = useSyncedState(initialUsers);
+  const [roles, setRoles] = useSyncedState(initialRoles);
+  const [modules, setModules] = useSyncedState(initialModules);
+  const [overview, setOverview] = useSyncedState(initialOverview);
+  const [sessions, setSessions] = useSyncedState(initialSessions);
+  const [recentAudit, setRecentAudit] = useSyncedState(initialAudit);
   const [quickFilter, setQuickFilter] = useState<UserQuickFilter | null>(null);
   const [auditAction, setAuditAction] = useState('');
   const [openUserId, setOpenUserId] = useState<number | null>(null);
@@ -118,7 +119,7 @@ export default function AdminClient({
     setUsers(payload.users);
     setRoles(payload.roles);
     setModules(payload.modules);
-  }, []);
+  }, [setUsers, setRoles, setModules]);
 
   const reloadOverview = useCallback(async () => {
     const [ov, audit] = await Promise.all([
@@ -127,12 +128,12 @@ export default function AdminClient({
     ]);
     setOverview(ov.overview);
     setRecentAudit(audit);
-  }, []);
+  }, [setOverview, setRecentAudit]);
 
   const reloadSessions = useCallback(async () => {
     const payload = await adminFetch<{ sessions: AdminSession[] }>('/api/admin/sessions');
     setSessions(payload.sessions);
-  }, []);
+  }, [setSessions]);
 
   const refreshAll = async () => {
     setRefreshing(true);

@@ -35,6 +35,7 @@ import {
   vehicleLabel,
 } from '@/lib/fleet';
 import { APP_LOCALE } from '@/lib/locale';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 type Period = 'month' | '90d' | 'year' | 'all';
 
@@ -90,7 +91,7 @@ export default function FuelClient({
   defaultCurrency: string;
   today: string;
 }) {
-  const [logs, setLogs] = useState<FuelLogDto[]>(initialLogs);
+  const [logs, setLogs] = useSyncedState<FuelLogDto[]>(initialLogs);
   const [search, setSearch] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState<number | null>(null);
   const [period, setPeriod] = useState<Period>('month');

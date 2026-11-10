@@ -17,6 +17,7 @@ import type {
   ProductOption,
   StatusFilter,
 } from './types';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 interface InvoicesClientProps {
   currentUser: { id: number; name: string; email: string };
@@ -85,8 +86,8 @@ export default function InvoicesClient({
   approvers,
   initialOpenId = null,
 }: InvoicesClientProps) {
-  const [invoices, setInvoices] = useState<InvoiceSummary[]>(initialInvoices);
-  const [customers, setCustomers] = useState<CustomerOption[]>(initialCustomers);
+  const [invoices, setInvoices] = useSyncedState<InvoiceSummary[]>(initialInvoices);
+  const [customers, setCustomers] = useSyncedState<CustomerOption[]>(initialCustomers);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(() =>
     initialOpenId !== null && initialInvoices.some((i) => i.id === initialOpenId) ? initialOpenId : null,
   );

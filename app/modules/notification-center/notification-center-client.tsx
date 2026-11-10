@@ -4,6 +4,7 @@ import { APP_LOCALE } from '@/lib/locale';
 import React, { useMemo, useState } from 'react';
 
 import type { DueDateBuckets, DueDateItem, DueSource } from '@/lib/due-dates';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 
@@ -62,8 +63,8 @@ function groupOf(days: number): GroupKey {
 }
 
 export default function NotificationCenterClient({ initialItems, initialBuckets }: Props) {
-  const [items] = useState<DueDateItem[]>(initialItems);
-  const [buckets] = useState<DueDateBuckets>(initialBuckets);
+  const [items] = useSyncedState<DueDateItem[]>(initialItems);
+  const [buckets] = useSyncedState<DueDateBuckets>(initialBuckets);
   const [search, setSearch] = useState('');
   const [source, setSource] = useState<DueSource | 'all'>('all');
 

@@ -11,6 +11,7 @@ import {
   SERVICE_TIERS,
   UNITS_OF_MEASURE,
 } from '@/lib/service-catalog';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 interface ProductsClientProps {
   initialProducts: ProductSummary[];
@@ -71,7 +72,7 @@ const inputClass =
 const labelClass = 'block text-xs font-medium text-gray-600 mb-1.5';
 
 export default function ProductsClient({ initialProducts, defaultCurrency }: ProductsClientProps) {
-  const [products, setProducts] = useState<ProductSummary[]>(initialProducts);
+  const [products, setProducts] = useSyncedState<ProductSummary[]>(initialProducts);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<Filter>('Active');
   const [country, setCountry] = useState('');

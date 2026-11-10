@@ -30,6 +30,9 @@ import type {
   TripSummary,
   TripsTab,
 } from './types';
+import { useLiveRefresh } from '@/app/ui/use-live-refresh';
+import { useSyncedState } from '@/app/ui/use-synced-state';
+import { MODULE_SOURCES } from '@/lib/live-sources';
 
 interface TripsClientProps {
   currentUser: { id: number; name: string; email: string };
@@ -95,13 +98,13 @@ export default function TripsClient({
 }: TripsClientProps) {
   const router = useRouter();
   const [tab, setTab] = useState<TripsTab>(initialTab);
-  const [closeoutTrips, setCloseoutTrips] = useState<CloseoutTrip[] | null>(initialCloseoutTrips);
+  const [closeoutTrips, setCloseoutTrips] = useSyncedState<CloseoutTrip[] | null>(initialCloseoutTrips);
   const [closeoutError, setCloseoutError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(initialQuery.q);
   const [settledQuery, setSettledQuery] = useState(initialQuery.q);
   const [activeFilter, setActiveFilter] = useState<TripStatusFilter>(initialQuery.status);
   const [sort, setSort] = useState<TripSort>(initialQuery.sort);
-  const [counts, setCounts] = useState<TripStatusCounts>(initialCounts);
+  const [counts, setCounts] = useSyncedState<TripStatusCounts>(initialCounts);
 
   // The New trip form's clients, owners and travellers are fetched the first
   // time it opens and kept for the next; the form shows once they're here.
@@ -156,6 +159,25 @@ export default function TripsClient({
       cancelled = true;
     };
   }, [wantKey, listCurrent, listFailed, settledQuery, activeFilter, sort]);
+
+  // A trip changed somewhere else: re-read the same query, keeping every page
+  // already on screen. The status counts follow the page's own server render.
+  const refreshLive = async () => {
+    if (!listCurrent) return; // a new query is already on its way
+    try {
+      const pages = await Promise.all(Array.from({ length: loaded.page }, (_, i) => fetchTripPage(query, i + 1)));
+      const last = pages[pages.length - 1];
+      if (!last) return;
+      setLoaded((current) => {
+        if (current.key !== wantKey || current.page !== pages.length) return current;
+        const trips = pages.slice(1).reduce((all, next) => appendTripPage(all, next.trips), pages[0]?.trips ?? []);
+        return { ...current, trips, total: last.total };
+      });
+    } catch {
+      // The next change, or the next minute, tries again.
+    }
+  };
+  useLiveRefresh(MODULE_SOURCES['trip-planning'] ?? [], () => void refreshLive());
 
   const loadMore = async () => {
     if (!listCurrent || loadingMore) return;
@@ -266,7 +288,7 @@ export default function TripsClient({
     return () => {
       cancelled = true;
     };
-  }, [tab, canCloseOut, closeoutTrips, closeoutError]);
+  }, [tab, canCloseOut, closeoutTrips, closeoutError, setCloseoutTrips]);
 
   const saveCloseout = (tripId: number, closeout: TripCloseout) => {
     setCloseoutTrips((current) =>

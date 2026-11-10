@@ -5,6 +5,7 @@ import "./globals.css";
 import Sidebar from "@/app/ui/sidebar";
 import { BannerProvider } from "@/app/ui/banner";
 import GlobalSearch from "@/app/ui/global-search";
+import LiveSync from "@/app/ui/live-sync";
 import MessagingAlerts from "@/app/ui/messaging-alerts";
 import NotificationsBell from "@/app/ui/notifications-bell";
 import WorldClockTicker from "@/app/ui/world-clock-ticker";
@@ -75,6 +76,7 @@ export default async function RootLayout({
           />
         )}
         {auth && <MessagingAlerts />}
+        {auth && <LiveSync />}
         <div className={`flex-1 min-w-0 flex flex-col min-h-screen transition-all duration-300 ${shouldShowSidebar ? 'sidebar-margin' : ''}`}>
           {children}
         </div>

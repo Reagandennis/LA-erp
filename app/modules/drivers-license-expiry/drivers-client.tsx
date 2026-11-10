@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { startVisibleInterval } from '@/lib/visible-interval';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 /**
  * Org-wide driving-licence watchlist.
@@ -74,8 +75,8 @@ type Props = {
 };
 
 export default function DriversClient({ isAdmin, canOpenPersonnel, initialItems, initialStats }: Props) {
-  const [items, setItems] = useState<License[]>(initialItems);
-  const [stats, setStats] = useState<Stats>(initialStats);
+  const [items, setItems] = useSyncedState<License[]>(initialItems);
+  const [stats, setStats] = useSyncedState<Stats>(initialStats);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('All');
   const [busy, setBusy] = useState(false);
@@ -94,7 +95,7 @@ export default function DriversClient({ isAdmin, canOpenPersonnel, initialItems,
     } catch {
       /* keep current data on transient failure */
     }
-  }, []);
+  }, [setItems, setStats]);
 
   // Licences are written on the Drivers page (often in another tab), so this
   // list re-reads itself while visible and as soon as the window comes back.

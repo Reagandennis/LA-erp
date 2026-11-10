@@ -35,13 +35,8 @@ model User {
   quickbooksConnections          QuickBooksConnection[]           @relation("QuickBooksConnectedBy")
   waveConnections                WaveConnection[]                 @relation("WaveConnectedBy")
   messagingAccounts              MessagingAccount[]               @relation("MessagingAccountOwner")
-  shiftTemplatesCreated          ShiftTemplate[]                  @relation("ShiftTemplateCreatedBy")
-  shiftTemplateMemberships       ShiftTemplateMember[]            @relation("ShiftTemplateMemberUser")
-  teamsCreated                   Team[]                           @relation("TeamCreatedBy")
-  teamMemberships                TeamMember[]                     @relation("TeamMemberUser")
-  leaveRequests                  LeaveRequest[]                   @relation("LeaveRequestUser")
-  leaveDecisions                 LeaveRequest[]                   @relation("LeaveRequestDecidedBy")
   publicHolidaysCreated          PublicHoliday[]                  @relation("PublicHolidayCreatedBy")
+  shiftLine                      ShiftLine?                       @relation("ShiftLineUser")
   createdQuotes                  Quote[]                          @relation("QuoteCreatedBy")
   approvableQuotes               Quote[]                          @relation("QuoteApprover")
   quoteNotifications             QuoteNotification[]
@@ -75,8 +70,6 @@ model User {
   fileNotifications              FileNotification[]
   calendarEvents                 CalendarEvent[]
   calendarEventNotifications     CalendarEventNotification[]
-  scheduleShifts                 ScheduleShift[]                  @relation("ScheduleEmployee")
-  createdScheduleShifts          ScheduleShift[]                  @relation("ScheduleCreatedBy")
   zelloActivities                ZelloActivity[]                  @relation("ZelloActivityRecordedBy")
   whatsAppMessages               WhatsAppMessage[]                @relation("WhatsAppMessageRecordedBy")
   createdVehicles                Vehicle[]                        @relation("VehicleCreatedBy")
@@ -1030,7 +1023,7 @@ model TripDay {
   /// Deliberately a string, not DateTime: Prisma hands a date column back as
   /// UTC midnight, which reads as the previous day west of Greenwich. A date
   /// key round-trips unchanged and sorts lexicographically. Same convention as
-  /// ScheduleShift.date.
+  /// ShiftRecord.date.
   dateKey   String?
   /// Dense 1..N. The only ordering key, and the "Day 3" label when undated.
   dayNumber Int
@@ -1665,158 +1658,206 @@ model CalendarEventNotification {
   @@index([eventId])
 }
 
-/// A recurring shift pattern — "Morning, 9am–5pm, Mon–Fri".
-///
-/// Templates are what managers maintain; individual ScheduleShift rows are what
-/// actually lands on the board. Keeping them separate means editing a pattern
-/// never silently rewrites history that has already been worked.
-model ShiftTemplate {
-  id        String  @id @default(cuid())
-  name      String
-  /// 24h "HH:MM". Stored as text because a shift has no date of its own, and an
-  /// overnight shift legitimately ends before it starts (22:00 → 06:00).
-  startTime String
-  endTime   String
-  /// ISO weekdays this pattern runs on: 1 = Monday … 7 = Sunday.
-  weekdays  Int[]   @default([])
-  /// Palette key, not a raw colour — the UI owns the actual values.
-  colour    String  @default("blue")
-  active    Boolean @default(true)
-  sortOrder Int     @default(0)
+// ---------------------------------------------------------------------------
+// Shift planning. A rotating roster generated from a pattern, published one
+// month at a time. Managed in the Shift Planning Admin module; staff read
+// their own published shifts in Shift Planning. Rules and maths live in
+// lib/shift-rules.ts; every table below is written through lib/shift-planning.ts.
+//
+// Dates are 'YYYY-MM-DD' strings and times 'HH:MM', in ShiftConfig.timeZone:
+// a roster is wall-clock, and string dates range-filter without a timezone.
+// ---------------------------------------------------------------------------
 
-  createdById Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  createdBy   User?    @relation("ShiftTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+/// Every shift rule reads from this single row (id = 1), so targets are
+/// configuration and never constants in code.
+model ShiftConfig {
+  id                   Int      @id @default(1)
+  timeZone             String   @default("Africa/Nairobi")
+  /// The date on which a line with offset 0 is on cycle day 1. The rotation
+  /// runs continuously from here; a new month never restarts it.
+  rotationStart        String
+  /// Shift codes in cycle order, e.g. D,D,S,S,N,N,X,OC,OC,X.
+  pattern              String[]
+  /// Name, start, end and hours for each shift code (see lib/shift-rules.ts).
+  codes                Json
+  targetHours7d        Int      @default(48)
+  maxHours7d           Int      @default(52)
+  maxHours14d          Int      @default(116)
+  minRestHours         Int      @default(11)
+  maxConsecutiveDuties Int      @default(6)
+  leaveCapDays         Int      @default(14)
+  responseMinutes      Int      @default(60)
+  /// A month should be published this many days before it starts.
+  publishLeadDays      Int      @default(14)
+  /// ISO weekday the payroll week starts on: 1 = Monday … 7 = Sunday.
+  weekStart            Int      @default(1)
+  updatedById          Int?
+  updatedAt            DateTime @updatedAt
+}
 
-  members ShiftTemplateMember[]
-  teams   ShiftTemplateTeam[]
-  shifts  ScheduleShift[]
+/// One line of the roster: a person (or a vacancy) with a place in the rotation.
+model ShiftLine {
+  id                   Int      @id @default(autoincrement())
+  /// Short roster label, e.g. "TRC-1".
+  code                 String   @unique
+  /// The login account that sees this line as "my shifts". Null for a vacancy
+  /// or a person without an account.
+  userId               Int?     @unique
+  /// Shown when no account is linked.
+  displayName          String?
+  /// line | hybrid | fallback
+  role                 String   @default("line")
+  /// Zero-based cycle day this line is on at ShiftConfig.rotationStart. Null
+  /// keeps the line out of the generated rotation (a fallback).
+  cycleOffset          Int?
+  /// Inclusive 'YYYY-MM-DD' bounds of service on the roster; null = open.
+  startDate            String?
+  endDate              String?
+  contractHoursPerWeek Float    @default(48)
+  leaveEntitlementDays Float    @default(21)
+  leaveOpeningBalance  Float    @default(0)
+  active               Boolean  @default(true)
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user    User?         @relation("ShiftLineUser", fields: [userId], references: [id], onDelete: SetNull)
+  records ShiftRecord[]
+  leaves  ShiftLeave[]
 
   @@index([active, sortOrder])
 }
 
-/// A named group of people that can be rostered as a unit.
-model Team {
-  id     String @id @default(cuid())
-  name   String @unique
-  colour String @default("emerald")
-
-  createdById Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  createdBy   User?    @relation("TeamCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-
-  members        TeamMember[]
-  shiftTemplates ShiftTemplateTeam[]
+/// A roster month. Staff see a month only once it is published.
+model ShiftMonth {
+  /// 'YYYY-MM'
+  month         String    @id
+  /// draft | published
+  status        String    @default("draft")
+  generatedAt   DateTime  @default(now())
+  generatedById Int?
+  publishedAt   DateTime?
+  publishedById Int?
 }
 
-model TeamMember {
-  id     String @id @default(cuid())
-  teamId String
-  userId Int
-  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  user   User   @relation("TeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+/// One row per line per date. The generated code is never overwritten: the
+/// planned code (after overrides) and the worked code sit beside it.
+model ShiftRecord {
+  id            Int      @id @default(autoincrement())
+  lineId        Int
+  date          String
+  /// What the rotation produced. History; never changed.
+  generatedCode String
+  /// What is rostered after any manual change (leave, swap, cover).
+  plannedCode   String
+  /// What was actually worked when it differs from the plan (a call-in).
+  workedCode    String?
+  /// planned | worked | sick | leave | swapped | call-in | no-show
+  status        String   @default("planned")
+  plannedStart  String?
+  plannedEnd    String?
+  actualStart   String?
+  actualEnd     String?
+  hoursWorked   Float?
+  reasonCode    String?
+  note          String?
+  approvedById  Int?
+  /// The approved leave that put LV here, so declining it can be undone.
+  leaveId       Int?
+  updatedById   Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  @@unique([teamId, userId])
-  @@index([userId])
+  line   ShiftLine    @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  callIn ShiftCallIn?
+
+  @@unique([lineId, date])
+  @@index([date])
 }
 
-/// One person attached to a shift pattern.
-model ShiftTemplateMember {
-  id         String @id @default(cuid())
-  templateId String
-  userId     Int
-  /// Contracted hours for this person on this shift; the pattern's own span is
-  /// the default, but part-timers differ.
-  hours      Int?
+/// A person on call (or resting) brought in to work. Converts the record's
+/// worked code to the shift actually covered.
+model ShiftCallIn {
+  id                     Int       @id @default(autoincrement())
+  recordId               Int       @unique
+  /// absence | task_load | incident | event
+  trigger                String
+  calledById             Int?
+  calledAt               DateTime
+  acknowledgedAt         DateTime?
+  arrivedAt              DateTime?
+  releasedAt             DateTime?
+  /// Minutes from the call to arrival; compared with ShiftConfig.responseMinutes.
+  responseMinutes        Int?
+  /// Who approved calling someone in from a rest day (overtime escalation).
+  escalationApprovedById Int?
+  note                   String?
+  createdAt              DateTime  @default(now())
 
-  template ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  user     User          @relation("ShiftTemplateMemberUser", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([templateId, userId])
-  @@index([userId])
+  record ShiftRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
 }
 
-/// A whole team attached to a shift pattern.
-model ShiftTemplateTeam {
-  id         String @id @default(cuid())
-  templateId String
-  teamId     String
-  hours      Int?
+/// Time off for a roster line. Charged per rostered shift only: on-call and
+/// rest days inside the range are never charged.
+model ShiftLeave {
+  id            Int       @id @default(autoincrement())
+  lineId        Int
+  /// annual | sick | other
+  type          String    @default("annual")
+  /// Inclusive 'YYYY-MM-DD' bounds.
+  startDate     String
+  endDate       String
+  /// pending | approved | declined | cancelled
+  status        String    @default("pending")
+  shiftsCharged Int       @default(0)
+  note          String?
+  requestedById Int?
+  decidedById   Int?
+  decidedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  template ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  team     Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  line ShiftLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
 
-  @@unique([templateId, teamId])
+  @@index([lineId, startDate])
+  @@index([status])
 }
 
-/// Time off. Anyone may request; only a manager approves.
-model LeaveRequest {
-  id        String  @id @default(cuid())
-  userId    Int
-  /// annual | sick | casual | unpaid
-  type      String  @default("annual")
-  /// Inclusive 'YYYY-MM-DD' bounds, matching ScheduleShift.date.
-  startDate String
-  endDate   String
-  /// pending | approved | declined
-  status    String  @default("pending")
-  note      String?
-
-  decidedById Int?
-  decidedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  user      User  @relation("LeaveRequestUser", fields: [userId], references: [id], onDelete: Cascade)
-  decidedBy User? @relation("LeaveRequestDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
-
-  @@index([startDate, endDate])
-  @@index([userId, startDate])
-}
-
-/// A non-working day shown across the whole calendar.
+/// A public holiday. Hours worked on one are flagged for payroll at 2x.
 model PublicHoliday {
-  id   String @id @default(cuid())
+  id      String @id @default(cuid())
   /// 'YYYY-MM-DD'
-  date String @unique
-  name String
+  date    String @unique
+  name    String
+  /// ISO 3166-1 alpha-2.
+  country String @default("KE")
 
   createdById Int?
   createdAt   DateTime @default(now())
   createdBy   User?    @relation("PublicHolidayCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 }
 
-model ScheduleShift {
-  id             Int            @id @default(autoincrement())
-  employeeId     Int
-  /// Set when the shift came from a pattern; null for one-off shifts.
-  templateId     String?
-  date           String // 'YYYY-MM-DD'
-  type           String
-  startTime      String?
-  endTime        String?
-  timeLabel      String?
-  statusLabel    String?
-  role           String?
-  location       String?
-  breakMinutes   Int?
-  note           String?
-  tasksCompleted Int?
-  totalTasks     Int?
-  publishedAt    DateTime?
-  createdById    Int?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  employee       User           @relation("ScheduleEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  template       ShiftTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  createdBy      User?          @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+/// Who did what, when: every generate, override, call-in, swap and publish.
+/// Append-only — nothing in the app updates or deletes a row.
+model ShiftAudit {
+  id              Int      @id @default(autoincrement())
+  /// generate | override | swap | call_in | actual | publish | unpublish | leave | line | holiday | config
+  action          String
+  actorId         Int?
+  /// Kept as text so the log survives the account being removed.
+  actorName       String
+  month           String?
+  lineCode        String?
+  date            String?
+  summary         String
+  /// The before/after values and every rule that fired on save.
+  detail          Json?
+  /// True when a blocking rule was approved through; shown in the compliance log.
+  blockOverridden Boolean  @default(false)
+  createdAt       DateTime @default(now())
 
-  // No longer @@unique([employeeId, date]) — an employee can have multiple
-  // shifts on the same day (split shifts, overlapping coverage).
-  @@index([employeeId, date])
-  @@index([date])
+  @@index([createdAt])
+  @@index([month])
 }
 
 // Radio (Zello) channel traffic — persisted so switching channels keeps history.

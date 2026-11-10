@@ -6,6 +6,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { CustomerOption } from '@/lib/contacts';
 import { RISK_LEVELS, TRAVELER_STATUSES } from '@/lib/traveler-options';
 import type { TravelerListItem, TravelerStats, TravelerSummary } from '@/lib/travelers';
+import { useLiveRefresh } from '@/app/ui/use-live-refresh';
+import { useSyncedState } from '@/app/ui/use-synced-state';
+import { MODULE_SOURCES } from '@/lib/live-sources';
 
 /**
  * Travellers are the people we protect. They belong to a client account rather
@@ -136,7 +139,7 @@ export default function TravelersClient({
   const [items, setItems] = useState<TravelerListItem[]>(initialItems);
   const [total, setTotal] = useState(initialTotal);
   const [stats, setStats] = useState<TravelerStats>(initialStats);
-  const [customers] = useState<CustomerOption[]>(initialCustomers);
+  const [customers] = useSyncedState<CustomerOption[]>(initialCustomers);
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
@@ -224,6 +227,30 @@ export default function TravelersClient({
       /* keep current data on transient failure */
     }
   };
+
+  // Someone else added, edited or removed a traveller: re-read the same search,
+  // keeping every page that is already on screen.
+  const refreshLive = async () => {
+    if (loadedQueryKey.current !== queryKey) return; // a new search is already on its way
+    const seq = ++requestSeq.current;
+    try {
+      const pages: PageResponse[] = [];
+      for (let p = 1; p <= page; p += 1) {
+        const res = await fetch(listUrl(query, p, pageSize), { credentials: 'include', cache: 'no-store' });
+        if (!res.ok) return;
+        pages.push((await res.json()) as PageResponse);
+      }
+      const last = pages[pages.length - 1];
+      if (!last || seq !== requestSeq.current) return;
+      const seen = new Set<number>();
+      setItems(pages.flatMap((p) => p.items).filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true))));
+      setTotal(last.total);
+      setStats(last.stats);
+    } catch {
+      /* keep current data on transient failure */
+    }
+  };
+  useLiveRefresh(MODULE_SOURCES.travelers ?? [], () => void refreshLive());
 
   const showMore = async () => {
     if (moreLoading) return;

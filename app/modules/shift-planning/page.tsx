@@ -1,21 +1,28 @@
 import { redirect } from 'next/navigation';
 
 import { getServerAuth } from '@/lib/auth';
-import { ADMIN_ROLE_NAME } from '@/lib/rbac';
-import { userHasModule, userHasRole } from '@/lib/user';
+import { currentMonth, myShifts } from '@/lib/shift-planning';
+import { SHIFT_MODULE, canManageShifts } from '@/lib/shift-planning-route';
+import { userHasModule } from '@/lib/user';
 
-import PlanningClient from './planning-client';
+import MyShiftsClient from './my-shifts-client';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * What staff see: their own published shifts. Admins and schedulers also get
+ * an "Everyone" tab; building and changing the roster lives in Shift Planning
+ * Admin.
+ */
 export default async function ShiftPlanningPage() {
   const auth = await getServerAuth();
   if (!auth) redirect('/auth/login');
 
-  const isAdmin = userHasRole(auth.user, ADMIN_ROLE_NAME);
-  if (!isAdmin && !userHasModule(auth.user, 'shift-planning')) {
+  const canManage = canManageShifts(auth.user);
+  if (!canManage && !userHasModule(auth.user, SHIFT_MODULE)) {
     redirect('/dashboard');
   }
 
-  return <PlanningClient />;
+  const initial = await myShifts(auth.user.id, await currentMonth());
+  return <MyShiftsClient initial={initial} canManage={canManage} userName={auth.user.name} />;
 }

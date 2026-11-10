@@ -54,6 +54,7 @@ import {
   pruneDetails,
   type TripItemCategory,
 } from './categories';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 interface ItineraryPageClientProps {
   trip: TripDetail;
@@ -469,10 +470,10 @@ export default function ItineraryPageClient({
   isAdmin,
   focusItemId = null,
 }: ItineraryPageClientProps) {
-  const [trip, setTrip] = useState<TripDetail>(initialTrip);
+  const [trip, setTrip] = useSyncedState<TripDetail>(initialTrip);
   useRefreshListAfterEdits(trip, initialTrip);
   // Follows the trip's client, which the edit form can change.
-  const [clientTravelers, setClientTravelers] = useState(initialClientTravelers);
+  const [clientTravelers, setClientTravelers] = useSyncedState(initialClientTravelers);
   const [pending, setPending] = useState<string | null>(null);
   const [pendingItemId, setPendingItemId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -490,7 +491,7 @@ export default function ItineraryPageClient({
       : (trip.days[0]?.id ?? null);
   /** The right-hand pane shows the trip log instead of a day. */
   const [showLog, setShowLog] = useState(false);
-  const [logCount, setLogCount] = useState(initialTrip.logCount);
+  const [logCount, setLogCount] = useSyncedState(initialTrip.logCount);
   const [addingHere, setAddingHere] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editor, setEditor] = useState<EditorState>(blankEditor(null));

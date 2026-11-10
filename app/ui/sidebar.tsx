@@ -57,6 +57,9 @@ const RECENT_FROM_MODULES = 8;
 /** Sits straight under Dashboard instead of in its category group. */
 const PINNED_SLUG = 'ops-dashboard';
 
+/** Sub-modules, drawn indented under their parent when the parent is listed too. */
+const CHILD_OF: Record<string, string> = { 'shift-planning-admin': 'shift-planning' };
+
 /** Below this width the sidebar starts collapsed and overlays the page when opened. */
 const SMALL_SCREEN = '(max-width: 1023px)';
 const isSmallScreen = () => typeof window !== 'undefined' && window.matchMedia(SMALL_SCREEN).matches;
@@ -144,13 +147,15 @@ export default function Sidebar({ user, modules = [] }: SidebarProps) {
     const active = isActive(`/modules/${module.slug}`);
     const badge = unreadFor(module.slug);
     const badgeText = badge > 99 ? '99+' : String(badge);
+    const parent = CHILD_OF[module.slug];
+    const nested = !isCollapsed && !keyPrefix && Boolean(parent) && shown.some((m) => m.slug === parent);
     return (
       <Link
         key={`${keyPrefix}${module.id}`}
         href={`/modules/${module.slug}`}
         title={isCollapsed ? (badge > 0 ? `${module.name} (${badge} unread)` : module.name) : ""}
         className={`flex items-center gap-3 rounded-lg transition-all text-sm font-bold group ${
-          isCollapsed ? 'justify-center p-2.5' : 'px-3 py-2.5'
+          isCollapsed ? 'justify-center p-2.5' : nested ? 'ml-6 px-3 py-2 border-l-2 border-primary/15 rounded-l-none' : 'px-3 py-2.5'
         } ${
           active
             ? 'bg-primary text-secondary'

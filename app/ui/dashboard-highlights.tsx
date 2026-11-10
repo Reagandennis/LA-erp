@@ -8,6 +8,7 @@ import type {
   HighlightTone,
   HighlightValue,
 } from '@/lib/dashboard-highlights';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const TONE_STYLES: Record<HighlightTone, { value: string; dot: string }> = {
   neutral: { value: 'text-white', dot: 'bg-white/40' },
@@ -27,7 +28,7 @@ export function DashboardHighlights({
   initialSelected: string[];
   slots: number;
 }>) {
-  const [highlights, setHighlights] = useState(initialHighlights);
+  const [highlights, setHighlights] = useSyncedState(initialHighlights);
   const [selected, setSelected] = useState(initialSelected);
   const [draft, setDraft] = useState(initialSelected);
   const [isPicking, setIsPicking] = useState(false);
@@ -89,7 +90,7 @@ export function DashboardHighlights({
     } finally {
       setIsSaving(false);
     }
-  }, [draft]);
+  }, [draft, setHighlights]);
 
   return (
     <div className="relative z-10 w-full lg:w-auto lg:min-w-[420px]">

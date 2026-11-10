@@ -6,6 +6,7 @@ import { adminFetch, errorMessage } from '@/app/admin/_components/admin-api';
 import { Card, inputClass, primaryButton, StatTile } from '@/app/admin/_components/admin-ui';
 import { useBanner } from '@/app/ui/banner';
 import type { AiUsageOverview } from '@/lib/ai-budget';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 type Settings = AiUsageOverview['settings'];
 
@@ -85,7 +86,7 @@ function NumberField({
 
 export default function AiUsageClient({ initial, emailConfigured }: { initial: AiUsageOverview; emailConfigured: boolean }) {
   const banner = useBanner();
-  const [overview, setOverview] = useState(initial);
+  const [overview, setOverview] = useSyncedState(initial);
   const [draft, setDraft] = useState<Settings>(initial.settings);
   const [saving, setSaving] = useState(false);
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft((d) => ({ ...d, [key]: value }));

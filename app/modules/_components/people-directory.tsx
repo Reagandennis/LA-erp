@@ -9,6 +9,7 @@ import { startVisibleInterval } from '@/lib/visible-interval';
 import { CPO_GRADES, ENGAGEMENT_TYPES, PERSONNEL_ROLES } from '@/lib/people-views';
 import type { PersonnelLicence, PersonnelListItem, PersonnelSummary, UserOption } from '@/lib/personnel';
 import { AvatarStatus, StatusDot, presenceOf, usePresence } from '@/app/ui/status-dot';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 /**
  * The people directory shared by all five workforce modules: the all-people
@@ -97,8 +98,8 @@ type LicenceForm = { licenseNumber: string; category: string; expiryDate: string
 const EMPTY_LICENCE: LicenceForm = { licenseNumber: '', category: 'Class A', expiryDate: '', document: null };
 
 export default function PeopleDirectory({ view, canEdit, initialItems, initialUsers, initialSelectedId }: Props) {
-  const [items, setItems] = useState<PersonnelListItem[]>(initialItems);
-  const [users, setUsers] = useState<UserOption[]>(initialUsers);
+  const [items, setItems] = useSyncedState<PersonnelListItem[]>(initialItems);
+  const [users, setUsers] = useSyncedState<UserOption[]>(initialUsers);
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');

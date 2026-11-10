@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { subscribeServerEvents } from '@/app/ui/messaging-alerts-store';
 import { moduleIcon } from '@/app/ui/module-icons';
 import { useNow } from '@/app/ui/use-client';
+import { useLiveRefresh } from '@/app/ui/use-live-refresh';
+import { MODULE_SOURCES } from '@/lib/live-sources';
 import { APP_LOCALE } from '@/lib/locale';
 import type { OpsDashboard, OpsReference, OpsSections } from '@/lib/ops-dashboard';
 import { type OpsPanelKey, PANEL_ICON, PANEL_TITLE } from '@/lib/ops-panels';
@@ -340,6 +342,10 @@ export default function OpsDashboardClient({
   }, []);
 
   useEffect(() => startVisibleInterval(() => void refresh(), REFRESH_MS), [refresh]);
+
+  // A trip, task, handover or vehicle changed: reload the panels now rather
+  // than at the next poll. The poll above stays as the safety net.
+  useLiveRefresh(MODULE_SOURCES['ops-dashboard'] ?? [], () => void refresh(), 0);
 
   const watchingWhatsapp = visible.includes('whatsapp');
   useEffect(() => {

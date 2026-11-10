@@ -2,6 +2,7 @@
 
 import { APP_LOCALE } from '@/lib/locale';
 import React, { useState } from 'react';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 // --- Types (mirror lib/feedback.ts) ---
 type FeedbackCategory = 'Bug Report' | 'Feature Idea' | 'Improvement' | 'Technical Support';
@@ -92,8 +93,8 @@ function getStatusStyle(status: string) {
 }
 
 export default function FeedbackClient({ currentUser, isAdmin, initialItems, initialStats }: Props) {
-  const [items, setItems] = useState<FeedbackItem[]>(initialItems);
-  const [stats, setStats] = useState<FeedbackStats>(initialStats);
+  const [items, setItems] = useSyncedState<FeedbackItem[]>(initialItems);
+  const [stats, setStats] = useSyncedState<FeedbackStats>(initialStats);
   const [activeFilter, setActiveFilter] = useState<FeedbackFilter>('All');
   const [isFormOpen, setIsFormOpen] = useState(false);
 

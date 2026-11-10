@@ -140,7 +140,8 @@ export async function loadDashboardOverview(user: AccessUser): Promise<Dashboard
     contracts: has('contract-renewal'),
     calendar: has('calendar'),
     tasks: has('todo-personal'),
-    leave: isAdmin || has('shift-planning'),
+    // Deciding leave is the scheduler's job, so only they are shown what is waiting.
+    leave: isAdmin || has('shift-planning-admin'),
   };
 
   const today = startOfToday();
@@ -178,11 +179,17 @@ export async function loadDashboardOverview(user: AccessUser): Promise<Dashboard
           }), none())
         : Promise.resolve(none<never>()),
       canSee.leave
-        ? safe('leave', prisma.leaveRequest.findMany({
+        ? safe('leave', prisma.shiftLeave.findMany({
             where: { status: 'pending' },
             orderBy: { createdAt: 'asc' },
             take: 5,
-            select: { id: true, type: true, startDate: true, endDate: true, user: { select: { name: true } } },
+            select: {
+              id: true,
+              type: true,
+              startDate: true,
+              endDate: true,
+              line: { select: { code: true, displayName: true, user: { select: { name: true } } } },
+            },
           }), none())
         : Promise.resolve(none<never>()),
       canSee.trips
@@ -277,7 +284,7 @@ export async function loadDashboardOverview(user: AccessUser): Promise<Dashboard
       quotes: quotes.map((q) => ({ id: q.id, reference: q.reference, title: q.subject, customer: q.customer.name, amount: Number(q.total), currency: q.currency, submittedAt: iso(q.submittedAt), href: '/modules/quotes' })),
       invoices: invoices.map((i) => ({ id: i.id, reference: i.number, title: `Invoice ${i.number}`, customer: i.customer.name, amount: Number(i.total), currency: i.currency, submittedAt: iso(i.submittedAt), href: '/modules/invoices-review' })),
       handovers: handovers.map((h) => ({ id: h.id, post: h.post, status: h.status, period: h.shiftPeriod, shiftDate: h.shiftDate.toISOString(), summary: h.summary })),
-      leave: leave.map((l) => ({ id: l.id, person: l.user.name, type: l.type, startDate: l.startDate, endDate: l.endDate })),
+      leave: leave.map((l) => ({ id: String(l.id), person: l.line.user?.name ?? l.line.displayName ?? l.line.code, type: l.type, startDate: l.startDate, endDate: l.endDate })),
     },
     movements: {
       trips: trips.map((t) => {

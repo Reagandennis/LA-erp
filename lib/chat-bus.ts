@@ -63,6 +63,15 @@ export function publish(userId: number, event: string, data: unknown): void {
 }
 
 /**
+ * Push an SSE event to every connected tab of every user. For "something
+ * changed, refetch" signals only: the payload must never carry data, because
+ * each client re-reads through its own access checks.
+ */
+export function publishAll(event: string, data: unknown): void {
+  for (const userId of [...subscribers.keys()]) publish(userId, event, data);
+}
+
+/**
  * Broadcast to all members of a conversation except the sender.
  */
 export function broadcastToMembers(

@@ -6,6 +6,7 @@ import { useState } from 'react';
 
 import type { BrandProfileSummary } from '@/lib/brand-profiles';
 import type { OrganizationSummary } from '@/lib/organization';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 type Tab = 'defaults' | 'brands';
 
@@ -224,7 +225,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function BrandProfilesTab({ initial }: { initial: BrandProfileSummary[] }) {
   const router = useRouter();
-  const [profiles, setProfiles] = useState(initial);
+  const [profiles, setProfiles] = useSyncedState(initial);
   const [editing, setEditing] = useState<BrandProfileSummary | null>(null);
   const [showNew, setShowNew] = useState(false);
 

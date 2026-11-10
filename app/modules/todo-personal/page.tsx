@@ -5,6 +5,8 @@ import React, { use, useCallback, useEffect, useEffectEvent, useRef, useState } 
 
 import CalendarClient, { type CalendarExtraEvent } from '@/app/modules/calendar/calendar-client';
 import { useBanner } from '@/app/ui/banner';
+import { useLiveRefresh } from '@/app/ui/use-live-refresh';
+import { MODULE_SOURCES } from '@/lib/live-sources';
 import { dateKeyFromIso, dayFromIso, isoFromDateKey } from '@/lib/date-grid';
 import KanbanBoard from './kanban-board';
 
@@ -1209,20 +1211,25 @@ export default function TodoPersonalPage({
     return () => controller.abort();
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const epochAtFetch = writeEpochRef.current;
-      fetchTasks()
-        .then((nextTasks) => {
-          mergeFetchedTasks(nextTasks, epochAtFetch);
-        })
-        .catch(() => {
-          // ignore
-        });
-    }, 10000);
-
-    return () => clearInterval(interval);
+  const pollTasks = useCallback(() => {
+    const epochAtFetch = writeEpochRef.current;
+    fetchTasks()
+      .then((nextTasks) => {
+        mergeFetchedTasks(nextTasks, epochAtFetch);
+      })
+      .catch(() => {
+        // ignore
+      });
   }, [mergeFetchedTasks]);
+
+  useEffect(() => {
+    const interval = setInterval(pollTasks, 10000);
+    return () => clearInterval(interval);
+  }, [pollTasks]);
+
+  // A task shared, commented on or completed by someone else lands at once;
+  // the ten-second poll above stays as the safety net.
+  useLiveRefresh(MODULE_SOURCES['todo-personal'] ?? [], pollTasks, 0);
 
   // Deep link (?open=<id>): open that task's drawer the way a click does. Each
   // new ?open= value is a fresh request (adjusted during render), so changing

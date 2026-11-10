@@ -168,7 +168,7 @@ export default async function DashboardPage() {
                   <Row key={`h${h.id}`} href="/modules/handover" title={`${h.status} handover · ${h.post ?? h.period}`} subtitle={h.summary} meta={shortDate(h.shiftDate)} metaTone={h.status === 'Urgent' ? 'danger' : 'warn'} />
                 ))}
                 {approvals.leave.map((l) => (
-                  <Row key={`l${l.id}`} href="/modules/shift-planning" title={`${l.person} · ${l.type} leave`} subtitle={`${l.startDate} → ${l.endDate}`} meta="pending" metaTone="warn" />
+                  <Row key={`l${l.id}`} href="/modules/shift-planning-admin" title={`${l.person} · ${l.type} leave`} subtitle={`${l.startDate} → ${l.endDate}`} meta="pending" metaTone="warn" />
                 ))}
               </>
             )}

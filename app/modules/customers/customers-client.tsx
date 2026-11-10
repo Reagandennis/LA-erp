@@ -16,6 +16,7 @@ import type {
   QuoteOption,
   SignatureStatus,
 } from '@/lib/crm';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 // --- Config mirrored from lib/crm.ts (server-only module; types import fine, values don't) ---
 
@@ -192,10 +193,10 @@ export default function CustomersClient({
   );
   const [entityFilter, setEntityFilter] = useState<'All' | Entity>('All');
 
-  const [accounts, setAccounts] = useState<CustomerAccount[]>(initialAccounts);
-  const [deals, setDeals] = useState<DealSummary[]>(initialDeals);
-  const [customers, setCustomers] = useState<CrmCustomer[]>(initialCustomers);
-  const [activities, setActivities] = useState<CrmActivitySummary[]>(initialActivities);
+  const [accounts, setAccounts] = useSyncedState<CustomerAccount[]>(initialAccounts);
+  const [deals, setDeals] = useSyncedState<DealSummary[]>(initialDeals);
+  const [customers, setCustomers] = useSyncedState<CrmCustomer[]>(initialCustomers);
+  const [activities, setActivities] = useSyncedState<CrmActivitySummary[]>(initialActivities);
 
   const [selectedDealId, setSelectedDealId] = useState<number | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(() =>

@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 
 import type { NoteSummary } from '@/lib/notes';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 
@@ -40,7 +41,7 @@ type NoteForm = {
 const EMPTY_FORM: NoteForm = { title: '', content: '', category: 'Work', color: 'yellow', pinned: false };
 
 export default function NotesClient({ initialItems }: { initialItems: NoteSummary[] }) {
-  const [items, setItems] = useState<NoteSummary[]>(initialItems);
+  const [items, setItems] = useSyncedState<NoteSummary[]>(initialItems);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('All');
 

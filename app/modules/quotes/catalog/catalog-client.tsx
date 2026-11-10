@@ -4,6 +4,7 @@ import { APP_LOCALE } from '@/lib/locale';
 import { useState } from 'react';
 
 import type { ProductOption } from '../types';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'ZAR', 'KES', 'NGN'];
 
@@ -42,7 +43,7 @@ function formatMoney(value: number, currency: string) {
 }
 
 export default function CatalogClient({ initialProducts }: CatalogClientProps) {
-  const [products, setProducts] = useState<ProductOption[]>(initialProducts);
+  const [products, setProducts] = useSyncedState<ProductOption[]>(initialProducts);
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);

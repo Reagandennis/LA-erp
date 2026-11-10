@@ -6,6 +6,7 @@ import { APP_LOCALE } from '@/lib/locale';
 import React, { useMemo, useRef, useState } from 'react';
 
 import type { VehicleSummary } from '@/lib/task-assignment';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 const ACCENT = '#f9b232';
@@ -53,7 +54,7 @@ const inputClass =
   'w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 focus:border-[#03458f]/40';
 
 export default function VehiclesClient({ initialVehicles }: { initialVehicles: VehicleSummary[] }) {
-  const [vehicles, setVehicles] = useState<VehicleSummary[]>(initialVehicles);
+  const [vehicles, setVehicles] = useSyncedState<VehicleSummary[]>(initialVehicles);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Status | 'All'>('All');
   const [selectedId, setSelectedId] = useState<number | null>(null);

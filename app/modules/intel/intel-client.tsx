@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 
 import type { AssessmentDetail, AssessmentSummary, IntelData } from './types';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 
@@ -36,8 +37,8 @@ export default function IntelClient({
   initialData: IntelData;
   configured: boolean;
 }) {
-  const [assessments, setAssessments] = useState<AssessmentSummary[]>(initialData.assessments);
-  const [stats, setStats] = useState(initialData.stats);
+  const [assessments, setAssessments] = useSyncedState<AssessmentSummary[]>(initialData.assessments);
+  const [stats, setStats] = useSyncedState(initialData.stats);
   const [location, setLocation] = useState('');
   const [context, setContext] = useState('');
   const [generating, setGenerating] = useState(false);

@@ -44,6 +44,7 @@ import {
   totalsByCurrency,
   vehicleLabel,
 } from '@/lib/fleet';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 type View = 'open' | 'overdue' | 'completed' | 'cancelled' | 'all';
 type KindFilter = 'all' | 'Scheduled' | 'Unscheduled';
@@ -170,7 +171,7 @@ export default function MaintenanceClient({
   defaultCurrency: string;
   today: string;
 }) {
-  const [items, setItems] = useState<MaintenanceDto[]>(initialItems);
+  const [items, setItems] = useSyncedState<MaintenanceDto[]>(initialItems);
   const [search, setSearch] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState<number | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');

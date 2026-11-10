@@ -15,6 +15,7 @@ import {
 } from '@/app/admin/_components/admin-ui';
 import { useBanner } from '@/app/ui/banner';
 import type { BackupOverview } from '@/lib/backup/overview';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 type Settings = BackupOverview['settings'];
 type Run = BackupOverview['runs'][number];
@@ -128,7 +129,7 @@ export default function BackupsClient({
   renderedAt: string;
 }) {
   const banner = useBanner();
-  const [overview, setOverview] = useState(initial);
+  const [overview, setOverview] = useSyncedState(initial);
   const [draft, setDraft] = useState<EditableSettings>(() => editable(initial.settings));
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -146,7 +147,7 @@ export default function BackupsClient({
 
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
 
-  const apply = useCallback((next: BackupOverview) => setOverview(next), []);
+  const apply = useCallback((next: BackupOverview) => setOverview(next), [setOverview]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
@@ -169,7 +170,7 @@ export default function BackupsClient({
         .catch(() => {});
     }, 3000);
     return () => clearInterval(id);
-  }, [overview.running, banner]);
+  }, [overview.running, banner, setOverview]);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(editable(settings));
 

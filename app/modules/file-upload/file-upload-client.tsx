@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 // --- Types (mirror lib/files.ts) ---
 type ShareTarget = { id: number; name: string };
@@ -88,8 +89,8 @@ function FileIcon({ mime, className }: { mime: string; className?: string }) {
 }
 
 export default function FileUploadClient({ viewer, initialItems, initialStats, shareableUsers }: Props) {
-  const [items, setItems] = useState<StoredFile[]>(initialItems);
-  const [stats, setStats] = useState<Stats>(initialStats);
+  const [items, setItems] = useSyncedState<StoredFile[]>(initialItems);
+  const [stats, setStats] = useSyncedState<Stats>(initialStats);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<TypeFilter>('All');
   const [selectedId, setSelectedId] = useState<number | null>(null);

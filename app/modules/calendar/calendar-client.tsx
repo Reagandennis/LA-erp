@@ -4,6 +4,8 @@ import { APP_LOCALE } from '@/lib/locale';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { GoogleAuthProvider, useGoogleAuth } from '@/app/ui/google-auth-provider';
+import { useLiveRefresh } from '@/app/ui/use-live-refresh';
+import { MODULE_SOURCES } from '@/lib/live-sources';
 
 // --- Types ---
 type CalendarEvent = {
@@ -418,6 +420,9 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
       await loadLocal();
     })();
   }, [loadLocal]);
+
+  // An event added or moved elsewhere shows up in the range on screen at once.
+  useLiveRefresh(MODULE_SOURCES.calendar ?? [], () => void loadLocal());
 
   // --- Load Google events for the visible month when connected ---
   const loadGoogle = useCallback(async () => {

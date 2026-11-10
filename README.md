@@ -104,6 +104,13 @@ seeded into the database. Administrators grant module access per role.
 
 ### Workforce & Time
 - **Personnel** — team records, workforce details, and assignments.
+- **Shift Planning** — a person's own published shifts: what they are on now,
+  what is next, the month, and their leave. Admins also see everyone.
+- **Shift Planning Admin** — the roster's back office, for admins and anyone
+  granted the module as a scheduler: the rotation and its people, monthly
+  generate and publish, overrides and swaps checked against the working-time
+  rules, call-ins, leave, public holidays, the rules themselves, a dashboard,
+  and an append-only audit log. The rules live in `lib/shift-rules.ts`.
 - **Clock-in / out** — attendance and shift punches.
 - **Clock** — live, shift-aware working-time display.
 - **Countdown Timer** — deadlines and timed operational windows.
@@ -173,6 +180,40 @@ seeded into the database. Administrators grant module access per role.
   `X-Content-Type-Options`) are set in `next.config.ts`; user-uploaded files are
   served through `lib/file-response.ts`, which forces unknown types to download
   rather than render inline; expensive routes are rate-limited via the database.
+
+### Live updates
+
+Every screen stays in step with the database without a reload. A change made
+by a colleague, by you in another tab, or by a background job appears in
+about a second.
+
+1. **One hook announces every write.** `lib/prisma.ts` reports each database
+   write to `lib/live-events.ts`, which folds a save's writes together and
+   sends one `changed` event naming the models that changed. Nothing in a
+   route has to remember to announce anything. Writes made while answering a
+   `GET` stay quiet, so a page that does housekeeping while loading cannot
+   refresh itself in a loop.
+2. **One stream carries it.** The event rides the per-user Server-Sent Events
+   connection the app already holds open (`/api/messaging/stream`, fed by the
+   in-process bus in `lib/chat-bus.ts`). It carries model names only, never
+   data: each page re-reads through its own access checks.
+3. **One listener refreshes the screen.** `app/ui/live-sync.tsx`, mounted in
+   the app shell, re-renders the current page on the server when a change
+   touches what that screen shows (`lib/live-sources.ts`). Client state,
+   scroll position and open forms are left alone.
+
+When adding a screen:
+
+- List the models it shows under its module slug in `lib/live-sources.ts`.
+- Hold data that came from the server as a prop with `useSyncedState`
+  (`app/ui/use-synced-state.ts`) instead of `useState`, so it follows the
+  refreshed props. Keep `useState` for anything being typed into: a form
+  draft must not be overwritten by a live update.
+- A component that fetches its own data (a filtered or paged list) calls
+  `useLiveRefresh(sources, reload)` (`app/ui/use-live-refresh.ts`) instead.
+
+The bus lives in the single Node process `next start` runs. More than one
+server instance would need a shared broker; see the note in `lib/chat-bus.ts`.
 
 ---
 
@@ -284,8 +325,9 @@ models). Major groups:
   `QuoteTemplate`, `Product`, `BrandProfile`, `Invoice`, `InvoiceItem`,
   `InvoicePayment`, `QuickBooksConnection`, plus `*Sequence` models for
   human-readable numbering.
-- **Operations** — `Trip`, `TripItineraryItem`, `ScheduleShift`,
-  `DriverLicense`.
+- **Operations** — `Trip`, `TripItineraryItem`, `DriverLicense`.
+- **Shift roster** — `ShiftConfig`, `ShiftLine`, `ShiftMonth`, `ShiftRecord`,
+  `ShiftCallIn`, `ShiftLeave`, `ShiftAudit`, `PublicHoliday`.
 - **Communication** — `Conversation`, `ConversationMember`, `Message`,
   `Feedback`, `ZelloActivity`, `WhatsAppMessage`, plus `*Notification` models.
 - **Productivity & files** — `PersonalTodo` (+ attachments, shares, comments,

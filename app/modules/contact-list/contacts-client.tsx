@@ -6,6 +6,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import type { ContactSummary, CustomerOption } from '@/lib/contacts';
 
 import GoogleImportButton from './google-import-button';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const BRAND = '#03458f';
 const ACCENT = '#f9b232';
@@ -69,8 +70,8 @@ export default function ContactsClient({
   /** Contact to open on arrival (`?open=<id>`, e.g. from global search). */
   initialOpenId?: number | null;
 }) {
-  const [contacts, setContacts] = useState<ContactSummary[]>(initialContacts);
-  const [customers] = useState<CustomerOption[]>(initialCustomers);
+  const [contacts, setContacts] = useSyncedState<ContactSummary[]>(initialContacts);
+  const [customers] = useSyncedState<CustomerOption[]>(initialCustomers);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<Category | 'All'>('All');
   const [selectedId, setSelectedId] = useState<number | null>(() =>

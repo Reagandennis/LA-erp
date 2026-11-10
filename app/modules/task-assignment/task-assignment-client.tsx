@@ -28,6 +28,7 @@ import {
   type TripOption,
   type VehicleSummary,
 } from './types';
+import { useSyncedState } from '@/app/ui/use-synced-state';
 
 type Tab = 'dashboard' | 'availability' | 'assignments' | 'vehicles' | 'drivers' | 'officers';
 type ResourceTab = 'vehicles' | 'drivers' | 'officers';
@@ -72,7 +73,7 @@ const inputClass =
   'w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#03458f]/30 focus:border-[#03458f]/40';
 
 export default function TaskAssignmentClient({ initialData }: { initialData: TaskAssignmentData }) {
-  const [data, setData] = useState<TaskAssignmentData>(initialData);
+  const [data, setData] = useSyncedState<TaskAssignmentData>(initialData);
   const [tab, setTab] = useState<Tab>('dashboard');
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
