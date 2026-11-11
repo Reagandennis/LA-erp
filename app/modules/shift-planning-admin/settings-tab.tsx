@@ -4,7 +4,7 @@ import { type FormEvent, useState } from 'react';
 
 import { CODE_STYLE, Card, Label, formatDay, inputClass, primaryButton } from '@/app/modules/_components/shift-ui';
 import { useConfirm } from '@/app/ui/confirm-dialog';
-import { CONSOLE_CODES, type ShiftCode, type ShiftRules, isConsole, spanHours } from '@/lib/shift-rules';
+import { EXTRA_CODE_LENGTH, type ExtraCode, MAX_EXTRA_CODES, SHIFT_CODES, type ShiftCode, type ShiftRules, isConsole, isWorking, spanHours } from '@/lib/shift-rules';
 import type { AdminOverview } from '@/lib/shift-types';
 
 import { message, sendJson } from './api';
@@ -15,6 +15,17 @@ interface Props {
 }
 
 const PATTERN_CODES: ShiftCode[] = ['D', 'S', 'N', 'OC', 'X'];
+
+/** What one of the roster's own codes can count as, in the words a scheduler would use. */
+const COUNTS_AS: Record<ShiftCode, string> = {
+  D: 'Day shift',
+  S: 'Swing shift',
+  N: 'Night shift',
+  W: 'A working day',
+  OC: 'On call',
+  X: 'Off',
+  LV: 'Leave',
+};
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 type Limit = 'targetHours7d' | 'maxHours7d' | 'maxHours14d' | 'minRestHours' | 'maxConsecutiveDuties' | 'responseMinutes' | 'leaveCapDays' | 'publishLeadDays';
@@ -50,6 +61,19 @@ export default function SettingsTab({ data, reload }: Props) {
     if ((patch.start !== undefined || patch.end !== undefined) && next.start && next.end) next.hours = spanHours(next.start, next.end);
     setRules({ ...rules, codes: { ...rules.codes, [code]: next } });
   };
+
+  const setExtra = (index: number, patch: Partial<ExtraCode>) => {
+    setRules({
+      ...rules,
+      extra: rules.extra.map((extra, i) => {
+        if (i !== index) return extra;
+        const next = { ...extra, ...patch };
+        // Only a working code keeps hours of its own.
+        return isWorking(next.as) ? next : { ...next, start: null, end: null, hours: null };
+      }),
+    });
+  };
+  const addExtra = () => setRules({ ...rules, extra: [...rules.extra, { code: '', name: '', as: 'W', start: null, end: null, hours: null }] });
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -155,9 +179,9 @@ export default function SettingsTab({ data, reload }: Props) {
 
         <Card className="p-5">
           <h2 className="text-sm font-semibold text-gray-900">Shift times</h2>
-          <p className="mt-0.5 text-sm text-gray-500">A finish at or before the start runs into the next day. A night shift is dated, and its hours booked, on the day it starts.</p>
+          <p className="mt-0.5 text-sm text-gray-500">A finish at or before the start runs into the next day. A night shift is dated, and its hours booked, on the day it starts. W is a working day away from the console.</p>
           <div className="mt-4 space-y-3">
-            {CONSOLE_CODES.map((code) => (
+            {SHIFT_CODES.filter(isWorking).map((code) => (
               <div key={code} className="grid grid-cols-[2.5rem_1fr_1fr_1fr_5rem] items-end gap-3">
                 <span className={`flex h-9 items-center justify-center rounded-lg text-xs font-bold ${CODE_STYLE[code].chip}`}>{code}</span>
                 <div>
@@ -179,6 +203,74 @@ export default function SettingsTab({ data, reload }: Props) {
               </div>
             ))}
           </div>
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="text-sm font-semibold text-gray-900">Your own codes</h2>
+          <p className="mt-0.5 text-sm text-gray-500">
+            Codes your roster uses beside the built-in ones, such as SOC-D or INT. Each shows on the roster as written and follows the rules of what it counts as. Leave the times empty to use the times of that shift.
+          </p>
+          <div className="mt-4 space-y-3">
+            {rules.extra.length === 0 && <p className="text-sm text-gray-300">None yet. Uploading a roster adds the codes it uses.</p>}
+            {rules.extra.map((extra, i) => {
+              const saved = data.rules.extra.some((old) => old.code === extra.code);
+              const working = isWorking(extra.as);
+              return (
+                <div key={i} className="grid grid-cols-2 items-end gap-3 sm:grid-cols-[6rem_1fr_9.5rem_6.5rem_6.5rem_4.5rem_auto]">
+                  <div>
+                    <Label>Code</Label>
+                    {saved ? (
+                      <span className={`flex h-[2.375rem] items-center justify-center rounded-lg px-2 text-xs font-bold ${CODE_STYLE[extra.as].chip}`}>{extra.code}</span>
+                    ) : (
+                      <input aria-label="Code" required className={`${inputClass} uppercase`} maxLength={EXTRA_CODE_LENGTH} value={extra.code} onChange={(e) => setExtra(i, { code: e.target.value.toUpperCase().trim() })} placeholder="e.g. WT" />
+                    )}
+                  </div>
+                  <div>
+                    <Label>Name</Label>
+                    <input aria-label={`Name of ${extra.code || 'the code'}`} className={inputClass} maxLength={30} value={extra.name} onChange={(e) => setExtra(i, { name: e.target.value })} placeholder={extra.code || 'What it stands for'} />
+                  </div>
+                  <div>
+                    <Label>Counts as</Label>
+                    <select aria-label={`What ${extra.code || 'the code'} counts as`} className={inputClass} value={extra.as} onChange={(e) => setExtra(i, { as: e.target.value as ShiftCode })}>
+                      {SHIFT_CODES.map((code) => (
+                        <option key={code} value={code}>{COUNTS_AS[code]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Start</Label>
+                    <input type="time" aria-label={`Start of ${extra.code}`} disabled={!working} className={inputClass} value={extra.start ?? ''} onChange={(e) => setExtra(i, { start: e.target.value || null })} />
+                  </div>
+                  <div>
+                    <Label>Finish</Label>
+                    <input type="time" aria-label={`Finish of ${extra.code}`} disabled={!working} className={inputClass} value={extra.end ?? ''} onChange={(e) => setExtra(i, { end: e.target.value || null })} />
+                  </div>
+                  <div>
+                    <Label>Hours</Label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0.25"
+                      max="24"
+                      aria-label={`Hours of ${extra.code}`}
+                      disabled={!working}
+                      className={inputClass}
+                      value={extra.hours ?? ''}
+                      placeholder={working ? String(extra.start && extra.end ? spanHours(extra.start, extra.end) : rules.codes[extra.as].hours) : ''}
+                      onChange={(e) => setExtra(i, { hours: e.target.value === '' ? null : Number(e.target.value) })}
+                    />
+                  </div>
+                  <button type="button" aria-label={`Remove ${extra.code || 'this code'}`} className="h-[2.375rem] rounded-lg px-2 text-xs font-semibold text-rose-600 hover:bg-rose-50" onClick={() => setRules({ ...rules, extra: rules.extra.filter((_, j) => j !== i) })}>
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <button type="button" disabled={rules.extra.length >= MAX_EXTRA_CODES} className="mt-4 h-9 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-40" onClick={addExtra}>
+            + Add a code
+          </button>
+          <p className="mt-3 text-[11px] text-gray-400">A day shift, swing shift or night shift code covers that console shift. A working day counts hours and rest without covering the console. A code that is on the roster cannot be removed.</p>
         </Card>
 
         <Card className="p-5">

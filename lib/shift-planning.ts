@@ -21,14 +21,20 @@ import {
   type Violation,
   addDays,
   addMonths,
+  baseOf,
+  codeDef,
   datesBetween,
   emptyTotals,
+  extraOf,
+  generatedCode,
   isConsole,
   isDateKey,
   isMonthKey,
   isRecordStatus,
+  isRosterCode,
   isShiftCode,
   isTimeOfDay,
+  isWorking,
   leaveAccrued,
   lineOnRoster,
   lineTotals,
@@ -40,10 +46,12 @@ import {
   sanitizeRules,
   spanHours,
   validateRoster,
+  writtenCodes,
   zonedNow,
 } from './shift-rules';
 import {
   type ExistingCell,
+  type ImportCodeChoices,
   type ImportPreview,
   type ImportResult,
   type ImportTarget,
@@ -54,6 +62,7 @@ import {
   planRosterImport,
   readRosterWorkbook,
   rosterTemplate,
+  withNewCodes,
 } from './shift-import';
 import {
   type AdminOverview,
@@ -75,6 +84,7 @@ import {
   cellOfRecord,
   indexRecords,
   recordKey,
+  writtenCode,
 } from './shift-types';
 
 /**
@@ -99,14 +109,34 @@ const MAX_CHANGES = 400;
 
 // --- Rules -------------------------------------------------------------------
 
+/** The roster's own codes are kept with the built-in ones, in the `codes` column. */
+const EXTRA_KEY = 'extra';
+
 export async function getRules(db: Db = prisma): Promise<ShiftRules> {
   const row = await db.shiftConfig.findUnique({ where: { id: 1 } });
   if (!row) return DEFAULT_RULES;
+  const stored = (row.codes && typeof row.codes === 'object' ? row.codes : {}) as Record<string, unknown>;
   try {
-    return sanitizeRules(row, DEFAULT_RULES);
+    return sanitizeRules({ ...row, extra: stored[EXTRA_KEY] ?? [] }, DEFAULT_RULES);
   } catch {
-    return DEFAULT_RULES;
+    try {
+      // One bad code of the roster's own must not throw away the whole configuration.
+      return sanitizeRules({ ...row, extra: [] }, DEFAULT_RULES);
+    } catch {
+      return DEFAULT_RULES;
+    }
   }
+}
+
+/** The rules as the ShiftConfig row holds them. */
+function configData(rules: ShiftRules, actorId: number) {
+  const { extra, codes, ...columns } = rules;
+  return { ...columns, codes: { ...codes, [EXTRA_KEY]: extra } as unknown as Prisma.InputJsonValue, updatedById: actorId };
+}
+
+async function writeRules(db: Db, rules: ShiftRules, actorId: number): Promise<void> {
+  const data = configData(rules, actorId);
+  await db.shiftConfig.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: data });
 }
 
 export async function saveRules(actor: Actor, input: unknown): Promise<ShiftRules> {
@@ -117,9 +147,14 @@ export async function saveRules(actor: Actor, input: unknown): Promise<ShiftRule
   } catch (error) {
     throw new RosterError(error instanceof Error ? error.message : 'Invalid settings.');
   }
-  const data = { ...rules, codes: rules.codes as unknown as Prisma.InputJsonValue, updatedById: actor.id };
+  // A code that is on the roster cannot be taken away from under it.
+  const dropped = before.extra.filter((old) => !rules.extra.some((extra) => extra.code === old.code)).map((old) => old.code);
+  for (const code of dropped) {
+    const count = await prisma.shiftRecord.count({ where: { OR: [{ plannedCode: code }, { generatedCode: code }] } });
+    if (count > 0) throw new RosterError(`${code} is on the roster (${count} shift${count === 1 ? '' : 's'}), so it cannot be removed. Change those shifts first.`);
+  }
   await prisma.$transaction(async (tx) => {
-    await tx.shiftConfig.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: data });
+    await writeRules(tx, rules, actor.id);
     const changed = (Object.keys(rules) as Array<keyof ShiftRules>).filter(
       (key) => JSON.stringify(rules[key]) !== JSON.stringify(before[key]),
     );
@@ -420,15 +455,17 @@ function callInView(row: NonNullable<RecordRow['callIn']>): CallInView {
   };
 }
 
-function recordView(row: RecordRow): RecordView {
-  const code = (value: string): ShiftCode => (isShiftCode(value) ? value : 'X');
+/** A saved row as the app reads it: each code as the built-in one it counts as, the plan's own code beside it. */
+function recordView(rules: ShiftRules, row: RecordRow): RecordView {
+  const code = (value: string): ShiftCode => baseOf(rules, value) ?? 'X';
   return {
     id: row.id,
     lineId: row.lineId,
     date: row.date,
     generatedCode: code(row.generatedCode),
     plannedCode: code(row.plannedCode),
-    workedCode: row.workedCode && isShiftCode(row.workedCode) ? row.workedCode : null,
+    label: extraOf(rules, row.plannedCode)?.code ?? null,
+    workedCode: row.workedCode ? baseOf(rules, row.workedCode) : null,
     status: isRecordStatus(row.status) ? row.status : 'planned',
     actualStart: row.actualStart,
     actualEnd: row.actualEnd,
@@ -440,19 +477,24 @@ function recordView(row: RecordRow): RecordView {
   };
 }
 
-export async function loadRecords(db: Db, from: string, to: string, lineId?: number): Promise<RecordView[]> {
-  const rows = await db.shiftRecord.findMany({
-    where: { date: { gte: from, lte: to }, ...(lineId ? { lineId } : {}) },
-    include: RECORD_INCLUDE,
-    orderBy: [{ date: 'asc' }, { lineId: 'asc' }],
-  });
-  return rows.map(recordView);
+export async function loadRecords(db: Db, from: string, to: string, lineId?: number, rules?: ShiftRules): Promise<RecordView[]> {
+  const [rows, known] = await Promise.all([
+    db.shiftRecord.findMany({
+      where: { date: { gte: from, lte: to }, ...(lineId ? { lineId } : {}) },
+      include: RECORD_INCLUDE,
+      orderBy: [{ date: 'asc' }, { lineId: 'asc' }],
+    }),
+    rules ? Promise.resolve(rules) : getRules(db),
+  ]);
+  return rows.map((row) => recordView(known, row));
 }
 
-function plannedTimes(rules: ShiftRules, code: ShiftCode): { plannedStart: string | null; plannedEnd: string | null } {
-  return isConsole(code)
-    ? { plannedStart: rules.codes[code].start, plannedEnd: rules.codes[code].end }
-    : { plannedStart: null, plannedEnd: null };
+/** The hours a written code is rostered for; none for on call, rest and leave. */
+function plannedTimes(rules: ShiftRules, written: string): { plannedStart: string | null; plannedEnd: string | null } {
+  const base = baseOf(rules, written);
+  if (!base || !isWorking(base)) return { plannedStart: null, plannedEnd: null };
+  const def = codeDef(rules, base, written);
+  return { plannedStart: def.start, plannedEnd: def.end };
 }
 
 function monthLabel(month: string): string {
@@ -685,7 +727,7 @@ export async function applyChanges(actor: Actor, input: ChangeInput[], options: 
   if (input.length > MAX_CHANGES) throw new RosterError('Too many changes in one save.');
   const seen = new Set<string>();
   for (const change of input) {
-    if (!Number.isInteger(change?.lineId) || !isDateKey(change?.date) || !isShiftCode(change?.code)) {
+    if (!Number.isInteger(change?.lineId) || !isDateKey(change?.date) || typeof change?.code !== 'string') {
       throw new RosterError('One of the changes is not valid.');
     }
     const key = recordKey(change.lineId, change.date);
@@ -695,29 +737,54 @@ export async function applyChanges(actor: Actor, input: ChangeInput[], options: 
 
   const { rules, lines, records, generated } = await loadWindow(input.map((c) => c.date));
   const lineById = new Map(lines.map((l) => [l.id, l]));
-  const effective: Array<{ record: RecordView; code: ShiftCode; line: LineView }> = [];
+  /** `code` is as written; `base` is the built-in code it counts as. */
+  const effective: Array<{ record: RecordView; code: string; base: ShiftCode; line: LineView }> = [];
+  /** Days with nothing rostered that the change fills in. */
+  const filling: Array<{ date: string; code: string; base: ShiftCode; line: LineView; generated: string }> = [];
   for (const change of input) {
+    const base = baseOf(rules, change.code);
+    if (!base) throw new RosterError(`${change.code} is not a code this roster uses.`);
     const record = records.get(recordKey(change.lineId, change.date));
     const line = lineById.get(change.lineId);
-    if (!record || !line) throw new RosterError(`Nothing is rostered on ${dayLabel(change.date)} yet. Generate the month first.`);
+    if (!line) throw new RosterError('That person is no longer on the roster.');
+    if (!record) {
+      // A blank day in a month that exists: someone who joined after it was built, or a roster uploaded in part.
+      if (!generated(change.date)) throw new RosterError(`Nothing is rostered on ${dayLabel(change.date)} yet. Generate the month first.`);
+      if (!lineOnRoster(line, change.date)) {
+        throw new RosterError(`${line.code} is not on the roster on ${dayLabel(change.date)}. Check their start and end dates, and that they are active.`);
+      }
+      // What the rotation would have given is kept beside it, as for every other day.
+      filling.push({ date: change.date, code: change.code, base, line, generated: line.cycleOffset !== null ? generatedCode(rules, line.cycleOffset, change.date) : change.code });
+      continue;
+    }
     if (record.callIn || ['worked', 'sick', 'no-show', 'call-in'].includes(record.status)) {
       throw new RosterError(`${line.code} on ${dayLabel(change.date)} has recorded actuals. Clear them before changing the plan.`);
     }
-    if (record.plannedCode !== change.code) effective.push({ record, code: change.code, line });
+    if (writtenCode(record) !== change.code) effective.push({ record, code: change.code, base, line });
   }
-  if (effective.length === 0) return { saved: true, blocks: [], warnings: [], records: [] };
+  if (effective.length === 0 && filling.length === 0) return { saved: true, blocks: [], warnings: [], records: [] };
 
   const patches = new Map<string, Partial<RosterCell>>();
-  for (const { record, code } of effective) patches.set(recordKey(record.lineId, record.date), { planned: code });
-  const check = checkChange(rules, lines, records, patches, effective.map((e) => e.record.date), options, generated);
+  for (const { record, code, base } of effective) {
+    patches.set(recordKey(record.lineId, record.date), { planned: base, label: extraOf(rules, code)?.code ?? null });
+  }
+  for (const fill of filling) {
+    patches.set(recordKey(fill.line.id, fill.date), {
+      generated: baseOf(rules, fill.generated) ?? fill.base,
+      planned: fill.base,
+      status: fill.base === 'LV' ? 'leave' : 'planned',
+      label: extraOf(rules, fill.code)?.code ?? null,
+    });
+  }
+  const check = checkChange(rules, lines, records, patches, [...effective.map((e) => e.record.date), ...filling.map((f) => f.date)], options, generated);
   if (!check.allowed) return { saved: false, blocks: check.blocks, warnings: check.warnings };
 
   const kind = options.kind === 'swap' ? 'swap' : 'override';
   const reason = options.reason?.trim().slice(0, 200) || null;
   const saved = await prisma.$transaction(async (tx) => {
     const rows: RecordView[] = [];
-    for (const { record, code } of effective) {
-      const status: RecordStatus = code === 'LV' ? 'leave' : kind === 'swap' ? 'swapped' : 'planned';
+    for (const { record, code, base } of effective) {
+      const status: RecordStatus = base === 'LV' ? 'leave' : kind === 'swap' ? 'swapped' : 'planned';
       const row = await tx.shiftRecord.update({
         where: { id: record.id },
         data: {
@@ -728,23 +795,42 @@ export async function applyChanges(actor: Actor, input: ChangeInput[], options: 
           approvedById: actor.id,
           updatedById: actor.id,
           // A manual change takes the cell out of any leave that put LV there.
-          leaveId: code === 'LV' ? record.leaveId : null,
+          leaveId: base === 'LV' ? record.leaveId : null,
         },
         include: RECORD_INCLUDE,
       });
-      rows.push(recordView(row));
+      rows.push(recordView(rules, row));
     }
-    const first = effective[0] as (typeof effective)[number];
+    for (const fill of filling) {
+      const row = await tx.shiftRecord.create({
+        data: {
+          lineId: fill.line.id,
+          date: fill.date,
+          generatedCode: fill.generated,
+          plannedCode: fill.code,
+          status: fill.base === 'LV' ? 'leave' : 'planned',
+          ...plannedTimes(rules, fill.code),
+          reasonCode: reason,
+          approvedById: actor.id,
+          updatedById: actor.id,
+        },
+        include: RECORD_INCLUDE,
+      });
+      rows.push(recordView(rules, row));
+    }
+    const all = [
+      ...effective.map((e) => ({ line: e.line.code, date: e.record.date, generated: e.record.generatedCode as string, from: writtenCode(e.record) as string | null, to: e.code })),
+      ...filling.map((f) => ({ line: f.line.code, date: f.date, generated: f.generated, from: null as string | null, to: f.code })),
+    ];
+    const first = all[0] as (typeof all)[number];
     await audit(tx, actor, {
       action: kind,
-      month: monthOf(first.record.date),
-      date: first.record.date,
-      lineCode: effective.length === 1 ? first.line.code : null,
-      summary: effective
-        .map((e) => `${e.line.code} ${dayLabel(e.record.date)} ${e.record.plannedCode}→${e.code}`)
-        .join('; '),
+      month: monthOf(first.date),
+      date: first.date,
+      lineCode: all.length === 1 ? first.line : null,
+      summary: all.map((change) => `${change.line} ${dayLabel(change.date)} ${change.from ?? 'blank'}→${change.to}`).join('; '),
       detail: {
-        changes: effective.map((e) => ({ line: e.line.code, date: e.record.date, generated: e.record.generatedCode, from: e.record.plannedCode, to: e.code })),
+        changes: all,
         reason,
         warnings: check.warnings.map((v) => v.message),
         blocks: check.blocks.map((v) => v.message),
@@ -778,8 +864,10 @@ export async function recordActual(actor: Actor, input: ActualInput): Promise<Re
   });
   if (!row) throw new RosterError('Nothing is rostered there.');
   if (row.callIn) throw new RosterError('This day has a call-in. Edit or cancel the call-in instead.');
-  if (!isShiftCode(row.plannedCode) || !isConsole(row.plannedCode)) {
-    throw new RosterError('Only a rostered console shift can be marked worked, sick or no-show.');
+  const rules = await getRules();
+  const planned = baseOf(rules, row.plannedCode);
+  if (!planned || !isWorking(planned)) {
+    throw new RosterError('Only a rostered shift can be marked worked, sick or no-show.');
   }
   const start = input.actualStart || null;
   const end = input.actualEnd || null;
@@ -810,7 +898,7 @@ export async function recordActual(actor: Actor, input: ActualInput): Promise<Re
     });
     return updated;
   });
-  return recordView(saved);
+  return recordView(rules, saved);
 }
 
 /** Confirms every past console shift in a month that nobody has touched as worked to plan. */
@@ -822,7 +910,7 @@ export async function confirmWorked(actor: Actor, month: string): Promise<number
   if (to < monthStart(month)) return 0;
   return prisma.$transaction(async (tx) => {
     const result = await tx.shiftRecord.updateMany({
-      where: { date: { gte: monthStart(month), lte: to }, status: { in: ['planned', 'swapped'] }, plannedCode: { in: ['D', 'S', 'N'] } },
+      where: { date: { gte: monthStart(month), lte: to }, status: { in: ['planned', 'swapped'] }, plannedCode: { in: writtenCodes(rules, isWorking) } },
       data: { status: 'worked', updatedById: actor.id },
     });
     if (result.count > 0) {
@@ -942,7 +1030,7 @@ export async function saveCallIn(actor: Actor, input: CallInInput): Promise<Save
     });
     return row;
   });
-  return { saved: true, blocks: check.blocks, warnings: check.warnings, records: [recordView(saved)] };
+  return { saved: true, blocks: check.blocks, warnings: check.warnings, records: [recordView(rules, saved)] };
 }
 
 export async function cancelCallIn(actor: Actor, lineId: number, date: string): Promise<RecordView | null> {
@@ -967,7 +1055,7 @@ export async function cancelCallIn(actor: Actor, lineId: number, date: string): 
     });
     return updated;
   });
-  return recordView(saved);
+  return recordView(await getRules(), saved);
 }
 
 // --- Leave -------------------------------------------------------------------
@@ -1014,13 +1102,13 @@ export async function listLeaves(filter: { lineId?: number; from?: string } = {}
  * exists and the rotation where it does not yet.
  */
 export async function chargeableDates(db: Db, rules: ShiftRules, line: LineView, start: string, end: string, leaveId: number | null): Promise<string[]> {
-  const records = indexRecords(await loadRecords(db, start, end, line.id));
+  const records = indexRecords(await loadRecords(db, start, end, line.id, rules));
   const out: string[] = [];
   for (const date of datesBetween(start, end)) {
     const record = records.get(recordKey(line.id, date));
     if (record) {
       const chargedHere = leaveId !== null && record.leaveId === leaveId;
-      if (chargedHere || (isConsole(record.plannedCode) && !record.callIn && ['planned', 'swapped'].includes(record.status))) out.push(date);
+      if (chargedHere || (isWorking(record.plannedCode) && !record.callIn && ['planned', 'swapped'].includes(record.status))) out.push(date);
     } else if (line.cycleOffset !== null && lineOnRoster(line, date)) {
       const cell = resolveCell(rules, line, date, () => null);
       if (cell && isConsole(cell.planned)) out.push(date);
@@ -1040,7 +1128,7 @@ async function applyLeave(tx: Prisma.TransactionClient, rules: ShiftRules, leave
       lineId: leave.lineId,
       date: { in: charged },
       leaveId: null,
-      plannedCode: { in: ['D', 'S', 'N'] },
+      plannedCode: { in: writtenCodes(rules, isWorking) },
       status: { in: ['planned', 'swapped'] },
     },
     data: { plannedCode: 'LV', status: 'leave', leaveId: leave.id, plannedStart: null, plannedEnd: null },
@@ -1052,7 +1140,7 @@ async function applyLeave(tx: Prisma.TransactionClient, rules: ShiftRules, leave
 async function revertLeave(tx: Prisma.TransactionClient, rules: ShiftRules, leaveId: number): Promise<void> {
   const rows = await tx.shiftRecord.findMany({ where: { leaveId } });
   for (const row of rows) {
-    const code = isShiftCode(row.generatedCode) ? row.generatedCode : 'X';
+    const code = isRosterCode(rules, row.generatedCode) ? row.generatedCode : 'X';
     await tx.shiftRecord.update({
       where: { id: row.id },
       data: { plannedCode: code, status: 'planned', leaveId: null, ...plannedTimes(rules, code) },
@@ -1211,6 +1299,8 @@ export interface RosterImportInput {
   blankAsOff?: boolean;
   /** Who each row of the file is, where the scheduler chose; by the row's key. */
   mapping?: Record<string, ImportTarget>;
+  /** What each code the roster does not know counts as, where the scheduler chose. */
+  codes?: ImportCodeChoices;
   /** False (the default) only works out what would happen. */
   apply?: boolean;
   /** Needed when the upload adds a blocking problem to a published month. */
@@ -1237,7 +1327,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
   assertMonth(month);
   const from = monthStart(month);
   const to = monthEnd(month);
-  const [rules, lines, monthRow, records, months, users, leaves] = await Promise.all([
+  const [saved, lines, monthRow, records, months, users, leaves] = await Promise.all([
     getRules(),
     listLines(),
     prisma.shiftMonth.findUnique({ where: { month } }),
@@ -1247,7 +1337,21 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
     prisma.shiftLeave.findMany({ where: { status: 'approved', startDate: { lte: to }, endDate: { gte: from } } }),
   ]);
 
-  const workbook = readRosterWorkbook(input.sheets, month, rules, input.sheet);
+  // Read once to meet the file's own codes ("SOC-D", "WT"), then again with them
+  // added to the rules, so that those cells are shifts like any other.
+  const first = readRosterWorkbook(input.sheets, month, saved, input.sheet);
+  if (!first.reading || !first.sheet) throw new RosterError(first.error ?? 'No roster was found in this file.');
+  const learned = withNewCodes(saved, first.reading.unknown, input.codes ?? {});
+  let rules = saved;
+  if (learned.rules !== saved) {
+    try {
+      rules = sanitizeRules(learned.rules, saved);
+    } catch (error) {
+      throw new RosterError(error instanceof Error ? error.message : 'One of the codes in this file cannot be used.');
+    }
+  }
+  const newCodes = rules.extra.filter((extra) => !saved.extra.some((old) => old.code === extra.code));
+  const workbook = rules === saved ? first : readRosterWorkbook(input.sheets, month, rules, first.sheet);
   if (!workbook.reading || !workbook.sheet) throw new RosterError(workbook.error ?? 'No roster was found in this file.');
   const reading = workbook.reading;
 
@@ -1257,7 +1361,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
     if (record.date < from || record.date > to) continue;
     existing.set(recordKey(record.lineId, record.date), {
       id: record.id,
-      planned: record.plannedCode,
+      planned: writtenCode(record),
       generated: record.generatedCode,
       locked: Boolean(record.callIn) || LOCKED_STATUSES.includes(record.status),
       cell: cellOfRecord(record),
@@ -1278,7 +1382,8 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
       for (const leave of leaves) {
         if (leave.lineId !== person.target) continue;
         for (const shift of person.shifts) {
-          if (isConsole(shift.code) && shift.date >= leave.startDate && shift.date <= leave.endDate) onLeave.add(recordKey(leave.lineId, shift.date));
+          const base = baseOf(rules, shift.code);
+          if (base && isWorking(base) && shift.date >= leave.startDate && shift.date <= leave.endDate) onLeave.add(recordKey(leave.lineId, shift.date));
         }
       }
     }
@@ -1327,6 +1432,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
       .filter((line) => line.active && !inFile.has(line.id) && (monthRow ? [...existing.keys()].some((key) => key.startsWith(`${line.id}|`)) : line.cycleOffset !== null))
       .map((line) => (line.name === line.code ? line.code : `${line.code} · ${line.name}`)),
     onLeave: onLeave.size,
+    newCodes: learned.codes,
     notes: plan.notes,
     moreNotes: plan.moreNotes,
     blocks: checks.blocks.slice(0, MAX_SHOWN_VIOLATIONS),
@@ -1364,9 +1470,11 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
       }
 
       await tx.shiftMonth.upsert({ where: { month }, create: { month, generatedById: actor.id }, update: {} });
+      // The roster keeps the codes it has just met, and shows them as written from now on.
+      if (newCodes.length > 0) await writeRules(tx, rules, actor.id);
 
       const creates: Prisma.ShiftRecordCreateManyInput[] = [];
-      const updates = new Map<ShiftCode, number[]>();
+      const updates = new Map<string, number[]>();
       for (const person of plan.people) {
         const lineId = typeof person.target === 'number' ? person.target : lineIdOf.get(person.key);
         if (lineId === undefined) continue;
@@ -1380,7 +1488,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
             date: shift.date,
             generatedCode: shift.generated,
             plannedCode: shift.code,
-            status: shift.code === 'LV' ? 'leave' : 'planned',
+            status: baseOf(rules, shift.code) === 'LV' ? 'leave' : 'planned',
             ...plannedTimes(rules, shift.code),
             reasonCode: IMPORT_REASON,
             approvedById: actor.id,
@@ -1396,13 +1504,13 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
           where: { id: { in: ids }, status: { notIn: LOCKED_STATUSES } },
           data: {
             plannedCode: code,
-            status: code === 'LV' ? 'leave' : 'planned',
+            status: baseOf(rules, code) === 'LV' ? 'leave' : 'planned',
             ...plannedTimes(rules, code),
             reasonCode: IMPORT_REASON,
             approvedById: actor.id,
             updatedById: actor.id,
             // A change by hand takes the day out of any leave that put LV there.
-            ...(code === 'LV' ? {} : { leaveId: null }),
+            ...(baseOf(rules, code) === 'LV' ? {} : { leaveId: null }),
           },
         });
         updated += result.count;
@@ -1412,7 +1520,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
 
       const people = plan.people.filter((person) => person.target !== 'skip' && person.shifts.length > 0);
       const shifts = created.count + updated;
-      const summary = `${monthRow ? 'Updated' : 'Filled'} ${monthLabel(month)} from ${input.fileName}: ${shifts} shift${shifts === 1 ? '' : 's'} for ${people.length} ${people.length === 1 ? 'person' : 'people'}${adding.length ? `, ${adding.length} of them new to the roster` : ''}`;
+      const summary = `${monthRow ? 'Updated' : 'Filled'} ${monthLabel(month)} from ${input.fileName}: ${shifts} shift${shifts === 1 ? '' : 's'} for ${people.length} ${people.length === 1 ? 'person' : 'people'}${adding.length ? `, ${adding.length} of them new to the roster` : ''}${newCodes.length ? `; added the code${newCodes.length === 1 ? '' : 's'} ${newCodes.map((extra) => extra.code).join(', ')}` : ''}`;
       await audit(tx, actor, {
         action: 'import',
         month,
@@ -1424,6 +1532,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
           updated,
           people: people.map((person) => person.lineCode ?? codes[adding.findIndex((entry) => entry.person.key === person.key)] ?? person.label),
           added: adding.map((entry, i) => ({ code: codes[i], name: personName(entry.names), account: entry.account?.name ?? null })),
+          newCodes: newCodes.map((extra) => ({ code: extra.code, as: extra.as })),
           blankAsOff: Boolean(input.blankAsOff),
           skipped: { locked: totals.locked, unreadable: totals.unreadable, outside: totals.outside },
           blocks: needsReason ? checks.newBlocks.map((v) => v.message) : [],
@@ -1457,7 +1566,7 @@ export async function rosterTemplateRows(month: string): Promise<string[][]> {
     lines: lines.filter((line) => line.active || records.some((record) => record.lineId === line.id)),
     codeAt: (lineId, date) => {
       const record = index.get(recordKey(lineId, date));
-      if (record) return record.plannedCode;
+      if (record) return writtenCode(record);
       const line = lines.find((l) => l.id === lineId);
       if (monthRow || !line || line.cycleOffset === null || !lineOnRoster(line, date)) return null;
       return resolveCell(rules, line, date, () => null)?.planned ?? null;

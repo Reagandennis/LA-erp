@@ -4,15 +4,20 @@ import { type ReactNode, useMemo } from 'react';
 
 import { APP_LOCALE } from '@/lib/locale';
 import {
+  type RosterCell,
   type Severity,
   type ShiftCode,
   type ShiftRules,
   SHIFT_CODES,
-  isConsole,
+  baseOf,
+  codeDef,
+  extraOf,
+  isWorking,
   isoWeekday,
+  lineOnRoster,
   lineTotals,
 } from '@/lib/shift-rules';
-import { type HolidayView, type LineView, type MonthView, type RecordView, cellOfRecord, recordKey } from '@/lib/shift-types';
+import { type HolidayView, type LineView, type MonthView, type RecordView, cellOfRecord, recordKey, writtenCode } from '@/lib/shift-types';
 
 /**
  * Shared pieces of the two shift modules: how a shift code looks, how dates
@@ -25,6 +30,7 @@ export const CODE_STYLE: Record<ShiftCode, { chip: string; soft: string; dot: st
   D: { chip: 'bg-amber-100 text-amber-900', soft: 'bg-amber-50 border-amber-200 text-amber-900', dot: 'bg-amber-400' },
   S: { chip: 'bg-violet-100 text-violet-900', soft: 'bg-violet-50 border-violet-200 text-violet-900', dot: 'bg-violet-400' },
   N: { chip: 'bg-[#03458f] text-white', soft: 'bg-[#03458f]/5 border-[#03458f]/20 text-[#03458f]', dot: 'bg-[#03458f]' },
+  W: { chip: 'bg-sky-100 text-sky-900', soft: 'bg-sky-50 border-sky-200 text-sky-900', dot: 'bg-sky-400' },
   OC: { chip: 'bg-emerald-100 text-emerald-800', soft: 'bg-emerald-50 border-emerald-200 text-emerald-800', dot: 'bg-emerald-400' },
   X: { chip: 'bg-gray-100 text-gray-400', soft: 'bg-gray-50 border-gray-200 text-gray-500', dot: 'bg-gray-300' },
   LV: { chip: 'bg-rose-100 text-rose-700', soft: 'bg-rose-50 border-rose-200 text-rose-700', dot: 'bg-rose-400' },
@@ -90,10 +96,37 @@ export function formatSpan(minutes: number): string {
   return `${mins} min`;
 }
 
-/** The hours a code runs, e.g. "07:00 – 15:00"; empty for on call, rest and leave. */
-export function codeTimes(rules: ShiftRules, code: ShiftCode): string {
-  const def = rules.codes[code];
+/** The hours a code runs, e.g. "07:00 – 15:00"; empty for on call, rest and leave. `label` is the roster's own code it is written as. */
+export function codeTimes(rules: ShiftRules, code: ShiftCode, label?: string | null): string {
+  const def = codeDef(rules, code, label);
   return def.start && def.end ? `${def.start} – ${def.end}` : '';
+}
+
+/**
+ * How a code written on the roster looks and reads: one of its own ("SOC-D")
+ * takes the colours of the built-in code it counts as, and keeps its own name
+ * and hours. An unknown code reads as a rest day.
+ */
+export function codeLook(rules: ShiftRules, written: string): { base: ShiftCode; name: string; times: string; chip: string } {
+  const base = baseOf(rules, written) ?? 'X';
+  return { base, name: codeDef(rules, base, written).name, times: codeTimes(rules, base, written), chip: CODE_STYLE[base].chip };
+}
+
+/** A draft's code on a cell, as the rules read it. */
+export function draftPatch(rules: ShiftRules, written: string): Partial<RosterCell> {
+  return { planned: baseOf(rules, written) ?? 'X', label: extraOf(rules, written)?.code ?? null };
+}
+
+/** A blank day with a draft code on it, as the rules read it. */
+export function blankCell(rules: ShiftRules, written: string): RosterCell {
+  const patch = draftPatch(rules, written);
+  const planned = patch.planned ?? 'X';
+  return { generated: planned, planned, worked: null, status: 'planned', hours: null, start: null, end: null, label: patch.label ?? null };
+}
+
+/** A shift code as a small coloured tag; wide enough for the roster's own longer codes. */
+export function CodeChip({ rules, code, className = '' }: { rules: ShiftRules; code: string; className?: string }) {
+  return <span className={`inline-flex h-5 min-w-5 items-center justify-center whitespace-nowrap rounded px-1 text-[10px] font-bold ${codeLook(rules, code).chip} ${className}`}>{code}</span>;
 }
 
 // --- Small parts ---------------------------------------------------------------
@@ -128,13 +161,16 @@ export function MonthStatusPill({ month, today }: { month: MonthView; today: str
 export function Legend({ rules, className = '' }: { rules: ShiftRules; className?: string }) {
   return (
     <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-500 ${className}`}>
-      {SHIFT_CODES.map((code) => (
-        <span key={code} className="inline-flex items-center gap-1.5">
-          <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-[10px] font-bold ${CODE_STYLE[code].chip}`}>{code}</span>
-          {rules.codes[code].name}
-          {isConsole(code) && <span className="text-gray-400">{codeTimes(rules, code)}</span>}
-        </span>
-      ))}
+      {[...SHIFT_CODES, ...rules.extra.map((extra) => extra.code)].map((code) => {
+        const look = codeLook(rules, code);
+        return (
+          <span key={code} className="inline-flex items-center gap-1.5">
+            <CodeChip rules={rules} code={code} />
+            {look.name !== code && look.name}
+            {isWorking(look.base) && <span className="text-gray-400">{look.times}</span>}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -172,12 +208,13 @@ export interface RosterGridProps {
   records: Map<string, RecordView>;
   holidays: HolidayView[];
   today: string;
-  /** Unsaved changes, drawn over the saved code. */
-  draft?: ReadonlyMap<string, ShiftCode>;
+  /** Unsaved changes, drawn over the saved code; each as written (a built-in code or one of the roster's own). */
+  draft?: ReadonlyMap<string, string>;
   /** Cells and dates a rule has flagged. */
   flaggedCells?: ReadonlyMap<string, Severity>;
   flaggedDates?: ReadonlyMap<string, Severity>;
   activeKey?: string | null;
+  /** Called for a rostered day, and for a blank one the person could be given a shift on. */
   onCellClick?: (line: LineView, date: string, anchor: HTMLElement) => void;
   /** The row to pick out, e.g. the person looking at it. */
   highlightLineId?: number | null;
@@ -210,10 +247,11 @@ export function RosterGrid({
             rules,
             dates.map((date) => {
               const record = records.get(recordKey(line.id, date));
-              if (!record) return { date, cell: null };
-              const cell = cellOfRecord(record);
               const drafted = draft?.get(recordKey(line.id, date));
-              return { date, cell: drafted ? { ...cell, planned: drafted } : cell };
+              // A blank day being given a shift counts from the moment it is drafted.
+              if (!record) return { date, cell: drafted ? blankCell(rules, drafted) : null };
+              const cell = cellOfRecord(record);
+              return { date, cell: drafted ? { ...cell, ...draftPatch(rules, drafted) } : cell };
             }),
             holidaySet,
           ),
@@ -227,7 +265,8 @@ export function RosterGrid({
       .filter((line) => {
         const key = recordKey(line.id, date);
         const record = records.get(key);
-        return record && (draft?.get(key) ?? record.plannedCode) === 'OC' && !record.workedCode;
+        const drafted = draft?.get(key);
+        return (drafted ? baseOf(rules, drafted) : record?.plannedCode) === 'OC' && !record?.workedCode;
       })
       .map((line) => line.code);
 
@@ -287,20 +326,40 @@ export function RosterGrid({
                 {dates.map((date) => {
                   const key = recordKey(line.id, date);
                   const record = records.get(key);
-                  if (!record) {
-                    return <td key={date} className="border-b border-gray-50 p-0.5 text-center text-gray-200">·</td>;
-                  }
                   const drafted = draft?.get(key);
-                  const shown = record.workedCode ?? drafted ?? record.plannedCode;
+                  if (!record) {
+                    // Nothing rostered: a day the scheduler can fill, if the person is on the roster then.
+                    const open = Boolean(onCellClick) && lineOnRoster(line, date);
+                    const ring = activeKey === key ? 'ring-2 ring-[#03458f]' : drafted ? 'ring-2 ring-[#f9b232]' : '';
+                    const box = drafted ? (
+                      <span className={`flex h-7 min-w-8 items-center justify-center whitespace-nowrap rounded-md px-1 font-bold ${drafted.length > 3 ? 'text-[10px] tracking-tight' : 'text-[11px]'} ${codeLook(rules, drafted).chip} ${ring}`}>{drafted}</span>
+                    ) : (
+                      <span className={`flex h-7 min-w-8 items-center justify-center rounded-md ${open ? 'border border-dashed border-transparent text-gray-300 transition hover:border-[#03458f]/40 hover:bg-[#03458f]/5 hover:text-[#03458f]' : 'text-gray-200'} ${ring}`}>{open ? '+' : '·'}</span>
+                    );
+                    return (
+                      <td key={date} className={`border-b border-gray-50 p-0.5 text-center ${date === today ? 'bg-[#03458f]/5' : ''}`} title={open ? `${line.code} · ${formatDay(date)}\n${drafted ? `Unsaved: ${codeLook(rules, drafted).name}` : 'Nothing rostered. Click to give a shift.'}` : undefined}>
+                        {open && onCellClick ? (
+                          <button type="button" aria-label={`${line.code}, ${formatDay(date)}: nothing rostered`} className="block w-full rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#03458f]" onClick={(e) => onCellClick(line, date, e.currentTarget)}>
+                            {box}
+                          </button>
+                        ) : (
+                          box
+                        )}
+                      </td>
+                    );
+                  }
+                  // As written on the roster: a call-in shows the shift covered, a draft the code picked.
+                  const shown = record.workedCode ?? drafted ?? writtenCode(record);
+                  const look = codeLook(rules, shown);
                   const flag = flaggedCells?.get(key);
                   const absent = record.status === 'sick' || record.status === 'no-show';
                   const overridden = !drafted && record.plannedCode !== record.generatedCode;
                   const title = [
                     `${line.code} · ${formatDay(date)}`,
-                    `${rules.codes[shown].name}${codeTimes(rules, shown) ? ` ${codeTimes(rules, shown)}` : ''}`,
-                    drafted ? `Unsaved change from ${record.plannedCode}` : '',
+                    `${look.name}${look.times ? ` ${look.times}` : ''}`,
+                    drafted ? `Unsaved change from ${writtenCode(record)}` : '',
                     overridden ? `Changed from ${record.generatedCode}` : '',
-                    record.workedCode ? `Called in from ${record.plannedCode}` : '',
+                    record.workedCode ? `Called in from ${writtenCode(record)}` : '',
                     absent ? (record.status === 'sick' ? 'Sick' : 'No-show') : '',
                     record.status === 'worked' ? 'Worked' : '',
                   ]
@@ -317,7 +376,7 @@ export function RosterGrid({
                           : '';
                   const chip = (
                     <span
-                      className={`relative flex h-7 w-8 items-center justify-center rounded-md text-[11px] font-bold ${CODE_STYLE[shown].chip} ${ring} ${absent ? 'opacity-40 line-through' : ''}`}
+                      className={`relative flex h-7 min-w-8 items-center justify-center whitespace-nowrap rounded-md px-1 font-bold ${shown.length > 3 ? 'text-[10px] tracking-tight' : 'text-[11px]'} ${look.chip} ${ring} ${absent ? 'opacity-40 line-through' : ''}`}
                     >
                       {shown}
                       {record.workedCode && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />}

@@ -2,9 +2,9 @@
 
 import { type DragEvent, useEffect, useRef, useState } from 'react';
 
-import { CODE_STYLE, Label, Pill, formatMonth, ghostButton, inputClass, primaryButton } from '@/app/modules/_components/shift-ui';
-import type { ImportPersonView, ImportPreview, ImportResult, ImportTarget } from '@/lib/shift-import';
-import { RULE_LABEL, SHIFT_CODES, type ShiftRules, type Violation, isMonthKey } from '@/lib/shift-rules';
+import { CODE_STYLE, CodeChip, Label, Pill, formatMonth, ghostButton, inputClass, primaryButton } from '@/app/modules/_components/shift-ui';
+import type { ImportCodeChoices, ImportCodeView, ImportPersonView, ImportPreview, ImportResult, ImportTarget } from '@/lib/shift-import';
+import { RULE_LABEL, SHIFT_CODES, type ShiftCode, type ShiftRules, type Violation, isMonthKey } from '@/lib/shift-rules';
 import type { LineView } from '@/lib/shift-types';
 
 interface Props {
@@ -23,7 +23,21 @@ interface Request {
   sheet: string | null;
   blankAsOff: boolean;
   mapping: Record<string, ImportTarget>;
+  /** What each code the roster does not know counts as, where the scheduler has chosen. */
+  codes: ImportCodeChoices;
 }
+
+/** What a code of the roster's own can count as, in the order a scheduler would look for it. */
+const COUNTS_AS: Array<{ value: ShiftCode | 'skip'; label: string }> = [
+  { value: 'D', label: 'Day shift' },
+  { value: 'S', label: 'Swing shift' },
+  { value: 'N', label: 'Night shift' },
+  { value: 'W', label: 'A working day (not on the console)' },
+  { value: 'OC', label: 'On call' },
+  { value: 'X', label: 'Off' },
+  { value: 'LV', label: 'Leave' },
+  { value: 'skip', label: 'Do not use this code' },
+];
 
 const ACCEPT = '.xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
 const SHOWN_VIOLATIONS = 5;
@@ -35,6 +49,7 @@ async function send(request: Request, extra: { apply?: boolean; forceReason?: st
   if (request.sheet) body.set('sheet', request.sheet);
   if (request.blankAsOff) body.set('blankAsOff', '1');
   body.set('mapping', JSON.stringify(request.mapping));
+  body.set('codes', JSON.stringify(request.codes));
   if (extra.apply) body.set('apply', '1');
   if (extra.forceReason) body.set('forceReason', extra.forceReason);
   const response = await fetch('/api/shift-planning/admin/import', { method: 'POST', body });
@@ -56,6 +71,7 @@ export default function RosterImportDialog({ month: initialMonth, rules, lines, 
   const [sheet, setSheet] = useState<string | null>(null);
   const [blankAsOff, setBlankAsOff] = useState(false);
   const [mapping, setMapping] = useState<Record<string, ImportTarget>>({});
+  const [codes, setCodes] = useState<ImportCodeChoices>({});
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -98,16 +114,18 @@ export default function RosterImportDialog({ month: initialMonth, rules, lines, 
     setFile(chosen);
     setSheet(null);
     setMapping({});
+    setCodes({});
     setForceReason('');
-    void read({ file: chosen, month, sheet: null, blankAsOff, mapping: {} });
+    void read({ file: chosen, month, sheet: null, blankAsOff, mapping: {}, codes: {} });
   };
 
   const change = (patch: Partial<Omit<Request, 'file'>>) => {
-    const next = { month, sheet, blankAsOff, mapping, ...patch };
+    const next = { month, sheet, blankAsOff, mapping, codes, ...patch };
     setMonth(next.month);
     setSheet(next.sheet);
     setBlankAsOff(next.blankAsOff);
     setMapping(next.mapping);
+    setCodes(next.codes);
     if (file && isMonthKey(next.month)) void read({ file, ...next });
   };
 
@@ -122,7 +140,9 @@ export default function RosterImportDialog({ month: initialMonth, rules, lines, 
     setSaving(true);
     setError(null);
     try {
-      const result = await send({ file, month, sheet, blankAsOff, mapping }, { apply: true, forceReason });
+      // What was shown is what is saved: a guess the scheduler left standing goes in as their choice.
+      const shown = Object.fromEntries(preview.newCodes.map((entry) => [entry.code, entry.as]));
+      const result = await send({ file, month, sheet, blankAsOff, mapping, codes: { ...shown, ...codes } }, { apply: true, forceReason });
       await onImported(month, result.summary ?? `${formatMonth(month)} was filled from ${file.name}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the roster.');
@@ -194,12 +214,18 @@ export default function RosterImportDialog({ month: initialMonth, rules, lines, 
               <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
                 {SHIFT_CODES.map((code) => (
                   <span key={code} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${CODE_STYLE[code].chip}`}>{code}</span>
+                    <CodeChip rules={rules} code={code} />
                     {rules.codes[code].name}
                   </span>
                 ))}
+                {rules.extra.map((extra) => (
+                  <span key={extra.code} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                    <CodeChip rules={rules} code={extra.code} />
+                    {extra.name !== extra.code && extra.name}
+                  </span>
+                ))}
               </div>
-              <p className="mt-2 text-xs text-gray-400">The words work too: “Off”, “Night”, “On call”, “Leave”.</p>
+              <p className="mt-2 text-xs text-gray-400">The words work too: “Off”, “Night”, “On call”, “Leave”. Codes of your own (such as SOC-D) are picked up from the file.</p>
             </div>
           )}
 
@@ -233,6 +259,10 @@ export default function RosterImportDialog({ month: initialMonth, rules, lines, 
                 <Stat label="Already the same" value={totals.unchanged} />
                 <Stat label="Left alone" value={skipped + totals.blank} hint={skipped + totals.blank > 0 ? leftAlone(totals) : undefined} />
               </div>
+
+              {preview.newCodes.length > 0 && (
+                <NewCodes codes={preview.newCodes} onChange={(code, as) => change({ codes: { ...codes, [code]: as } })} rules={rules} />
+              )}
 
               {preview.monthStatus === 'published' && (
                 <Banner tone="warn">
@@ -366,6 +396,42 @@ function Banner({ tone, children }: { tone: 'warn' | 'info'; children: React.Rea
 
 /** File name, who they are on the roster, shifts: three columns, stacked on a phone. */
 const PERSON_GRID = 'sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_7.5rem] sm:gap-4';
+
+/**
+ * Codes the file uses that the roster has not met. They are added to the
+ * roster and shown as written; what each counts as decides its colour and
+ * which rules apply to it.
+ */
+function NewCodes({ codes, rules, onChange }: { codes: ImportCodeView[]; rules: ShiftRules; onChange: (code: string, as: ShiftCode | 'skip') => void }) {
+  return (
+    <div className="rounded-xl border border-[#03458f]/20 bg-[#03458f]/[0.03] px-4 py-3">
+      <p className="text-sm font-semibold text-gray-900">
+        {codes.length === 1 ? 'This file uses a code' : `This file uses ${codes.length} codes`} the roster has not seen before
+      </p>
+      <p className="mt-0.5 text-xs text-gray-500">
+        {codes.length === 1 ? 'It is' : 'They are'} added to the roster and shown exactly as written. Check what each one counts as: that sets its colour, and whether its hours and rest are counted. You can name them and set their times later under Rules &amp; holidays.
+      </p>
+      <ul className="mt-3 space-y-2">
+        {codes.map((entry) => (
+          <li key={entry.code} className="grid grid-cols-[5.5rem_1fr] items-center gap-3 sm:grid-cols-[5.5rem_6rem_1fr]">
+            <span className={`flex h-8 items-center justify-center whitespace-nowrap rounded-lg px-2 text-xs font-bold ${entry.as === 'skip' ? 'bg-gray-100 text-gray-400 line-through' : CODE_STYLE[entry.as].chip}`}>{entry.code}</span>
+            <span className="hidden text-xs text-gray-400 sm:block">
+              {entry.count} {entry.count === 1 ? 'cell' : 'cells'}
+            </span>
+            <select aria-label={`What ${entry.code} counts as`} className={`${inputClass} !py-1.5 text-xs`} value={entry.as} onChange={(e) => onChange(entry.code, e.target.value as ShiftCode | 'skip')}>
+              {COUNTS_AS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                  {option.value !== 'skip' && option.value !== 'W' && rules.codes[option.value].name !== option.label.replace(/ shift$/, '') ? ` (${rules.codes[option.value].name})` : ''}
+                </option>
+              ))}
+            </select>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function PersonRow({ person, lines, onChange }: { person: ImportPersonView; lines: LineView[]; onChange: (target: ImportTarget) => void }) {
   const options = lines.filter((line) => line.active || line.id === person.target);

@@ -52,7 +52,10 @@ export interface RecordView {
   lineId: number;
   date: string;
   generatedCode: ShiftCode;
+  /** The built-in code the plan counts as. */
   plannedCode: ShiftCode;
+  /** The roster's own code the plan is written as ("SOC-D"), when it is one. */
+  label?: string | null;
   workedCode: ShiftCode | null;
   status: RecordStatus;
   actualStart: string | null;
@@ -73,7 +76,13 @@ export function cellOfRecord(record: RecordView): RosterCell {
     hours: record.hoursWorked,
     start: record.actualStart,
     end: record.actualEnd,
+    label: record.label ?? null,
   };
+}
+
+/** The plan as it is written on the roster: the roster's own code, or the built-in one. */
+export function writtenCode(record: Pick<RecordView, 'plannedCode' | 'label'>): string {
+  return record.label ?? record.plannedCode;
 }
 
 export function recordKey(lineId: number, date: string): string {
@@ -84,7 +93,11 @@ export function indexRecords(records: RecordView[]): Map<string, RecordView> {
   return new Map(records.map((r) => [recordKey(r.lineId, r.date), r]));
 }
 
-/** A rules lookup over saved records, with optional cells replaced (a draft). */
+/**
+ * A rules lookup over saved records, with optional cells replaced (a draft).
+ * A draft may also roster a day that has nothing saved: a patch that names a
+ * planned code stands as the whole cell there.
+ */
 export function buildLookup(
   records: Map<string, RecordView>,
   patches?: ReadonlyMap<string, Partial<RosterCell>>,
@@ -92,9 +105,12 @@ export function buildLookup(
   return (lineId, date) => {
     const key = recordKey(lineId, date);
     const record = records.get(key);
-    if (!record) return null;
-    const cell = cellOfRecord(record);
     const patch = patches?.get(key);
+    if (!record) {
+      if (!patch?.planned) return null;
+      return { generated: patch.planned, worked: null, status: 'planned', hours: null, start: null, end: null, ...patch, planned: patch.planned };
+    }
+    const cell = cellOfRecord(record);
     return patch ? { ...cell, ...patch } : cell;
   };
 }
@@ -171,7 +187,8 @@ export interface UserOption {
 export interface ChangeInput {
   lineId: number;
   date: string;
-  code: ShiftCode;
+  /** As written: a built-in code or one of the roster's own. */
+  code: string;
 }
 
 /** A save that the rules stopped comes back with what fired instead of records. */

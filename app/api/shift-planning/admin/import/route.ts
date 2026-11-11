@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { enforceRateLimit } from '@/lib/rate-limit';
-import type { ImportTarget } from '@/lib/shift-import';
+import type { ImportCodeChoices, ImportTarget } from '@/lib/shift-import';
 import { RosterError, currentMonth, importRoster, rosterTemplateRows } from '@/lib/shift-planning';
 import { monthParam, requireManager, respond } from '@/lib/shift-planning-route';
-import { isMonthKey } from '@/lib/shift-rules';
+import { isCodeLike, isMonthKey, isShiftCode } from '@/lib/shift-rules';
 import { SpreadsheetError, readSpreadsheet } from '@/lib/spreadsheet-read';
 
 // node:zlib and Buffer are needed to open an .xlsx.
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-function mappingOf(raw: FormDataEntryValue | null): Record<string, ImportTarget> {
+function jsonObject(raw: FormDataEntryValue | null): Record<string, unknown> {
   if (typeof raw !== 'string' || !raw) return {};
   let parsed: unknown;
   try {
@@ -48,9 +48,22 @@ function mappingOf(raw: FormDataEntryValue | null): Record<string, ImportTarget>
     throw new RosterError('Invalid request.');
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new RosterError('Invalid request.');
+  return parsed as Record<string, unknown>;
+}
+
+function mappingOf(raw: FormDataEntryValue | null): Record<string, ImportTarget> {
   const out: Record<string, ImportTarget> = {};
-  for (const [key, value] of Object.entries(parsed)) {
+  for (const [key, value] of Object.entries(jsonObject(raw))) {
     if (value === 'new' || value === 'skip' || (typeof value === 'number' && Number.isInteger(value))) out[key] = value;
+  }
+  return out;
+}
+
+/** What each code the roster does not know should count as. */
+function codesOf(raw: FormDataEntryValue | null): ImportCodeChoices {
+  const out: ImportCodeChoices = {};
+  for (const [key, value] of Object.entries(jsonObject(raw))) {
+    if (isCodeLike(key) && (value === 'skip' || isShiftCode(value))) out[key] = value;
   }
   return out;
 }
@@ -94,6 +107,7 @@ export async function POST(request: NextRequest) {
       sheet: typeof sheet === 'string' && sheet ? sheet : null,
       blankAsOff: form.get('blankAsOff') === '1',
       mapping: mappingOf(form.get('mapping')),
+      codes: codesOf(form.get('codes')),
       apply: form.get('apply') === '1',
       forceReason: typeof forceReason === 'string' ? forceReason : null,
     });

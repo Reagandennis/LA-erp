@@ -80,6 +80,7 @@ describe('roster upload route', () => {
         sheet: null,
         blankAsOff: false,
         mapping: {},
+        codes: {},
         apply: false,
         forceReason: null,
       },
@@ -96,6 +97,7 @@ describe('roster upload route', () => {
         apply: '1',
         forceReason: 'Agreed cover',
         mapping: JSON.stringify({ mercy: 13, 'zz tester': 'new', kevin: 'skip', bad: 'drop table', worse: 1.5, none: null }),
+        codes: JSON.stringify({ 'SOC-D': 'D', WT: 'W', UP: 'skip', INT: 'Q', 'not a code': 'D', LONGERTHAN8: 'D' }),
       }),
     );
     expect(mocks.importRoster.mock.calls[0]?.[1]).toMatchObject({
@@ -104,6 +106,7 @@ describe('roster upload route', () => {
       apply: true,
       forceReason: 'Agreed cover',
       mapping: { mercy: 13, 'zz tester': 'new', kevin: 'skip' },
+      codes: { 'SOC-D': 'D', WT: 'W', UP: 'skip' },
     });
   });
 
@@ -115,6 +118,7 @@ describe('roster upload route', () => {
     expect(await error({ month: '2026-11' })).toEqual([400, 'Choose the roster file to upload.']);
     expect(await error({ file: csv(), month: 'November' })).toEqual([400, 'Pick the month this roster is for.']);
     expect(await error({ file: csv(), month: '2026-11', mapping: '{not json' })).toEqual([400, 'Invalid request.']);
+    expect(await error({ file: csv(), month: '2026-11', codes: '[1]' })).toEqual([400, 'Invalid request.']);
     expect((await error({ file: new File([new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 1, 2, 3, 4])], 'old.xls'), month: '2026-11' }))[1]).toMatch(/older Excel file/);
     expect((await error({ file: new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'huge.csv'), month: '2026-11' }))[1]).toMatch(/larger than 5 MB/);
     expect(mocks.importRoster).not.toHaveBeenCalled();

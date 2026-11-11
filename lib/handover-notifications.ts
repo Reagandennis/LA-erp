@@ -5,7 +5,7 @@ import { prisma } from './prisma';
 import { ADMIN_ROLE_NAME } from './rbac';
 import { plainText } from './rich-text';
 import { getRules } from './shift-planning';
-import { type IncomingShift, incomingShift, isAbsent, isRecordStatus, monthOf } from './shift-rules';
+import { type IncomingShift, type ShiftRules, baseOf, incomingShift, isAbsent, isRecordStatus, monthOf } from './shift-rules';
 
 /**
  * Telling the incoming shift that a handover is waiting for them.
@@ -55,7 +55,7 @@ function excerpt(text: string): string {
 }
 
 /** The people rostered on a shift who can be reached: on duty (not sick, on leave or absent) and with an active login. */
-async function rosteredOn(shift: IncomingShift, exceptUserId: number): Promise<HandoverRecipient[]> {
+async function rosteredOn(rules: ShiftRules, shift: IncomingShift, exceptUserId: number): Promise<HandoverRecipient[]> {
   // A draft month is still being moved around; staff can't see it either.
   const month = await prisma.shiftMonth.findUnique({ where: { month: monthOf(shift.date) }, select: { status: true } });
   if (month?.status !== 'published') return [];
@@ -72,8 +72,9 @@ async function rosteredOn(shift: IncomingShift, exceptUserId: number): Promise<H
   });
   return records
     .filter((record) => {
-      // A call-in works a different shift from the one planned.
-      if ((record.workedCode ?? record.plannedCode) !== shift.code) return false;
+      // A call-in works a different shift from the one planned. The roster may write the
+      // shift in a code of its own ("SOC-D"): it is the shift that code counts as.
+      if (baseOf(rules, record.workedCode ?? record.plannedCode) !== shift.code) return false;
       if (isRecordStatus(record.status) && isAbsent(record.status)) return false;
       const user = record.line.user;
       return Boolean(user && user.status === 'active' && user.id !== exceptUserId);
@@ -100,9 +101,10 @@ async function everyoneWithAccess(exceptUserId: number): Promise<HandoverRecipie
 
 /** Who a handover written now, by this person, should reach. */
 export async function handoverAudience(writerId: number, nowMs: number = Date.now()): Promise<HandoverAudience> {
-  const shift = incomingShift(await getRules(), nowMs);
+  const rules = await getRules();
+  const shift = incomingShift(rules, nowMs);
   if (shift) {
-    const rostered = await rosteredOn(shift, writerId);
+    const rostered = await rosteredOn(rules, shift, writerId);
     if (rostered.length > 0) return { via: 'roster', shift, recipients: rostered };
   }
   const everyone = await everyoneWithAccess(writerId);

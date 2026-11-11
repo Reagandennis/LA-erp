@@ -14,16 +14,21 @@ import { APP_LOCALE } from './locale';
 
 // --- Codes -------------------------------------------------------------------
 
-export const SHIFT_CODES = ['D', 'S', 'N', 'OC', 'X', 'LV'] as const;
+export const SHIFT_CODES = ['D', 'S', 'N', 'W', 'OC', 'X', 'LV'] as const;
 export type ShiftCode = (typeof SHIFT_CODES)[number];
 
-/** What a code means to the rules; the names and times are configuration. */
-export type ShiftKind = 'console' | 'on_call' | 'off' | 'leave';
+/**
+ * What a code means to the rules; the names and times are configuration.
+ * `duty` is a working day away from the console (an office day, a detail,
+ * training): its hours count, but it covers no console shift.
+ */
+export type ShiftKind = 'console' | 'duty' | 'on_call' | 'off' | 'leave';
 
 export const CODE_KIND: Record<ShiftCode, ShiftKind> = {
   D: 'console',
   S: 'console',
   N: 'console',
+  W: 'duty',
   OC: 'on_call',
   X: 'off',
   LV: 'leave',
@@ -37,6 +42,11 @@ export function isShiftCode(value: unknown): value is ShiftCode {
 
 export function isConsole(code: ShiftCode): boolean {
   return CODE_KIND[code] === 'console';
+}
+
+/** A day of work: a console shift or another duty. Its hours count and it needs rest around it. */
+export function isWorking(code: ShiftCode): boolean {
+  return CODE_KIND[code] === 'console' || CODE_KIND[code] === 'duty';
 }
 
 export const RECORD_STATUSES = ['planned', 'worked', 'sick', 'leave', 'swapped', 'call-in', 'no-show'] as const;
@@ -77,12 +87,38 @@ export interface ShiftCodeDef {
   hours: number;
 }
 
+/**
+ * A code of the roster's own, written on it as-is ("SOC-D", "INT"). The rules
+ * treat it as the built-in code it counts as; it may keep its own hours.
+ */
+export interface ExtraCode {
+  /** As it is written on the roster. */
+  code: string;
+  name: string;
+  /** The built-in code it counts as. */
+  as: ShiftCode;
+  /** Its own times and hours, for a working code; null takes them from the code it counts as. */
+  start: string | null;
+  end: string | null;
+  hours: number | null;
+}
+
+export const MAX_EXTRA_CODES = 30;
+export const EXTRA_CODE_LENGTH = 8;
+
+/** What a roster's own code may look like: a short word, e.g. "SOC-D", "WT", "A/L". */
+export function isCodeLike(value: string): boolean {
+  return value.length <= EXTRA_CODE_LENGTH && /^[A-Za-z][A-Za-z0-9+/_-]*$/.test(value);
+}
+
 export interface ShiftRules {
   timeZone: string;
   /** The date on which a line with offset 0 is on cycle day 1. */
   rotationStart: string;
   pattern: ShiftCode[];
   codes: Record<ShiftCode, ShiftCodeDef>;
+  /** The roster's own codes, beside the built-in ones. */
+  extra: ExtraCode[];
   targetHours7d: number;
   maxHours7d: number;
   maxHours14d: number;
@@ -104,10 +140,12 @@ export const DEFAULT_RULES: ShiftRules = {
     D: { name: 'Day', start: '07:00', end: '15:00', hours: 8 },
     S: { name: 'Swing', start: '15:00', end: '23:00', hours: 8 },
     N: { name: 'Night', start: '23:00', end: '07:00', hours: 8 },
+    W: { name: 'Duty', start: '08:00', end: '17:00', hours: 8 },
     OC: { name: 'On call', start: null, end: null, hours: 0 },
     X: { name: 'Off', start: null, end: null, hours: 0 },
     LV: { name: 'Leave', start: null, end: null, hours: 0 },
   },
+  extra: [],
   targetHours7d: 48,
   maxHours7d: 52,
   maxHours14d: 116,
@@ -118,6 +156,53 @@ export const DEFAULT_RULES: ShiftRules = {
   publishLeadDays: 14,
   weekStart: 1,
 };
+
+// --- The roster's own codes --------------------------------------------------
+
+/** The roster's own code that `written` is, or null for a built-in code or one nobody knows. */
+export function extraOf(rules: ShiftRules, written: string | null | undefined): ExtraCode | null {
+  if (!written) return null;
+  return rules.extra.find((extra) => extra.code === written) ?? null;
+}
+
+/** The built-in code a written code counts as; null when the roster does not know it. */
+export function baseOf(rules: ShiftRules, written: unknown): ShiftCode | null {
+  if (isShiftCode(written)) return written;
+  return typeof written === 'string' ? (extraOf(rules, written)?.as ?? null) : null;
+}
+
+/** True for anything that may be written on the roster: a built-in code or one of its own. */
+export function isRosterCode(rules: ShiftRules, value: unknown): value is string {
+  return baseOf(rules, value) !== null;
+}
+
+/**
+ * Name, times and hours for a shift: the built-in code's, or those of the
+ * roster's own code it is written as. A label that does not belong to `code`
+ * (a draft has moved the day on) is ignored.
+ */
+export function codeDef(rules: ShiftRules, code: ShiftCode, label?: string | null): ShiftCodeDef {
+  const base = rules.codes[code];
+  const extra = extraOf(rules, label);
+  if (!extra || extra.as !== code) return base;
+  if (!isWorking(code)) return { name: extra.name, start: null, end: null, hours: 0 };
+  const start = extra.start ?? base.start;
+  const end = extra.end ?? base.end;
+  return { name: extra.name, start, end, hours: extra.hours ?? (extra.start && extra.end ? spanHours(extra.start, extra.end) : base.hours) };
+}
+
+/** Every code that can be written on the roster, built-in first. */
+export function rosterCodes(rules: ShiftRules): Array<{ code: string; base: ShiftCode; name: string }> {
+  return [
+    ...SHIFT_CODES.map((code) => ({ code: code as string, base: code, name: rules.codes[code].name })),
+    ...rules.extra.map((extra) => ({ code: extra.code, base: extra.as, name: extra.name })),
+  ];
+}
+
+/** As written in the database: every code whose built-in code passes `test`. */
+export function writtenCodes(rules: ShiftRules, test: (base: ShiftCode) => boolean): string[] {
+  return rosterCodes(rules).filter((entry) => test(entry.base)).map((entry) => entry.code);
+}
 
 // --- Dates and times ---------------------------------------------------------
 
@@ -324,6 +409,8 @@ export interface RosterCell {
   hours: number | null;
   start: string | null;
   end: string | null;
+  /** The roster's own code the plan is written as ("SOC-D"), when it is one. */
+  label?: string | null;
 }
 
 /** Saved records only; null where nothing is stored for that line and date. */
@@ -373,8 +460,9 @@ export interface Duty {
 export function dutyOf(rules: ShiftRules, cell: RosterCell | null, date: string): Duty | null {
   if (!cell || isAbsent(cell.status)) return null;
   const code = cell.worked ?? cell.planned;
-  if (!isConsole(code)) return null;
-  const def = rules.codes[code];
+  if (!isWorking(code)) return null;
+  // A call-in is worked as the built-in shift it covered, whatever the day was written as.
+  const def = codeDef(rules, code, cell.worked ? null : cell.label);
   const startTime = cell.start ?? def.start ?? '00:00';
   const endTime = cell.end ?? def.end ?? startTime;
   const startMinutes = minutesOf(startTime);
@@ -651,7 +739,7 @@ export function newViolations(before: Violation[], after: Violation[]): Violatio
 
 export interface LineTotals {
   codes: Record<ShiftCode, number>;
-  /** Console shifts on the roster, including call-ins. */
+  /** Days of work on the roster (console shifts and other duties), including call-ins. */
   shifts: number;
   hours: number;
   callIns: number;
@@ -662,7 +750,7 @@ export interface LineTotals {
 
 export function emptyTotals(): LineTotals {
   return {
-    codes: { D: 0, S: 0, N: 0, OC: 0, X: 0, LV: 0 },
+    codes: { D: 0, S: 0, N: 0, W: 0, OC: 0, X: 0, LV: 0 },
     shifts: 0,
     hours: 0,
     callIns: 0,
@@ -707,7 +795,7 @@ export interface PayrollTotals {
   holidayHours: number;
   /** Worked on a rostered rest day: paid at 2x. */
   restDayHours: number;
-  /** Past console shifts nobody has confirmed as worked yet. */
+  /** Past shifts nobody has confirmed as worked yet. */
   unconfirmed: number;
   sickDays: number;
   noShows: number;
@@ -752,10 +840,10 @@ export function payrollTotals(
   for (const date of datesBetween(from, to)) {
     const cell = lookup(line.id, date);
     if (!cell) continue;
-    if (isConsole(cell.planned)) totals.plannedHours += rules.codes[cell.planned].hours;
+    if (isWorking(cell.planned)) totals.plannedHours += codeDef(rules, cell.planned, cell.label).hours;
     if (cell.status === 'sick') totals.sickDays += 1;
     if (cell.status === 'no-show') totals.noShows += 1;
-    if (cell.status === 'planned' && isConsole(cell.planned) && date < today) totals.unconfirmed += 1;
+    if (cell.status === 'planned' && isWorking(cell.planned) && date < today) totals.unconfirmed += 1;
 
     const hours = workedOn(date);
     if (hours === 0) continue;
@@ -840,7 +928,7 @@ export function sanitizeRules(input: unknown, base: ShiftRules = DEFAULT_RULES):
     throw new Error('The pattern needs between 2 and 56 cycle days.');
   }
   const pattern = patternRaw.map((code) => {
-    if (!isShiftCode(code) || code === 'LV') throw new Error('The pattern may only use D, S, N, OC and X.');
+    if (!isShiftCode(code) || code === 'LV' || code === 'W') throw new Error('The pattern may only use D, S, N, OC and X.');
     return code;
   });
 
@@ -857,7 +945,7 @@ export function sanitizeRules(input: unknown, base: ShiftRules = DEFAULT_RULES):
     const fallback = base.codes[code];
     const entry = (codesRaw[code] && typeof codesRaw[code] === 'object' ? codesRaw[code] : {}) as Record<string, unknown>;
     const name = String(entry.name ?? fallback.name).trim().slice(0, 30) || fallback.name;
-    if (isConsole(code)) {
+    if (isWorking(code)) {
       const start = entry.start ?? fallback.start;
       const end = entry.end ?? fallback.end;
       if (!isTimeOfDay(start) || !isTimeOfDay(end)) throw new Error(`${name} needs a start and end time.`);
@@ -869,11 +957,35 @@ export function sanitizeRules(input: unknown, base: ShiftRules = DEFAULT_RULES):
     }
   }
 
+  const extraRaw = pick('extra');
+  if (extraRaw !== undefined && extraRaw !== null && !Array.isArray(extraRaw)) throw new Error('The roster codes are not valid.');
+  const extraList = (extraRaw ?? []) as unknown[];
+  if (extraList.length > MAX_EXTRA_CODES) throw new Error(`A roster can have up to ${MAX_EXTRA_CODES} codes of its own.`);
+  const taken = new Set<string>(SHIFT_CODES.map((code) => code.toLowerCase()));
+  const extra = extraList.map((item): ExtraCode => {
+    const entry = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const code = String(entry.code ?? '').trim();
+    if (!isCodeLike(code)) throw new Error(`“${code || 'A code'}” cannot be a roster code: use a short word of up to ${EXTRA_CODE_LENGTH} letters, digits or dashes.`);
+    if (taken.has(code.toLowerCase())) throw new Error(`The code ${code} is already in use.`);
+    taken.add(code.toLowerCase());
+    if (!isShiftCode(entry.as)) throw new Error(`Say what ${code} counts as.`);
+    const name = String(entry.name ?? '').trim().slice(0, 30) || code;
+    if (!isWorking(entry.as)) return { code, name, as: entry.as, start: null, end: null, hours: null };
+    const start = entry.start || null;
+    const end = entry.end || null;
+    if (Boolean(start) !== Boolean(end)) throw new Error(`${code} needs both a start and a finish time, or neither.`);
+    if ((start && !isTimeOfDay(start)) || (end && !isTimeOfDay(end))) throw new Error(`${code} needs times as HH:MM.`);
+    const hours = entry.hours === undefined || entry.hours === null || entry.hours === '' ? null : Number(entry.hours);
+    if (hours !== null && (!Number.isFinite(hours) || hours <= 0 || hours > 24)) throw new Error(`${code} hours must be between 0 and 24.`);
+    return { code, name, as: entry.as, start: start as string | null, end: end as string | null, hours };
+  });
+
   const rules: ShiftRules = {
     timeZone,
     rotationStart,
     pattern,
     codes,
+    extra,
     targetHours7d: intBetween(pick('targetHours7d'), 1, 168, 'Weekly target'),
     maxHours7d: intBetween(pick('maxHours7d'), 1, 168, 'Weekly limit'),
     maxHours14d: intBetween(pick('maxHours14d'), 1, 336, 'Two-week cap'),

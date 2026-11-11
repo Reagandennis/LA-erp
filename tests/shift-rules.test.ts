@@ -6,7 +6,14 @@ import {
   type RosterCell,
   type RosterLine,
   type ShiftCode,
+  type ShiftRules,
   addDays,
+  baseOf,
+  codeDef,
+  isRosterCode,
+  rosterCodes,
+  writtenCodes,
+  isWorking,
   currentAndNext,
   absoluteMinutes,
   cycleRange,
@@ -22,6 +29,7 @@ import {
   validateRoster,
   zonedNow,
 } from '../lib/shift-rules';
+import { type RecordView, buildLookup, indexRecords, recordKey } from '../lib/shift-types';
 
 const rules = DEFAULT_RULES;
 
@@ -255,5 +263,120 @@ describe('configuration', () => {
     // 22:30 UTC on 30 Nov is 01:30 on 1 Dec in Nairobi.
     expect(zonedNow('Africa/Nairobi', Date.UTC(2026, 10, 30, 22, 30))).toEqual({ date: '2026-12-01', minutes: 90 });
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
+  });
+});
+
+describe('drafting on a blank day', () => {
+  const line: RosterLine = { id: 1, code: 'P1', cycleOffset: null, startDate: null, endDate: null, active: true };
+  const saved: RecordView = { id: 9, lineId: 1, date: '2026-12-01', generatedCode: 'D', plannedCode: 'D', workedCode: null, status: 'planned', actualStart: null, actualEnd: null, hoursWorked: null, reasonCode: null, note: null, leaveId: null, callIn: null };
+  const records = indexRecords([saved]);
+
+  it('reads nothing where nothing is saved, until a draft rosters the day', () => {
+    expect(buildLookup(records)(1, '2026-12-02')).toBeNull();
+    // A patch that does not say what is rostered cannot stand for a whole day.
+    expect(buildLookup(records, new Map([[recordKey(1, '2026-12-02'), { status: 'worked' as const }]]))(1, '2026-12-02')).toBeNull();
+    const drafted = buildLookup(records, new Map([[recordKey(1, '2026-12-02'), { planned: 'N' as const, label: null }]]));
+    expect(drafted(1, '2026-12-02')).toEqual({ generated: 'N', planned: 'N', worked: null, status: 'planned', hours: null, start: null, end: null, label: null });
+    expect(drafted(1, '2026-12-01')).toMatchObject({ planned: 'D' });
+  });
+
+  it('is checked like any other change: a night straight before the day shift breaks the rest rule', () => {
+    const day = '2026-11-30';
+    const check = (code: ShiftCode) =>
+      validateRoster(rules, [line], buildLookup(records, new Map([[recordKey(1, day), { planned: code }]])), day, '2026-12-01', () => true).filter((v) => v.rule === 'rest');
+    expect(check('N').map((v) => v.key)).toEqual(['rest|1|2026-12-01']);
+    expect(check('X')).toEqual([]);
+  });
+});
+
+describe("the roster's own codes", () => {
+  const own: ShiftRules = {
+    ...rules,
+    extra: [
+      { code: 'SOC-D', name: 'SOC Day', as: 'D', start: '06:00', end: '18:00', hours: null },
+      { code: 'SOC-N', name: 'SOC Night', as: 'N', start: null, end: null, hours: 12 },
+      { code: 'INT', name: 'Intel desk', as: 'W', start: null, end: null, hours: null },
+      { code: 'UP', name: 'Unpaid leave', as: 'LV', start: null, end: null, hours: null },
+    ],
+  };
+  const cell = (planned: ShiftCode, label: string | null = null, extra: Partial<RosterCell> = {}): RosterCell => ({
+    generated: planned,
+    planned,
+    worked: null,
+    status: 'planned',
+    hours: null,
+    start: null,
+    end: null,
+    label,
+    ...extra,
+  });
+
+  it('count as the built-in code they stand for', () => {
+    expect(['D', 'SOC-D', 'INT', 'UP', 'soc-d', 'ZZ', null].map((code) => baseOf(own, code))).toEqual(['D', 'D', 'W', 'LV', null, null, null]);
+    expect(isRosterCode(own, 'SOC-N')).toBe(true);
+    expect(isRosterCode(rules, 'SOC-N')).toBe(false);
+    expect(rosterCodes(own).map((entry) => entry.code)).toEqual(['D', 'S', 'N', 'W', 'OC', 'X', 'LV', 'SOC-D', 'SOC-N', 'INT', 'UP']);
+    // What a database filter for "a day of work" has to list.
+    expect(writtenCodes(own, isWorking)).toEqual(['D', 'S', 'N', 'W', 'SOC-D', 'SOC-N', 'INT']);
+  });
+
+  it('keep their own name, times and hours, and borrow the rest', () => {
+    expect(codeDef(own, 'D', 'SOC-D')).toEqual({ name: 'SOC Day', start: '06:00', end: '18:00', hours: 12 });
+    expect(codeDef(own, 'N', 'SOC-N')).toEqual({ name: 'SOC Night', start: '23:00', end: '07:00', hours: 12 });
+    expect(codeDef(own, 'W', 'INT')).toEqual({ name: 'Intel desk', start: '08:00', end: '17:00', hours: 8 });
+    expect(codeDef(own, 'LV', 'UP')).toEqual({ name: 'Unpaid leave', start: null, end: null, hours: 0 });
+    expect(codeDef(own, 'D')).toEqual(rules.codes.D);
+    // A label left behind by a draft that has moved the day on is not this shift's.
+    expect(codeDef(own, 'N', 'SOC-D')).toEqual(rules.codes.N);
+  });
+
+  it('work the hours they are written for; a call-in works the shift it covered', () => {
+    expect(dutyOf(own, cell('D', 'SOC-D'), '2026-12-01')).toMatchObject({ code: 'D', hours: 12, start: absoluteMinutes('2026-12-01', 6 * 60), end: absoluteMinutes('2026-12-01', 18 * 60) });
+    expect(dutyOf(own, cell('W', 'INT'), '2026-12-01')).toMatchObject({ code: 'W', hours: 8 });
+    expect(dutyOf(own, cell('LV', 'UP'), '2026-12-01')).toBeNull();
+    expect(dutyOf(own, cell('X', null, { worked: 'D', status: 'call-in' }), '2026-12-01')).toMatchObject({ hours: 8 });
+  });
+
+  it('cover a console shift only when they stand for one', () => {
+    const everyone: RosterLine[] = [1, 2, 3, 4].map((id) => ({ id, code: `P${id}`, cycleOffset: null, startDate: null, endDate: null, active: true }));
+    const day = '2026-12-01';
+    const roster = (codes: Array<[ShiftCode, string | null]>): CellLookup => (lineId, date) => {
+      const entry = codes[lineId - 1];
+      return date === day && entry ? cell(entry[0], entry[1]) : null;
+    };
+    const gaps = (codes: Array<[ShiftCode, string | null]>) =>
+      validateRoster(own, everyone, roster(codes), day, day, () => true).filter((v) => v.rule === 'coverage_gap').map((v) => v.key);
+    expect(gaps([['D', 'SOC-D'], ['S', null], ['N', 'SOC-N'], ['OC', null]])).toEqual([]);
+    expect(gaps([['W', 'INT'], ['S', null], ['N', 'SOC-N'], ['OC', null]])).toEqual([`coverage_gap|${day}|D`]);
+  });
+
+  it('count a working day towards hours and rest, and leave towards neither', () => {
+    const line: RosterLine = { id: 1, code: 'P1', cycleOffset: null, startDate: null, endDate: null, active: true };
+    const from = '2026-12-01';
+    const week = (code: ShiftCode, label: string): CellLookup => (_id, date) => (date >= from && date <= addDays(from, 6) ? cell(code, label) : null);
+    const rulesHit = (lookup: CellLookup) => [...new Set(validateRoster(own, [line], lookup, from, addDays(from, 6), () => true).filter((v) => v.lineId === 1).map((v) => v.rule))].sort();
+    // Seven twelve-hour days: over the weekly limit, with no day off.
+    expect(rulesHit(week('D', 'SOC-D'))).toEqual(expect.arrayContaining(['weekly_max', 'weekly_rest']));
+    expect(rulesHit(week('W', 'INT'))).toEqual(expect.arrayContaining(['weekly_rest', 'weekly_max']));
+    expect(rulesHit(week('LV', 'UP'))).toEqual([]);
+    const totals = lineTotals(own, [{ date: from, cell: cell('D', 'SOC-D') }, { date: addDays(from, 1), cell: cell('W', 'INT') }, { date: addDays(from, 2), cell: cell('LV', 'UP') }], new Set());
+    expect(totals).toMatchObject({ shifts: 2, hours: 20, codes: { D: 1, W: 1, LV: 1 } });
+  });
+
+  it('are checked when the rules are saved', () => {
+    const save = (extra: unknown) => sanitizeRules({ ...rules, extra });
+    expect(save([{ code: ' WT ', as: 'W' }]).extra).toEqual([{ code: 'WT', name: 'WT', as: 'W', start: null, end: null, hours: null }]);
+    expect(save([{ code: 'UP', name: ' Unpaid ', as: 'LV', start: '08:00', end: '17:00', hours: 9 }]).extra).toEqual([{ code: 'UP', name: 'Unpaid', as: 'LV', start: null, end: null, hours: null }]);
+    expect(save(undefined).extra).toEqual([]);
+    expect(() => save([{ code: 'd', as: 'D' }])).toThrow(/already in use/);
+    expect(() => save([{ code: 'WT', as: 'W' }, { code: 'wt', as: 'X' }])).toThrow(/already in use/);
+    expect(() => save([{ code: 'two words', as: 'W' }])).toThrow(/cannot be a roster code/);
+    expect(() => save([{ code: 'WT', as: 'Q' }])).toThrow(/Say what WT counts as/);
+    expect(() => save([{ code: 'WT', as: 'W', start: '08:00' }])).toThrow(/both a start and a finish/);
+    expect(() => save([{ code: 'WT', as: 'W', hours: 30 }])).toThrow(/between 0 and 24/);
+    expect(() => save('WT')).toThrow(/not valid/);
+    // The built-in working day has times like a console shift; the pattern still takes neither it nor leave.
+    expect(sanitizeRules(rules).codes.W).toEqual({ name: 'Duty', start: '08:00', end: '17:00', hours: 8 });
+    expect(() => sanitizeRules({ ...rules, pattern: ['D', 'W'] })).toThrow(/may only use D, S, N, OC and X/);
   });
 });

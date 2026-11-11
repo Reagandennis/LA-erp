@@ -13,7 +13,8 @@ import {
   datesBetween,
   dutyOf,
   isAbsent,
-  isConsole,
+  codeDef,
+  isWorking,
   lineTotals,
   minutesOf,
   monthEnd,
@@ -157,7 +158,7 @@ export async function loadDashboard(nowMs: number = Date.now()): Promise<Dashboa
     let plannedToDate = 0;
     for (const date of elapsed) {
       const cell = lookup(line.id, date);
-      if (cell && isConsole(cell.planned)) plannedToDate += rules.codes[cell.planned].hours;
+      if (cell && isWorking(cell.planned)) plannedToDate += codeDef(rules, cell.planned, cell.label).hours;
     }
 
     let callInsThisCycle = 0;

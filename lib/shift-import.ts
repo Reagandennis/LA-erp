@@ -14,15 +14,23 @@
 
 import {
   CODE_KIND,
+  MAX_EXTRA_CODES,
   SHIFT_CODES,
   type CellLookup,
+  type ExtraCode,
   type RosterCell,
   type RosterLine,
   type ShiftCode,
   type ShiftRules,
   type Violation,
+  baseOf,
+  codeDef,
+  extraOf,
   generatedCode,
+  isCodeLike,
   isDateKey,
+  isShiftCode,
+  isWorking,
   lineOnRoster,
   monthDates,
   monthEnd,
@@ -40,6 +48,7 @@ const SYNONYMS: Record<ShiftCode, string[]> = {
   D: ['day', 'days', 'dayshift', 'am', 'morning', 'early'],
   S: ['swing', 'swingshift', 'afternoon', 'pm', 'evening', 'late'],
   N: ['night', 'nights', 'nightshift'],
+  W: ['duty', 'onduty', 'work', 'working'],
   OC: ['oncall', 'call', 'standby', 'stby'],
   X: ['off', 'o', 'dayoff', 'offday', 'offduty', 'rest', 'restday', 'rd', 'r', 'do'],
   LV: ['leave', 'l', 'al', 'annualleave', 'onleave', 'lve', 'vacation', 'vac'],
@@ -64,33 +73,70 @@ function clockTime(raw: string): string | null {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-/**
- * The shift a cell stands for: `'blank'` for an empty cell, `null` for text
- * that is not a shift. Understands the codes, the names the rules give them,
- * the common words ("Off", "Night", "On call"), and a shift's hours
- * ("07:00-15:00").
- */
-export function parseShiftCode(raw: string, rules: ShiftRules): ShiftCode | 'blank' | null {
-  const text = raw.trim();
-  if (BLANK_MARKS.has(text.toLowerCase())) return 'blank';
-  const key = squash(text);
-  if (!key) return null;
-  for (const code of SHIFT_CODES) if (key === code.toLowerCase()) return code;
-  // The names this roster gives its shifts win over the general words.
-  for (const code of SHIFT_CODES) if (key === squash(rules.codes[code].name)) return code;
-  for (const code of SHIFT_CODES) if (SYNONYMS[code].includes(key)) return code;
+/** A cell of the file, read against the roster's codes. */
+export interface CellReading {
+  /** The roster code it stands for, as the roster writes it ("D", "SOC-D"); null when it is none. */
+  code: string | null;
+  /** The cell is empty. */
+  blank: boolean;
+  /** Not a code the roster knows, but written like one ("WT"): it could become one. */
+  token: string | null;
+}
 
-  const span = /^(.+?)\s*(?:-|–|—|to|till|until)\s*(.+)$/i.exec(text);
-  if (span) {
-    const start = clockTime(span[1] ?? '');
-    const end = clockTime(span[2] ?? '');
-    if (start && end) {
-      for (const code of SHIFT_CODES) {
-        if (CODE_KIND[code] === 'console' && rules.codes[code].start === start && rules.codes[code].end === end) return code;
+/**
+ * The shift a cell stands for. Understands the built-in codes, the roster's
+ * own, the names the rules give them, the common words ("Off", "Night",
+ * "On call"), and a shift's hours ("07:00-15:00").
+ */
+export function readCell(raw: string, rules: ShiftRules): CellReading {
+  const text = raw.trim();
+  if (BLANK_MARKS.has(text.toLowerCase())) return { code: null, blank: true, token: null };
+  const found = (code: string): CellReading => ({ code, blank: false, token: null });
+  const key = squash(text);
+  if (key) {
+    for (const code of SHIFT_CODES) if (key === code.toLowerCase()) return found(code);
+    for (const extra of rules.extra) if (key === squash(extra.code)) return found(extra.code);
+    // The names this roster gives its shifts win over the general words.
+    for (const code of SHIFT_CODES) if (key === squash(rules.codes[code].name)) return found(code);
+    for (const extra of rules.extra) if (key === squash(extra.name)) return found(extra.code);
+    for (const code of SHIFT_CODES) if (SYNONYMS[code].includes(key)) return found(code);
+
+    const span = /^(.+?)\s*(?:-|–|—|to|till|until)\s*(.+)$/i.exec(text);
+    if (span) {
+      const start = clockTime(span[1] ?? '');
+      const end = clockTime(span[2] ?? '');
+      if (start && end) {
+        for (const code of SHIFT_CODES) {
+          if (CODE_KIND[code] === 'console' && rules.codes[code].start === start && rules.codes[code].end === end) return found(code);
+        }
       }
     }
   }
-  return null;
+  // A short word that is nobody's weekday may be a code this roster has not met yet.
+  const token = text.toUpperCase();
+  return { code: null, blank: false, token: isCodeLike(token) && !WEEKDAYS.has(text.toLowerCase()) ? token : null };
+}
+
+/** `readCell` in one value: the code, `'blank'` for an empty cell, `null` for anything else. */
+export function parseShiftCode(raw: string, rules: ShiftRules): string | 'blank' | null {
+  const cell = readCell(raw, rules);
+  return cell.blank ? 'blank' : cell.code;
+}
+
+/**
+ * What a code the roster has not met most likely counts as, from how it is
+ * written: "SOC-D" a day shift, "SOC-N" a night shift, anything else a working
+ * day. Only a starting point: the scheduler confirms it before it is saved.
+ */
+export function guessBase(token: string): ShiftCode {
+  const text = token.toUpperCase();
+  if (/(^|[-_/])N$|NIGHT/.test(text)) return 'N';
+  if (/(^|[-_/])D$|DAY/.test(text)) return 'D';
+  if (/(^|[-_/])S$|SWING/.test(text)) return 'S';
+  if (/(^|[-_/])OC$|CALL/.test(text)) return 'OC';
+  if (/LEAVE|(^|[-_/])LV$/.test(text)) return 'LV';
+  if (/OFF/.test(text)) return 'X';
+  return 'W';
 }
 
 // --- Day headings --------------------------------------------------------------
@@ -180,11 +226,10 @@ export function parseDayHeading(raw: string, month: string): string | null {
 
 // --- Reading a sheet -----------------------------------------------------------
 
-export interface FileCell {
+export interface FileCell extends CellReading {
   date: string;
   /** The cell as written, for reporting. */
   raw: string;
-  code: ShiftCode | 'blank' | null;
 }
 
 /** One person's row (or rows, in a sheet split into blocks). */
@@ -216,6 +261,8 @@ export interface SheetReading {
   conflicts: string[];
   /** Rows beside the days that were passed over because most of their cells are not shifts. */
   ignored: Array<{ label: string; samples: string[] }>;
+  /** Codes on people's rows that the roster does not know yet, and how many cells hold each. */
+  unknown: Array<{ token: string; count: number }>;
 }
 
 interface Block {
@@ -300,10 +347,11 @@ function readUpright(rows: string[][], month: string, rules: ShiftRules): Omit<S
     let known = 0;
     for (const [column, date] of current.columns) {
       const raw = row[column] ?? '';
-      const code = parseShiftCode(raw, rules);
-      if (code === null) unknown.push(raw);
-      else if (code !== 'blank') known += 1;
-      cells.push({ date, raw, code });
+      const cell = readCell(raw, rules);
+      // A code the roster has not met yet still marks the row as someone's shifts.
+      if (cell.code !== null || cell.token !== null) known += 1;
+      else if (!cell.blank) unknown.push(raw);
+      cells.push({ date, raw, ...cell });
     }
     // Totals, weekday letters, a legend: not a person unless most of what is written is a shift.
     if (known === 0 || unknown.length > known) {
@@ -321,16 +369,19 @@ function readUpright(rows: string[][], month: string, rules: ShiftRules): Omit<S
     }
     for (const cell of cells) {
       const earlier = person.byDate.get(cell.date);
-      if (!earlier || earlier.code === 'blank') {
+      if (!earlier || earlier.blank) {
         if (!earlier) person.cells.push(cell);
         else person.cells[person.cells.indexOf(earlier)] = cell;
         person.byDate.set(cell.date, cell);
-        if (cell.code !== null && cell.code !== 'blank') recognised += 1;
-      } else if (cell.code !== 'blank' && cell.code !== earlier.code) {
+        if (cell.code !== null) recognised += 1;
+      } else if (!cell.blank && (cell.code ?? cell.raw) !== (earlier.code ?? earlier.raw)) {
         clashes.push({ key, date: cell.date, first: earlier.raw, second: cell.raw });
       }
     }
   });
+
+  const tokens = new Map<string, number>();
+  for (const person of people.values()) for (const cell of person.cells) if (cell.token) tokens.set(cell.token, (tokens.get(cell.token) ?? 0) + 1);
 
   // "Controller" beside every name says nothing about who a row is: people are named by what is theirs alone.
   const shared = new Map<string, number>();
@@ -357,7 +408,31 @@ function readUpright(rows: string[][], month: string, rules: ShiftRules): Omit<S
     recognised,
     conflicts: clashes.map((clash) => `${labels.get(clash.key)}, ${shortDay(clash.date)}: the file says both “${clash.first}” and “${clash.second}”. The first was used.`),
     ignored,
+    unknown: [...tokens.entries()].map(([token, count]) => ({ token, count })).sort((a, b) => b.count - a.count || a.token.localeCompare(b.token)),
   };
+}
+
+/**
+ * The roster's rules with the file's new codes added, each counting as what
+ * was chosen for it (or guessed, where nothing was). Reading the file again
+ * with these rules turns those cells into shifts.
+ */
+export function withNewCodes(
+  rules: ShiftRules,
+  unknown: SheetReading['unknown'],
+  choices: Readonly<Record<string, ShiftCode | 'skip'>>,
+): { rules: ShiftRules; codes: ImportCodeView[] } {
+  const codes = unknown.map(({ token, count }): ImportCodeView => {
+    const chosen = choices[token];
+    const valid = chosen === 'skip' || isShiftCode(chosen);
+    return { code: token, count, as: valid ? chosen : guessBase(token), guessed: !valid };
+  });
+  const room = Math.max(0, MAX_EXTRA_CODES - rules.extra.length);
+  const adding = codes
+    .filter((entry): entry is ImportCodeView & { as: ShiftCode } => entry.as !== 'skip')
+    .slice(0, room)
+    .map((entry): ExtraCode => ({ code: entry.code, name: entry.code, as: entry.as, start: null, end: null, hours: null }));
+  return { rules: adding.length > 0 ? { ...rules, extra: [...rules.extra, ...adding] } : rules, codes };
 }
 
 /** Reads one sheet for a month. `people` is empty when it holds no roster for that month. */
@@ -531,11 +606,14 @@ export interface ImportOptions {
   mapping: Record<string, ImportTarget>;
 }
 
-/** A saved record, as far as planning needs it. */
+/** What each code the roster does not know should count as; by the code as the file writes it. */
+export type ImportCodeChoices = Record<string, ShiftCode | 'skip'>;
+
+/** A saved record, as far as planning needs it. Codes are as written on the roster. */
 export interface ExistingCell {
   id: number;
-  planned: ShiftCode;
-  generated: ShiftCode;
+  planned: string;
+  generated: string;
   /** Worked, sick, no-show or called in: the plan is history and is left alone. */
   locked: boolean;
   cell: RosterCell;
@@ -543,11 +621,12 @@ export interface ExistingCell {
 
 export interface PlannedShift {
   date: string;
-  code: ShiftCode;
+  /** As written on the roster: a built-in code or one of its own. */
+  code: string;
   /** The record to change; null to create one. */
   recordId: number | null;
   /** What the rotation gives that day, for a new record. */
-  generated: ShiftCode;
+  generated: string;
 }
 
 export interface PlannedPerson {
@@ -585,6 +664,12 @@ export interface ImportPlan {
 
 const MAX_NOTES = 40;
 
+/** What the roster calls a written code. */
+function codeName(rules: ShiftRules, written: string): string {
+  const base = baseOf(rules, written);
+  return base ? codeDef(rules, base, written).name : written;
+}
+
 export function planRosterImport(input: {
   month: string;
   rules: ShiftRules;
@@ -602,6 +687,8 @@ export function planRosterImport(input: {
   ];
   /** Days a line has already been given by an earlier row of the file. */
   const taken = new Set<string>();
+  /** Codes the roster does not know that were left out, and the cells holding each. */
+  const unused = new Map<string, number>();
 
   const people = reading.people.map((person): PlannedPerson => {
     const chosen = options.mapping[person.key];
@@ -629,18 +716,19 @@ export function planRosterImport(input: {
     if (target === 'skip') return planned;
 
     for (const cell of person.cells) {
-      if (cell.code === null) {
-        planned.unreadable += 1;
-        notes.push(`${person.label}, ${shortDay(cell.date)}: “${cell.raw}” is not a shift code, so that day was left as it is.`);
-        continue;
-      }
-      let code: ShiftCode;
-      if (cell.code === 'blank') {
+      let code: string;
+      if (cell.blank) {
         if (!options.blankAsOff) {
           planned.blank += 1;
           continue;
         }
         code = 'X';
+      } else if (cell.code === null) {
+        planned.unreadable += 1;
+        // A code the scheduler chose not to use is summed up once, not cell by cell.
+        if (cell.token) unused.set(cell.token, (unused.get(cell.token) ?? 0) + 1);
+        else notes.push(`${person.label}, ${shortDay(cell.date)}: “${cell.raw}” is not a shift code, so that day was left as it is.`);
+        continue;
       } else {
         code = cell.code;
       }
@@ -663,7 +751,7 @@ export function planRosterImport(input: {
         planned.unchanged += 1;
       } else if (saved?.locked) {
         planned.locked += 1;
-        notes.push(`${person.label}, ${shortDay(cell.date)}: already recorded as worked, sick or called in on ${rules.codes[saved.planned].name}, so “${cell.raw || 'blank'}” was not applied.`);
+        notes.push(`${person.label}, ${shortDay(cell.date)}: already recorded as worked, sick or called in on ${codeName(rules, saved.planned)}, so “${cell.raw || 'blank'}” was not applied.`);
       } else {
         planned.shifts.push({
           date: cell.date,
@@ -680,6 +768,9 @@ export function planRosterImport(input: {
     return planned;
   });
 
+  for (const [token, count] of unused) {
+    notes.unshift(`“${token}” is not a code this roster uses, so ${count === 1 ? 'the 1 cell' : `the ${count} cells`} holding it ${count === 1 ? 'was' : 'were'} left as ${count === 1 ? 'it is' : 'they are'}.`);
+  }
   return { people, notes: notes.slice(0, MAX_NOTES), moreNotes: Math.max(0, notes.length - MAX_NOTES) };
 }
 
@@ -730,16 +821,19 @@ export function checkImport(input: {
     }
     for (const shift of person.shifts) {
       const key = `${lineId}|${shift.date}`;
-      const code = input.onLeave?.has(key) && CODE_KIND[shift.code] === 'console' ? 'LV' : shift.code;
+      const base = baseOf(rules, shift.code) ?? 'X';
+      const onLeave = Boolean(input.onLeave?.has(key)) && isWorking(base);
+      const code = onLeave ? 'LV' : base;
       const saved = lookup(lineId, shift.date);
       overlay.set(key, {
-        generated: saved?.generated ?? shift.generated,
+        generated: saved?.generated ?? baseOf(rules, shift.generated) ?? 'X',
         planned: code,
         worked: null,
         status: code === 'LV' ? 'leave' : 'planned',
         hours: null,
         start: null,
         end: null,
+        label: onLeave ? null : (extraOf(rules, shift.code)?.code ?? null),
       });
     }
   }
@@ -775,6 +869,18 @@ export interface ImportPersonView {
   unreadable: number;
 }
 
+/** A code in the file that the roster does not know yet. */
+export interface ImportCodeView {
+  /** As the file writes it. */
+  code: string;
+  /** Cells holding it. */
+  count: number;
+  /** What it will count as once added; `skip` leaves those cells alone. */
+  as: ShiftCode | 'skip';
+  /** True while `as` is the roster's own guess rather than the scheduler's choice. */
+  guessed: boolean;
+}
+
 export interface ImportPreview {
   month: string;
   monthStatus: MonthStatus;
@@ -793,6 +899,8 @@ export interface ImportPreview {
   notInFile: string[];
   /** Rostered shifts that fall on approved leave and will show as Leave. */
   onLeave: number;
+  /** Codes the file uses that the roster will learn, shown as written from then on. */
+  newCodes: ImportCodeView[];
   notes: string[];
   moreNotes: number;
   blocks: Violation[];
@@ -816,7 +924,7 @@ export interface ImportResult {
 export function rosterTemplate(input: {
   month: string;
   lines: Array<Pick<ImportLine, 'id' | 'code' | 'name'>>;
-  codeAt: (lineId: number, date: string) => ShiftCode | null;
+  codeAt: (lineId: number, date: string) => string | null;
 }): string[][] {
   const dates = monthDates(input.month);
   return [

@@ -3,14 +3,16 @@
 import { type FormEvent, useMemo, useState } from 'react';
 
 import {
-  CODE_STYLE,
   Card,
+  CodeChip,
   Label,
   Legend,
   MonthStatusPill,
   Pill,
   RosterGrid,
+  codeLook,
   codeTimes,
+  draftPatch,
   formatDay,
   formatMonth,
   ghostButton,
@@ -23,20 +25,21 @@ import {
   CODE_KIND,
   CONSOLE_CODES,
   RULE_LABEL,
-  SHIFT_CODES,
   TRIGGER_LABEL,
   type CallInTrigger,
   type RosterCell,
   type Severity,
-  type ShiftCode,
   type Violation,
+  codeDef,
   isConsole,
+  isWorking,
   monthDates,
   monthOf,
   newViolations,
+  rosterCodes,
   validateRoster,
 } from '@/lib/shift-rules';
-import { type AdminOverview, type LineView, type RecordView, type SaveResult, buildLookup, indexRecords, recordKey } from '@/lib/shift-types';
+import { type AdminOverview, type LineView, type RecordView, type SaveResult, buildLookup, indexRecords, recordKey, writtenCode } from '@/lib/shift-types';
 
 import { message, saveChecked, sendJson } from './api';
 import RosterImportDialog from './roster-import-dialog';
@@ -66,7 +69,8 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
   const index = useMemo(() => indexRecords(data.records), [data.records]);
   const { confirm, dialog } = useConfirm();
 
-  const [draft, setDraft] = useState<Map<string, ShiftCode>>(new Map());
+  /** Unsaved changes: the code each cell would take, as written (a built-in code or one of the roster's own). */
+  const [draft, setDraft] = useState<Map<string, string>>(new Map());
   const [draftKind, setDraftKind] = useState<'override' | 'swap'>('override');
   const [menu, setMenu] = useState<(CellRef & { x: number; y: number }) | null>(null);
   const [callIn, setCallIn] = useState<CellRef | null>(null);
@@ -94,7 +98,7 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
     const isGenerated = (date: string) => generated.has(monthOf(date));
     const saved = validateRoster(rules, lines, buildLookup(index), from, to, isGenerated);
     if (draft.size === 0) return { current: saved, fresh: [] as Violation[] };
-    const patches = new Map<string, Partial<RosterCell>>([...draft].map(([key, code]) => [key, { planned: code }]));
+    const patches = new Map<string, Partial<RosterCell>>([...draft].map(([key, code]) => [key, draftPatch(rules, code)]));
     const drafted = validateRoster(rules, lines, buildLookup(index, patches), from, to, isGenerated);
     return { current: drafted, fresh: newViolations(saved, drafted) };
   }, [month.status, dates, data.generatedMonths, rules, lines, index, draft]);
@@ -119,7 +123,7 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
 
   // --- Draft ---
 
-  const editDraft = (edit: (next: Map<string, ShiftCode>) => void, kind: 'override' | 'swap' = 'override') => {
+  const editDraft = (edit: (next: Map<string, string>) => void, kind: 'override' | 'swap' = 'override') => {
     const next = new Map(draft);
     edit(next);
     setDraftKind(draft.size === 0 ? kind : kind === 'swap' && draftKind === 'swap' ? 'swap' : 'override');
@@ -128,14 +132,19 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
     setNotice(null);
   };
 
-  const setCode = (cell: CellRef, code: ShiftCode) => {
+  const setCode = (cell: CellRef, code: string) => {
     const key = recordKey(cell.lineId, cell.date);
     const record = index.get(key);
-    if (!record) return;
     editDraft((next) => {
-      if (code === record.plannedCode) next.delete(key);
+      // Back to what is saved (or, on a blank day, the same code picked twice) undoes the change.
+      if (record ? code === writtenCode(record) : next.get(key) === code) next.delete(key);
       else next.set(key, code);
     });
+    setMenu(null);
+  };
+
+  const clearDraft = (cell: CellRef) => {
+    editDraft((next) => next.delete(recordKey(cell.lineId, cell.date)));
     setMenu(null);
   };
 
@@ -145,11 +154,11 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
     const recordA = index.get(a);
     const recordB = index.get(b);
     if (!recordA || !recordB) return;
-    const codeA = draft.get(a) ?? recordA.plannedCode;
-    const codeB = draft.get(b) ?? recordB.plannedCode;
+    const codeA = draft.get(a) ?? writtenCode(recordA);
+    const codeB = draft.get(b) ?? writtenCode(recordB);
     editDraft((next) => {
       for (const [key, record, code] of [[a, recordA, codeB], [b, recordB, codeA]] as const) {
-        if (code === record.plannedCode) next.delete(key);
+        if (code === writtenCode(record)) next.delete(key);
         else next.set(key, code);
       }
     }, 'swap');
@@ -431,7 +440,8 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
               onCellClick={(line, date, anchor) => {
                 const rect = anchor.getBoundingClientRect();
                 const width = 304;
-                const height = 440;
+                // A blank day's menu only offers the codes, so it is much shorter.
+                const height = index.has(recordKey(line.id, date)) ? 440 : 250;
                 setMenu({
                   lineId: line.id,
                   date,
@@ -499,6 +509,21 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
         />
       )}
 
+      {menu && !menuRecord && menuLine && (
+        <BlankCellMenu
+          key={recordKey(menu.lineId, menu.date)}
+          x={menu.x}
+          y={menu.y}
+          line={menuLine}
+          date={menu.date}
+          drafted={draft.get(recordKey(menu.lineId, menu.date)) ?? null}
+          rules={rules}
+          onClose={() => setMenu(null)}
+          onSet={(code) => setCode(menu, code)}
+          onClear={() => clearDraft(menu)}
+        />
+      )}
+
       {callIn && callInRecord && callInLine && (
         <CallInDialog
           line={callInLine}
@@ -528,8 +553,8 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
                 return (
                   <span key={key} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
                     <span className="font-semibold">{line?.code}</span> {formatDay(date, { day: 'numeric', month: 'short' })}
-                    <span className={`rounded px-1 text-[10px] font-bold ${record ? CODE_STYLE[record.plannedCode].chip : ''}`}>{record?.plannedCode}</span>→
-                    <span className={`rounded px-1 text-[10px] font-bold ${CODE_STYLE[code].chip}`}>{code}</span>
+                    {record ? <CodeChip rules={rules} code={writtenCode(record)} className="!h-4" /> : <span className="text-gray-400">blank</span>}→
+                    <CodeChip rules={rules} code={code} className="!h-4" />
                     <button type="button" aria-label="Undo this change" className="text-gray-400 hover:text-rose-600" onClick={() => editDraft((next) => next.delete(key))}>
                       ×
                     </button>
@@ -619,19 +644,22 @@ function CellMenu({
   line: LineView;
   date: string;
   record: RecordView;
-  drafted: ShiftCode | null;
+  /** The unsaved code on this cell, as written. */
+  drafted: string | null;
   rules: AdminOverview['rules'];
   others: LineView[];
   busy: boolean;
   onClose: () => void;
-  onSet: (code: ShiftCode) => void;
+  onSet: (code: string) => void;
   onSwap: (otherLineId: number) => void;
   onActual: (status: string, times?: { actualStart: string; actualEnd: string }) => void;
   onCallIn: () => void;
   onCancelCallIn: () => void;
 }) {
   const locked = hasActuals(record);
-  const planned = drafted ?? record.plannedCode;
+  const planned = drafted ?? writtenCode(record);
+  const rostered = codeLook(rules, writtenCode(record));
+  const plannedDef = codeDef(rules, record.plannedCode, record.label);
   const kind = CODE_KIND[record.plannedCode];
   const [times, setTimes] = useState<{ actualStart: string; actualEnd: string } | null>(null);
   const section = 'border-t border-gray-100 px-4 py-3';
@@ -648,22 +676,22 @@ function CellMenu({
           <p className="mt-0.5 text-xs text-gray-400">
             {line.name !== line.code && `${line.name} · `}
             Rotation gives {rules.codes[record.generatedCode].name}
-            {record.plannedCode !== record.generatedCode && `, rostered ${rules.codes[record.plannedCode].name}`}
+            {(record.plannedCode !== record.generatedCode || record.label) && `, rostered ${rostered.name}${rostered.times ? ` ${rostered.times}` : ''}`}
             {record.reasonCode && ` (${record.reasonCode})`}
           </p>
         </div>
 
         <div className={section}>
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Roster as</p>
-          <div className="grid grid-cols-6 gap-1.5">
-            {SHIFT_CODES.map((code) => (
+          <div className="flex flex-wrap gap-1.5">
+            {rosterCodes(rules).map(({ code, base, name }) => (
               <button
                 key={code}
                 type="button"
                 disabled={locked}
-                title={`${rules.codes[code].name} ${codeTimes(rules, code)}`}
+                title={`${name} ${codeTimes(rules, base, code)}`.trim()}
                 onClick={() => onSet(code)}
-                className={`flex h-9 items-center justify-center rounded-lg text-xs font-bold transition disabled:opacity-30 ${CODE_STYLE[code].chip} ${planned === code ? 'ring-2 ring-[#03458f] ring-offset-1' : 'hover:brightness-95'}`}
+                className={`flex h-9 min-w-[2.35rem] items-center justify-center whitespace-nowrap rounded-lg px-1.5 font-bold transition disabled:opacity-30 ${code.length > 3 ? 'text-[11px]' : 'text-xs'} ${codeLook(rules, code).chip} ${planned === code ? 'ring-2 ring-[#03458f] ring-offset-1' : 'hover:brightness-95'}`}
               >
                 {code}
               </button>
@@ -690,7 +718,7 @@ function CellMenu({
           )}
         </div>
 
-        {isConsole(record.plannedCode) && !record.callIn && (
+        {isWorking(record.plannedCode) && !record.callIn && (
           <div className={section}>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               What happened <span className="font-normal normal-case text-gray-300">· now: {record.status}</span>
@@ -720,7 +748,7 @@ function CellMenu({
               <button
                 type="button"
                 className="mt-2 text-[11px] font-semibold text-[#03458f] hover:underline"
-                onClick={() => setTimes({ actualStart: record.actualStart ?? rules.codes[record.plannedCode].start ?? '', actualEnd: record.actualEnd ?? rules.codes[record.plannedCode].end ?? '' })}
+                onClick={() => setTimes({ actualStart: record.actualStart ?? plannedDef.start ?? '', actualEnd: record.actualEnd ?? plannedDef.end ?? '' })}
               >
                 Worked different hours
               </button>
@@ -753,6 +781,70 @@ function CellMenu({
             )}
           </div>
         )}
+      </div>
+    </>
+  );
+}
+
+/** The menu on a day with nothing rostered: give the person a shift. */
+function BlankCellMenu({
+  x,
+  y,
+  line,
+  date,
+  drafted,
+  rules,
+  onClose,
+  onSet,
+  onClear,
+}: {
+  x: number;
+  y: number;
+  line: LineView;
+  date: string;
+  drafted: string | null;
+  rules: AdminOverview['rules'];
+  onClose: () => void;
+  onSet: (code: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <>
+      <button type="button" aria-label="Close" className="fixed inset-0 z-40 cursor-default" onClick={onClose} />
+      <div className="fixed z-50 w-[19rem] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl" style={{ left: x, top: y }}>
+        <div className="px-4 py-3">
+          <p className="text-sm font-semibold text-gray-900">
+            {line.code} · {formatDay(date)}
+          </p>
+          <p className="mt-0.5 text-xs text-gray-400">
+            {line.name !== line.code && `${line.name} · `}
+            {drafted ? `Nothing saved yet. Will be rostered ${codeLook(rules, drafted).name}.` : 'Nothing is rostered on this day.'}
+          </p>
+        </div>
+        <div className="border-t border-gray-100 px-4 py-3">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Roster as</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rosterCodes(rules).map(({ code, base, name }) => (
+              <button
+                key={code}
+                type="button"
+                title={`${name} ${codeTimes(rules, base, code)}`.trim()}
+                onClick={() => onSet(code)}
+                className={`flex h-9 min-w-[2.35rem] items-center justify-center whitespace-nowrap rounded-lg px-1.5 font-bold transition ${code.length > 3 ? 'text-[11px]' : 'text-xs'} ${codeLook(rules, code).chip} ${drafted === code ? 'ring-2 ring-[#03458f] ring-offset-1' : 'hover:brightness-95'}`}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-gray-400">
+            {drafted ? 'Save the change below to put it on the roster.' : 'Pick a shift, then save the change below.'}
+          </p>
+          {drafted && (
+            <button type="button" className="mt-2 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50" onClick={onClear}>
+              Leave it blank
+            </button>
+          )}
+        </div>
       </div>
     </>
   );

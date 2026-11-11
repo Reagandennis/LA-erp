@@ -4,6 +4,7 @@ import {
   type ExistingCell,
   type ImportLine,
   checkImport,
+  guessBase,
   matchLine,
   newLineCodes,
   parseDayHeading,
@@ -11,13 +12,17 @@ import {
   personName,
   planRosterImport,
   readRosterSheet,
+  readCell,
   readRosterWorkbook,
   rosterTemplate,
+  withNewCodes,
 } from '../lib/shift-import';
-import { DEFAULT_RULES, type RosterCell, type ShiftCode, generatedCode, monthDates } from '../lib/shift-rules';
+import { DEFAULT_RULES, type RosterCell, type ShiftCode, type ShiftRules, generatedCode, monthDates } from '../lib/shift-rules';
 
 const rules = DEFAULT_RULES;
 const NOV = '2026-11';
+/** A cell as `parseShiftCode` gives it: the code, 'blank', or null. */
+const shown = (cell: { code: string | null; blank: boolean }) => (cell.blank ? 'blank' : cell.code);
 const DEC = '2026-12';
 
 const line = (id: number, offset: number | null, name: string, extra: Partial<ImportLine> = {}): ImportLine => ({
@@ -66,6 +71,34 @@ describe('shift codes as people write them', () => {
   it('tells an empty cell from one it cannot read', () => {
     for (const blank of ['', '  ', '-', '—', 'N/A']) expect(parseShiftCode(blank, rules)).toBe('blank');
     for (const junk of ['T', 'Training', '8', '09:00-17:00', 'D/N']) expect(parseShiftCode(junk, rules)).toBeNull();
+  });
+
+  it('knows the roster\'s own codes, by code or by name, before the general words', () => {
+    const own: ShiftRules = {
+      ...rules,
+      extra: [
+        { code: 'SOC-D', name: 'SOC Day', as: 'D', start: '06:00', end: '18:00', hours: null },
+        { code: 'AL', name: 'Annual leave', as: 'LV', start: null, end: null, hours: null },
+      ],
+    };
+    expect(parseShiftCode('soc-d', own)).toBe('SOC-D');
+    expect(parseShiftCode('SOC D', own)).toBe('SOC-D');
+    expect(parseShiftCode('soc day', own)).toBe('SOC-D');
+    // "AL" is a general word for leave until the roster makes it a code of its own.
+    expect(parseShiftCode('AL', rules)).toBe('LV');
+    expect(parseShiftCode('AL', own)).toBe('AL');
+    expect(parseShiftCode('D', own)).toBe('D');
+  });
+
+  it('spots a word that could be a code the roster has not met', () => {
+    expect(readCell('soc-n', rules)).toEqual({ code: null, blank: false, token: 'SOC-N' });
+    expect(readCell(' WT ', rules).token).toBe('WT');
+    // Not a weekday, a number, a sentence, or anything too long to be a code.
+    for (const raw of ['Mon', 'T', 'Th', '8', '8h', 'see note', 'Induction', 'D?']) expect(readCell(raw, rules).token, raw).toBeNull();
+  });
+
+  it('guesses what a new code counts as from how it is written', () => {
+    expect(['SOC-D', 'SOC-N', 'CR/S', 'NIGHT2', 'INT', 'WT', 'UP', 'STBY-OC', 'OFFSITE'].map(guessBase)).toEqual(['D', 'N', 'S', 'N', 'W', 'W', 'W', 'OC', 'X']);
   });
 
   it('uses the names the roster gives its shifts', () => {
@@ -125,9 +158,9 @@ describe('reading a roster sheet', () => {
       ['Mercy Wanjiru', 6, ['Mercy Wanjiru', 'Controller']],
       ['Kevin Mwangi', 7, ['Kevin Mwangi', 'Controller']],
     ]);
-    expect(reading.people[0]?.cells.map((c) => c.code)).toEqual(['D', 'D', 'N', 'X', 'blank', 'LV', 'D']);
+    expect(reading.people[0]?.cells.map(shown)).toEqual(['D', 'D', 'N', 'X', 'blank', 'LV', 'D']);
     // "T" is kept, to be reported against Kevin, rather than dropping his row.
-    expect(reading.people[1]?.cells[3]).toEqual({ date: '2026-11-04', raw: 'T', code: null });
+    expect(reading.people[1]?.cells[3]).toEqual({ date: '2026-11-04', raw: 'T', code: null, blank: false, token: null });
     expect(reading.dates).toEqual(monthDates(NOV).slice(0, 7));
   });
 
@@ -150,7 +183,7 @@ describe('reading a roster sheet', () => {
     const reading = readRosterSheet(rows, NOV, rules);
     expect(reading.dates).toHaveLength(30);
     expect(reading.people).toHaveLength(2);
-    const mercy = reading.people[0]?.cells.map((c) => c.code).join('');
+    const mercy = reading.people[0]?.cells.map(shown).join('');
     expect(mercy).toBe('D'.repeat(14) + 'N'.repeat(14) + 'XX');
     expect(reading.conflicts).toEqual([
       'Mercy, 29 Nov: the file says both “X” and “N”. The first was used.',
@@ -177,18 +210,55 @@ describe('reading a roster sheet', () => {
     ];
     const reading = readRosterSheet(rows, NOV, rules);
     expect(reading.people).toHaveLength(1);
-    expect(reading.people[0]?.cells.map((c) => c.code)).toEqual(['D', 'D', 'S', 'D', 'D']);
+    expect(reading.people[0]?.cells.map(shown)).toEqual(['D', 'D', 'S', 'D', 'D']);
     expect(reading.conflicts).toEqual(['Mercy, 1 Nov: the file says both “D” and “N”. The first was used.']);
   });
 
   it('passes over rows that are not shifts and remembers what they held', () => {
     const rows = [
       ['Name', '1', '2', '3', '4', '5'],
-      ['Mercy', 'M', 'M', 'E', 'E', 'N'],
+      ['Mercy', '8h', '8h', '12 hrs', '12 hrs', 'N'],
     ];
     const reading = readRosterSheet(rows, NOV, rules);
     expect(reading.people).toHaveLength(0);
-    expect(reading.ignored).toEqual([{ label: 'Mercy', samples: ['M', 'E'] }]);
+    expect(reading.ignored).toEqual([{ label: 'Mercy', samples: ['8h', '12 hrs'] }]);
+  });
+
+  it('keeps a row written in codes the roster has not met, and counts them', () => {
+    // The layout of a real control-room roster: weekday names over dates, the roster's own codes.
+    const dates = monthDates(NOV).slice(15);
+    const rows = [
+      [],
+      ['', ...dates.map((d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(`${d}T00:00:00Z`).getUTCDay()]!)],
+      ['', ...dates],
+      ['Lyn', 'SOC-D', 'X', 'X', 'X', 'SOC-N', 'SOC-N', 'X', 'X', 'SOC-N', 'SOC-N', 'X', 'X', 'SOC-N', 'SOC-N', 'X'],
+      ['Speranza', ...dates.map(() => 'UP')],
+      ['Mary', 'INT', 'INT', 'INT', 'INT', 'INT', 'X', 'X', 'INT', 'INT', 'INT', 'INT', 'INT', 'X', 'X', 'AL'],
+    ];
+    const reading = readRosterSheet(rows, NOV, rules);
+    expect(reading.people.map((p) => p.label)).toEqual(['Lyn', 'Speranza', 'Mary']);
+    expect(reading.ignored).toEqual([]);
+    expect(reading.unknown).toEqual([
+      { token: 'UP', count: 15 },
+      { token: 'INT', count: 10 },
+      { token: 'SOC-N', count: 6 },
+      { token: 'SOC-D', count: 1 },
+    ]);
+    expect(reading.people[2]?.cells.map((c) => c.code ?? c.token)).toEqual(['INT', 'INT', 'INT', 'INT', 'INT', 'X', 'X', 'INT', 'INT', 'INT', 'INT', 'INT', 'X', 'X', 'LV']);
+
+    // Added to the rules, each counting as what was chosen or guessed, the same cells are shifts.
+    const learned = withNewCodes(rules, reading.unknown, { UP: 'LV', INT: 'skip' });
+    expect(learned.codes).toEqual([
+      { code: 'UP', count: 15, as: 'LV', guessed: false },
+      { code: 'INT', count: 10, as: 'skip', guessed: false },
+      { code: 'SOC-N', count: 6, as: 'N', guessed: true },
+      { code: 'SOC-D', count: 1, as: 'D', guessed: true },
+    ]);
+    expect(learned.rules.extra.map((e) => [e.code, e.as])).toEqual([['UP', 'LV'], ['SOC-N', 'N'], ['SOC-D', 'D']]);
+    const again = readRosterSheet(rows, NOV, learned.rules);
+    expect(again.unknown).toEqual([{ token: 'INT', count: 10 }]);
+    expect(again.people[0]?.cells.slice(0, 5).map((c) => c.code)).toEqual(['SOC-D', 'X', 'X', 'X', 'SOC-N']);
+    expect(withNewCodes(rules, [], {}).rules).toBe(rules);
   });
 
   it('says nothing about a row of totals', () => {
@@ -247,8 +317,8 @@ describe('choosing the sheet', () => {
   });
 
   it('says what is wrong with codes it does not know, and with a file that holds no roster', () => {
-    const odd = readRosterWorkbook([{ name: 'S', rows: [['Name', '1', '2', '3', '4', '5'], ['Mercy', 'M', 'M', 'E', 'E', 'E']] }], NOV, rules);
-    expect(odd.error).toMatch(/not shift codes this roster uses \(for example “M”, “E”\)/);
+    const odd = readRosterWorkbook([{ name: 'S', rows: [['Name', '1', '2', '3', '4', '5'], ['Mercy', '8h', '8h', '12 hrs', '12 hrs', '12 hrs']] }], NOV, rules);
+    expect(odd.error).toMatch(/not shift codes this roster uses \(for example “8h”, “12 hrs”\)/);
     expect(odd.error).toMatch(/D for Day, S for Swing/);
     expect(readRosterWorkbook([{ name: 'S', rows: [['Invoice', 'Amount'], ['A-1', '300']] }], NOV, rules).error).toMatch(/No roster was found.*headed 1 to 30/);
   });
@@ -299,14 +369,18 @@ describe('new people', () => {
 });
 
 describe('planning an upload', () => {
-  const saved = (planned: ShiftCode, extra: Partial<ExistingCell> = {}): ExistingCell => ({
-    id: 0,
-    planned,
-    generated: planned,
-    locked: false,
-    cell: { generated: planned, planned, worked: null, status: 'planned', hours: null, start: null, end: null },
-    ...extra,
-  });
+  /** A saved day, written as `planned`: a built-in code, or SOC-D standing for a Day shift. */
+  const saved = (planned: ShiftCode | 'SOC-D', extra: Partial<ExistingCell> = {}): ExistingCell => {
+    const base: ShiftCode = planned === 'SOC-D' ? 'D' : planned;
+    return {
+      id: 0,
+      planned,
+      generated: base,
+      locked: false,
+      cell: { generated: base, planned: base, worked: null, status: 'planned', hours: null, start: null, end: null, label: planned === base ? null : planned },
+      ...extra,
+    };
+  };
 
   /** November as generated from the rotation, by `${lineId}|${date}`. */
   function generatedMonth(month = NOV): Map<string, ExistingCell> {
@@ -339,10 +413,10 @@ describe('planning an upload', () => {
     const first = existing.get('3|2026-11-01')!;
     const worked = existing.get('3|2026-11-02')!;
     existing.set('3|2026-11-02', { ...worked, locked: true });
-    const other = (code: ShiftCode): ShiftCode => (code === 'X' ? 'D' : 'X');
+    const other = (code: string): ShiftCode => (code === 'X' ? 'D' : 'X');
     const rows = [
       ['Name', '1', '2', '3', '4', '5'],
-      ['Mercy Wanjiru', other(first.planned), other(worked.planned), '', existing.get('3|2026-11-04')!.planned, 'Training'],
+      ['Mercy Wanjiru', other(first.planned), other(worked.planned), '', existing.get('3|2026-11-04')!.planned, 'In training'],
     ];
     const result = plan(rows, existing);
     const [mercy] = result.people;
@@ -350,7 +424,7 @@ describe('planning an upload', () => {
     expect(mercy).toMatchObject({ unchanged: 1, blank: 1, locked: 1, unreadable: 1 });
     expect(result.notes).toHaveLength(2);
     expect(result.notes[0]).toMatch(/2 Nov: already recorded as worked, sick or called in/);
-    expect(result.notes[1]).toBe('Mercy Wanjiru, 5 Nov: “Training” is not a shift code, so that day was left as it is.');
+    expect(result.notes[1]).toBe('Mercy Wanjiru, 5 Nov: “In training” is not a shift code, so that day was left as it is.');
   });
 
   it('rosters blanks as Off when asked', () => {
@@ -392,8 +466,23 @@ describe('planning an upload', () => {
     expect(result.notes).toEqual(["Mercy Wanjiru: 3 days are before TRC-3's start date or after their end date, and were skipped."]);
   });
 
+  it('writes the roster\'s own codes as they are, and sums up one it was told not to use', () => {
+    const own: ShiftRules = { ...rules, extra: [{ code: 'SOC-D', name: 'SOC-D', as: 'D', start: null, end: null, hours: null }] };
+    const rows = [['Name', '1', '2', '3', '4', '5'], ['Mercy Wanjiru', 'SOC-D', 'soc-d', 'WT', 'WT', 'X']];
+    const existing = new Map([['3|2026-11-01', saved('D', { id: 7 })], ['3|2026-11-02', saved('SOC-D', { id: 8, generated: 'D' })]]);
+    const result = planRosterImport({ month: NOV, rules: own, reading: readRosterSheet(rows, NOV, own), lines, existing, options: { blankAsOff: false, mapping: {} } });
+    const [mercy] = result.people;
+    // A day rostered as plain D is rewritten as SOC-D; one already written that way is left.
+    expect(mercy?.shifts).toEqual([
+      { date: '2026-11-01', code: 'SOC-D', recordId: 7, generated: 'D' },
+      { date: '2026-11-05', code: 'X', recordId: null, generated: generatedCode(rules, 4, '2026-11-05') },
+    ]);
+    expect(mercy).toMatchObject({ unchanged: 1, unreadable: 2 });
+    expect(result.notes).toEqual(['“WT” is not a code this roster uses, so the 2 cells holding it were left as they are.']);
+  });
+
   it('caps a long list of notes', () => {
-    const rows = [['Name', ...monthDates(NOV).map((d) => d.slice(8))], ...lines.map((l) => [l.name, ...monthDates(NOV).map((_, i) => (i < 12 ? 'Q' : 'D'))])];
+    const rows = [['Name', ...monthDates(NOV).map((d) => d.slice(8))], ...lines.map((l) => [l.name, ...monthDates(NOV).map((_, i) => (i < 12 ? '??' : 'D'))])];
     const result = plan(rows, new Map());
     expect(result.notes).toHaveLength(40);
     expect(result.moreNotes).toBe(20);
@@ -426,6 +515,33 @@ describe('planning an upload', () => {
       expect(result.people[0]?.shifts).toHaveLength(1);
       const checks = checkImport({ month: NOV, rules, plan: result, lines, lookup: lookupOf(existing), generatedMonths: [NOV] });
       expect(checks.newBlocks.map((v) => v.key)).toEqual([`coverage_gap|${day}|D`]);
+    });
+
+    it('counts a code of the roster\'s own as the shift it stands for', () => {
+      const own: ShiftRules = {
+        ...rules,
+        extra: [
+          { code: 'SOC-D', name: 'SOC-D', as: 'D', start: null, end: null, hours: null },
+          { code: 'INT', name: 'INT', as: 'W', start: null, end: null, hours: null },
+        ],
+      };
+      const existing = generatedMonth();
+      const day = '2026-11-10';
+      const onDay = lines.find((l) => existing.get(`${l.id}|${day}`)?.planned === 'D')!;
+      const resting = lines.find((l) => existing.get(`${l.id}|${day}`)?.planned === 'X')!;
+      const upload = (cover: string) =>
+        planRosterImport({
+          month: NOV,
+          rules: own,
+          reading: readRosterSheet([['Name', '10', '11', '12', '13', '14'], [onDay.name, 'OFF', '', '', '', ''], [resting.name, cover, '', '', '', '']], NOV, own),
+          lines,
+          existing,
+          options: { blankAsOff: false, mapping: {} },
+        });
+      const check = (cover: string) => checkImport({ month: NOV, rules: own, plan: upload(cover), lines, lookup: lookupOf(existing), generatedMonths: [NOV] });
+      // SOC-D covers the Day shift; INT is a working day that covers nothing.
+      expect(check('SOC-D').newBlocks.filter((v) => v.rule === 'coverage_gap')).toEqual([]);
+      expect(check('INT').newBlocks.map((v) => v.key)).toContain(`coverage_gap|${day}|D`);
     });
 
     it('lets a new person cover, and shows approved leave as Leave', () => {

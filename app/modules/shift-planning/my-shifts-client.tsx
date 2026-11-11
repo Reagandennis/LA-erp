@@ -30,6 +30,7 @@ import {
   type ShiftRules,
   absoluteMinutes,
   addDays,
+  codeDef,
   currentAndNext,
   datesBetween,
   dutyOf,
@@ -57,6 +58,9 @@ const LEAVE_TONE: Record<LeaveView['status'], 'ok' | 'warn' | 'danger' | 'muted'
 
 /** What a record shows on the day: the shift actually worked, else the plan. */
 const shownCode = (record: RecordView): ShiftCode => record.workedCode ?? record.plannedCode;
+
+/** The roster's own code the day is written as ("SOC-D"); a call-in is worked as the built-in shift it covered. */
+const shownLabel = (record: RecordView): string | null => (record.workedCode ? null : (record.label ?? null));
 
 export default function MyShiftsClient({ initial, canManage, userName }: { initial: MyShifts; canManage: boolean; userName: string }) {
   const [data, setData] = useState<MyShifts>(initial);
@@ -303,6 +307,11 @@ function Hero({
   const { current, next } = currentAndNext(duties, nowAbs);
   const todayRecord = upcoming.find((r) => r.date === today);
   const todayCode = todayRecord ? shownCode(todayRecord) : null;
+  /** What the roster calls a duty: its own code's name ("SOC Day") where the day is written as one. */
+  const dutyName = (duty: Duty) => {
+    const record = upcoming.find((r) => r.date === duty.date);
+    return codeDef(rules, duty.code, record ? shownLabel(record) : null).name;
+  };
 
   let eyebrow = 'Next shift';
   let title = 'Nothing published yet';
@@ -311,7 +320,7 @@ function Hero({
 
   if (clock && current) {
     eyebrow = 'On shift now';
-    title = `${rules.codes[current.code].name} shift`;
+    title = `${dutyName(current)} shift`;
     detail = `${timeOfAbsolute(current.start).time} – ${timeOfAbsolute(current.end).time} · ends in ${formatSpan(current.end - nowAbs)}`;
     progress = (nowAbs - current.start) / (current.end - current.start);
   } else if (todayCode === 'OC') {
@@ -327,7 +336,7 @@ function Hero({
     title = 'Day off';
     detail = next ? `Back on ${formatDay(next.date)}.` : 'Rest day.';
   } else if (next) {
-    title = `${rules.codes[next.code].name} shift`;
+    title = `${dutyName(next)} shift`;
     detail = `${formatDay(next.date)} · ${timeOfAbsolute(next.start).time} – ${timeOfAbsolute(next.end).time}${clock ? ` · starts in ${formatSpan(next.start - nowAbs)}` : ''}`;
   }
 
@@ -352,7 +361,7 @@ function Hero({
         {showNext && next && (
           <div className="shrink-0 rounded-2xl bg-white/10 px-5 py-4 backdrop-blur">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-white/60">Next up</p>
-            <p className="mt-1 text-lg font-semibold">{rules.codes[next.code].name}</p>
+            <p className="mt-1 text-lg font-semibold">{dutyName(next)}</p>
             <p className="text-sm text-white/80">
               {formatDay(next.date)} · {timeOfAbsolute(next.start).time}
             </p>
@@ -396,8 +405,8 @@ function WeekStrip({
               </div>
               {code ? (
                 <div className={`mt-2 rounded-xl border px-2.5 py-2 ${CODE_STYLE[code].soft}`}>
-                  <p className="text-sm font-semibold">{rules.codes[code].name}</p>
-                  <p className="text-[11px] opacity-75">{codeTimes(rules, code) || (code === 'OC' ? 'In reserve' : code === 'LV' ? 'Approved leave' : 'Rest day')}</p>
+                  <p className="text-sm font-semibold">{codeDef(rules, code, record && shownLabel(record)).name}</p>
+                  <p className="text-[11px] opacity-75">{codeTimes(rules, code, record && shownLabel(record)) || (code === 'OC' ? 'In reserve' : code === 'LV' ? 'Approved leave' : 'Rest day')}</p>
                 </div>
               ) : (
                 <div className="mt-2 rounded-xl border border-dashed border-gray-200 px-2.5 py-2">
@@ -463,7 +472,7 @@ function MonthCalendar({
               </div>
               {code && record && (
                 <div className="mt-auto">
-                  <p className="truncate text-[13px] font-semibold leading-tight">{rules.codes[code].name}</p>
+                  <p className="truncate text-[13px] font-semibold leading-tight">{codeDef(rules, code, shownLabel(record)).name}</p>
                   <p className="truncate text-[10px] leading-tight opacity-70">
                     {record.status === 'sick'
                       ? 'Sick'
@@ -473,7 +482,7 @@ function MonthCalendar({
                           ? 'Called in'
                           : record.actualStart && record.actualEnd
                             ? `${record.actualStart} – ${record.actualEnd}`
-                            : codeTimes(rules, code)}
+                            : codeTimes(rules, code, shownLabel(record))}
                   </p>
                 </div>
               )}
