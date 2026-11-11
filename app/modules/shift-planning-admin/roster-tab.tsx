@@ -39,11 +39,16 @@ import {
 import { type AdminOverview, type LineView, type RecordView, type SaveResult, buildLookup, indexRecords, recordKey } from '@/lib/shift-types';
 
 import { message, saveChecked, sendJson } from './api';
+import RosterImportDialog from './roster-import-dialog';
 
 interface Props {
   data: AdminOverview;
   reload: (month?: string) => Promise<void>;
   onOpenPeople: () => void;
+  /** A roster file filled `month`: show that month, with a line saying what was done. */
+  onImported: (month: string, summary: string) => Promise<void>;
+  /** What the last upload did, shown until the scheduler moves on. */
+  flash?: string | null;
 }
 
 interface CellRef {
@@ -55,7 +60,7 @@ type Notice = { tone: 'ok' | 'danger'; text: string } | null;
 
 const hasActuals = (record: RecordView) => Boolean(record.callIn) || ['worked', 'sick', 'no-show', 'call-in'].includes(record.status);
 
-export default function RosterTab({ data, reload, onOpenPeople }: Props) {
+export default function RosterTab({ data, reload, onOpenPeople, onImported, flash }: Props) {
   const { rules, lines, month, today, holidays } = data;
   const dates = useMemo(() => monthDates(month.month), [month.month]);
   const index = useMemo(() => indexRecords(data.records), [data.records]);
@@ -72,6 +77,7 @@ export default function RosterTab({ data, reload, onOpenPeople }: Props) {
   /** What the server said when it stopped a save or a publish. */
   const [conflict, setConflict] = useState<SaveResult | null>(null);
   const [publishStop, setPublishStop] = useState<SaveResult | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const gridLines = useMemo(
     () => lines.filter((line) => line.active || dates.some((date) => index.has(recordKey(line.id, date)))),
@@ -280,16 +286,43 @@ export default function RosterTab({ data, reload, onOpenPeople }: Props) {
 
   // --- Render ---
 
+  const importDialog = importing && (
+    <RosterImportDialog
+      month={month.month}
+      rules={rules}
+      lines={lines}
+      onClose={() => setImporting(false)}
+      onImported={async (filled, summary) => {
+        setImporting(false);
+        discard();
+        setNotice(null);
+        await onImported(filled, summary);
+      }}
+    />
+  );
+  const uploadButton = (
+    <button type="button" className={ghostButton} disabled={busy || draft.size > 0} onClick={() => setImporting(true)} title={draft.size > 0 ? 'Save or discard your changes first' : 'Fill this month from an Excel or CSV file'}>
+      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+      </svg>
+      Upload roster
+    </button>
+  );
+
   if (rotationLines.length === 0 && month.status === 'none') {
     return (
       <Card className="p-10 text-center">
+        {importDialog}
         <h2 className="text-lg font-semibold text-gray-900">Add people to the rotation first</h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
-          The roster is generated from the rotation pattern, one line per person. Add each person and the cycle day they start on, then come back to generate the month.
+          The roster is generated from the rotation pattern, one line per person. Add each person and the cycle day they start on, then come back to generate the month. Or upload a roster you already have in Excel.
         </p>
-        <button type="button" className={`${primaryButton} mt-6`} onClick={onOpenPeople}>
-          Add people
-        </button>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <button type="button" className={primaryButton} onClick={onOpenPeople}>
+            Add people
+          </button>
+          {uploadButton}
+        </div>
       </Card>
     );
   }
@@ -302,6 +335,7 @@ export default function RosterTab({ data, reload, onOpenPeople }: Props) {
   return (
     <div className="space-y-4 pb-28">
       {dialog}
+      {importDialog}
 
       <Card className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -312,6 +346,7 @@ export default function RosterTab({ data, reload, onOpenPeople }: Props) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {uploadButton}
           {month.status === 'none' && (
             <button type="button" className={primaryButton} disabled={busy} onClick={() => void generate()}>
               Generate from rotation
@@ -345,6 +380,7 @@ export default function RosterTab({ data, reload, onOpenPeople }: Props) {
         </div>
       </Card>
 
+      {flash && !notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{flash}</div>}
       {notice && (
         <div className={`rounded-xl border px-4 py-3 text-sm ${notice.tone === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
           {notice.text}
@@ -375,7 +411,7 @@ export default function RosterTab({ data, reload, onOpenPeople }: Props) {
         <Card className="px-6 py-16 text-center">
           <h3 className="text-base font-semibold text-gray-900">{formatMonth(month.month)} has not been generated</h3>
           <p className="mx-auto mt-2 max-w-lg text-sm text-gray-500">
-            Generating builds every shift from the rotation for {rotationLines.length} {rotationLines.length === 1 ? 'person' : 'people'}, carrying on from where the previous month ended. Nothing is visible to staff until you publish.
+            Generating builds every shift from the rotation for {rotationLines.length} {rotationLines.length === 1 ? 'person' : 'people'}, carrying on from where the previous month ended. If the month is already planned in Excel, upload that instead. Nothing is visible to staff until you publish.
           </p>
         </Card>
       ) : (

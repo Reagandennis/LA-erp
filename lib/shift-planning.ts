@@ -43,6 +43,19 @@ import {
   zonedNow,
 } from './shift-rules';
 import {
+  type ExistingCell,
+  type ImportPreview,
+  type ImportResult,
+  type ImportTarget,
+  type NamedSheet,
+  checkImport,
+  newLineCodes,
+  personName,
+  planRosterImport,
+  readRosterWorkbook,
+  rosterTemplate,
+} from './shift-import';
+import {
   type AdminOverview,
   type AuditView,
   type CallInView,
@@ -59,6 +72,7 @@ import {
   type TeamRoster,
   type UserOption,
   buildLookup,
+  cellOfRecord,
   indexRecords,
   recordKey,
 } from './shift-types';
@@ -1183,6 +1197,272 @@ export async function leaveBalances(lines: LineView[], today: string): Promise<R
     };
   }
   return out;
+}
+
+// --- Uploading a roster --------------------------------------------------------
+
+export interface RosterImportInput {
+  month: string;
+  fileName: string;
+  /** The uploaded file, already read into rows (see lib/spreadsheet-read.ts). */
+  sheets: NamedSheet[];
+  /** The sheet to read, when the workbook has several rosters for the month. */
+  sheet?: string | null;
+  blankAsOff?: boolean;
+  /** Who each row of the file is, where the scheduler chose; by the row's key. */
+  mapping?: Record<string, ImportTarget>;
+  /** False (the default) only works out what would happen. */
+  apply?: boolean;
+  /** Needed when the upload adds a blocking problem to a published month. */
+  forceReason?: string | null;
+}
+
+const IMPORT_REASON = 'Roster upload';
+const MAX_SHOWN_VIOLATIONS = 40;
+const LOCKED_STATUSES = ['worked', 'sick', 'no-show', 'call-in'];
+
+/**
+ * Fills a month from an uploaded roster: one row per person, one column per
+ * day. Without `apply` nothing is written and the result is a preview of
+ * exactly what would be.
+ *
+ * The file sets the plan, the way a scheduler's own changes do. It reaches
+ * only the people and days it names: anyone else on the roster keeps their
+ * month, and a day with recorded actuals keeps its history. A month that does
+ * not exist yet is created as a draft, and people the roster does not know
+ * are added to it, outside the rotation.
+ */
+export async function importRoster(actor: Actor, input: RosterImportInput): Promise<ImportResult> {
+  const { month } = input;
+  assertMonth(month);
+  const from = monthStart(month);
+  const to = monthEnd(month);
+  const [rules, lines, monthRow, records, months, users, leaves] = await Promise.all([
+    getRules(),
+    listLines(),
+    prisma.shiftMonth.findUnique({ where: { month } }),
+    loadRecords(prisma, addDays(from, -14), addDays(to, 14)),
+    generatedMonths(prisma, addDays(from, -14), addDays(to, 14)),
+    listUserOptions(),
+    prisma.shiftLeave.findMany({ where: { status: 'approved', startDate: { lte: to }, endDate: { gte: from } } }),
+  ]);
+
+  const workbook = readRosterWorkbook(input.sheets, month, rules, input.sheet);
+  if (!workbook.reading || !workbook.sheet) throw new RosterError(workbook.error ?? 'No roster was found in this file.');
+  const reading = workbook.reading;
+
+  const index = indexRecords(records);
+  const existing = new Map<string, ExistingCell>();
+  for (const record of records) {
+    if (record.date < from || record.date > to) continue;
+    existing.set(recordKey(record.lineId, record.date), {
+      id: record.id,
+      planned: record.plannedCode,
+      generated: record.generatedCode,
+      locked: Boolean(record.callIn) || LOCKED_STATUSES.includes(record.status),
+      cell: cellOfRecord(record),
+    });
+  }
+
+  const mapping: Record<string, ImportTarget> = {};
+  for (const [key, target] of Object.entries(input.mapping ?? {})) {
+    if (target === 'new' || target === 'skip' || (Number.isInteger(target) && lines.some((line) => line.id === target))) mapping[key] = target;
+  }
+  const plan = planRosterImport({ month, rules, reading, lines, existing, options: { blankAsOff: Boolean(input.blankAsOff), mapping } });
+
+  // In a month that is only now being created, approved leave lands on it as it does when generating.
+  const onLeave = new Set<string>();
+  if (!monthRow) {
+    for (const person of plan.people) {
+      if (typeof person.target !== 'number') continue;
+      for (const leave of leaves) {
+        if (leave.lineId !== person.target) continue;
+        for (const shift of person.shifts) {
+          if (isConsole(shift.code) && shift.date >= leave.startDate && shift.date <= leave.endDate) onLeave.add(recordKey(leave.lineId, shift.date));
+        }
+      }
+    }
+  }
+  const checks = checkImport({ month, rules, plan, lines, lookup: buildLookup(index), generatedMonths: months, onLeave });
+
+  // People the file adds: a login account with exactly their name becomes theirs.
+  const free = users.filter((user) => user.lineId === null);
+  const claimed = new Set<number>();
+  const fileNames = new Map(reading.people.map((person) => [person.key, person.identity]));
+  const adding = plan.people
+    .filter((person) => person.target === 'new' && person.shifts.length > 0)
+    .map((person) => {
+      const names = fileNames.get(person.key) ?? [person.label];
+      // Only the full name or the email itself: a shared first name is not enough to hand someone a login's shifts.
+      const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+      const account = free.find((user) => !claimed.has(user.id) && names.some((name) => same(name, user.name) || same(name, user.email))) ?? null;
+      if (account) claimed.add(account.id);
+      return { person, names, account: account ? { id: account.id, name: account.name } : null };
+    });
+  const accountOf = new Map(adding.map((entry) => [entry.person.key, entry.account]));
+
+  const totals = { set: 0, unchanged: 0, blank: 0, locked: 0, outside: 0, unreadable: 0, newPeople: adding.length };
+  for (const person of plan.people) {
+    totals.set += person.shifts.length;
+    totals.unchanged += person.unchanged;
+    totals.blank += person.blank;
+    totals.locked += person.locked;
+    totals.outside += person.outside;
+    totals.unreadable += person.unreadable;
+  }
+  const inFile = new Set(plan.people.map((person) => person.target));
+  const needsReason = monthRow?.status === 'published' && checks.newBlocks.length > 0;
+  const preview: ImportPreview = {
+    month,
+    monthStatus: monthView(rules, month, monthRow).status,
+    fileName: input.fileName,
+    sheet: workbook.sheet,
+    sheets: workbook.sheets,
+    days: reading.dates.length,
+    daysInMonth: datesBetween(from, to).length,
+    turned: reading.turned,
+    people: plan.people.map(({ shifts, ...person }) => ({ ...person, set: shifts.length, account: accountOf.get(person.key)?.name ?? null })),
+    totals,
+    notInFile: lines
+      .filter((line) => line.active && !inFile.has(line.id) && (monthRow ? [...existing.keys()].some((key) => key.startsWith(`${line.id}|`)) : line.cycleOffset !== null))
+      .map((line) => (line.name === line.code ? line.code : `${line.code} · ${line.name}`)),
+    onLeave: onLeave.size,
+    notes: plan.notes,
+    moreNotes: plan.moreNotes,
+    blocks: checks.blocks.slice(0, MAX_SHOWN_VIOLATIONS),
+    warnings: checks.warnings.slice(0, MAX_SHOWN_VIOLATIONS),
+    moreBlocks: Math.max(0, checks.blocks.length - MAX_SHOWN_VIOLATIONS),
+    moreWarnings: Math.max(0, checks.warnings.length - MAX_SHOWN_VIOLATIONS),
+    needsReason,
+    newBlocks: checks.newBlocks.length,
+  };
+  if (!input.apply) return { applied: false, preview, summary: null };
+
+  if (totals.set === 0) throw new RosterError(`Nothing in this file changes the roster for ${monthLabel(month)}.`);
+  const forceReason = input.forceReason?.trim().slice(0, 300) ?? '';
+  if (needsReason && !forceReason) {
+    throw new RosterError(`${monthLabel(month)} is published and this upload would break a roster rule. Give a reason to go ahead.`);
+  }
+
+  const codes = newLineCodes(lines.map((line) => line.code), adding.map((entry) => entry.names));
+  const last = lines.reduce((max, line) => Math.max(max, line.sortOrder), 0);
+  const counts = await prisma.$transaction(
+    async (tx) => {
+      const lineIdOf = new Map<string, number>();
+      for (const [i, entry] of adding.entries()) {
+        const created = await tx.shiftLine.create({
+          data: {
+            code: codes[i] as string,
+            displayName: personName(entry.names) || entry.person.label.slice(0, 80),
+            userId: entry.account?.id ?? null,
+            cycleOffset: null,
+            sortOrder: last + i + 1,
+          },
+          select: { id: true },
+        });
+        lineIdOf.set(entry.person.key, created.id);
+      }
+
+      await tx.shiftMonth.upsert({ where: { month }, create: { month, generatedById: actor.id }, update: {} });
+
+      const creates: Prisma.ShiftRecordCreateManyInput[] = [];
+      const updates = new Map<ShiftCode, number[]>();
+      for (const person of plan.people) {
+        const lineId = typeof person.target === 'number' ? person.target : lineIdOf.get(person.key);
+        if (lineId === undefined) continue;
+        for (const shift of person.shifts) {
+          if (shift.recordId !== null) {
+            updates.set(shift.code, [...(updates.get(shift.code) ?? []), shift.recordId]);
+            continue;
+          }
+          creates.push({
+            lineId,
+            date: shift.date,
+            generatedCode: shift.generated,
+            plannedCode: shift.code,
+            status: shift.code === 'LV' ? 'leave' : 'planned',
+            ...plannedTimes(rules, shift.code),
+            reasonCode: IMPORT_REASON,
+            approvedById: actor.id,
+            updatedById: actor.id,
+          });
+        }
+      }
+      const created = await tx.shiftRecord.createMany({ data: creates, skipDuplicates: true });
+      let updated = 0;
+      for (const [code, ids] of updates) {
+        const result = await tx.shiftRecord.updateMany({
+          // Someone may have recorded actuals since the preview: those days keep their history.
+          where: { id: { in: ids }, status: { notIn: LOCKED_STATUSES } },
+          data: {
+            plannedCode: code,
+            status: code === 'LV' ? 'leave' : 'planned',
+            ...plannedTimes(rules, code),
+            reasonCode: IMPORT_REASON,
+            approvedById: actor.id,
+            updatedById: actor.id,
+            // A change by hand takes the day out of any leave that put LV there.
+            ...(code === 'LV' ? {} : { leaveId: null }),
+          },
+        });
+        updated += result.count;
+      }
+
+      if (!monthRow) for (const leave of leaves) await applyLeave(tx, rules, leave);
+
+      const people = plan.people.filter((person) => person.target !== 'skip' && person.shifts.length > 0);
+      const shifts = created.count + updated;
+      const summary = `${monthRow ? 'Updated' : 'Filled'} ${monthLabel(month)} from ${input.fileName}: ${shifts} shift${shifts === 1 ? '' : 's'} for ${people.length} ${people.length === 1 ? 'person' : 'people'}${adding.length ? `, ${adding.length} of them new to the roster` : ''}`;
+      await audit(tx, actor, {
+        action: 'import',
+        month,
+        summary,
+        detail: {
+          file: input.fileName,
+          sheet: workbook.sheet,
+          created: created.count,
+          updated,
+          people: people.map((person) => person.lineCode ?? codes[adding.findIndex((entry) => entry.person.key === person.key)] ?? person.label),
+          added: adding.map((entry, i) => ({ code: codes[i], name: personName(entry.names), account: entry.account?.name ?? null })),
+          blankAsOff: Boolean(input.blankAsOff),
+          skipped: { locked: totals.locked, unreadable: totals.unreadable, outside: totals.outside },
+          blocks: needsReason ? checks.newBlocks.map((v) => v.message) : [],
+          forceReason: needsReason ? forceReason : null,
+        },
+        blockOverridden: needsReason,
+      });
+      return { summary };
+    },
+    { timeout: 20_000 },
+  );
+  return { applied: true, preview, summary: `${counts.summary}.` };
+}
+
+/**
+ * The month as a table to download, edit in Excel and upload again: one row
+ * per active person, one column per day. A month not generated yet shows what
+ * the rotation would give.
+ */
+export async function rosterTemplateRows(month: string): Promise<string[][]> {
+  assertMonth(month);
+  const [rules, lines, monthRow, records] = await Promise.all([
+    getRules(),
+    listLines(),
+    prisma.shiftMonth.findUnique({ where: { month }, select: { month: true } }),
+    loadRecords(prisma, monthStart(month), monthEnd(month)),
+  ]);
+  const index = indexRecords(records);
+  return rosterTemplate({
+    month,
+    lines: lines.filter((line) => line.active || records.some((record) => record.lineId === line.id)),
+    codeAt: (lineId, date) => {
+      const record = index.get(recordKey(lineId, date));
+      if (record) return record.plannedCode;
+      const line = lines.find((l) => l.id === lineId);
+      if (monthRow || !line || line.cycleOffset === null || !lineOnRoster(line, date)) return null;
+      return resolveCell(rules, line, date, () => null)?.planned ?? null;
+    },
+  });
 }
 
 // --- Views -------------------------------------------------------------------

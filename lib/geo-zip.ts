@@ -40,12 +40,19 @@ function findEocd(buf: Buffer): number {
   return -1;
 }
 
+export interface ZipReadOptions {
+  /** Read only the entries this accepts; the rest are never inflated. */
+  only?: (name: string) => boolean;
+  /** Refuse an entry that inflates past this many bytes (a zip bomb, or simply the wrong file). */
+  maxEntryBytes?: number;
+}
+
 /**
  * Every file in the archive, in central-directory order. Directory entries are
  * skipped. Throws with a readable message rather than returning junk when the
  * archive is not something we can handle.
  */
-export function readZipEntries(buf: Buffer): ZipEntry[] {
+export function readZipEntries(buf: Buffer, options: ZipReadOptions = {}): ZipEntry[] {
   if (buf.length < EOCD_MIN_SIZE) {
     throw new Error('Not a zip archive — the file is too small.');
   }
@@ -83,6 +90,7 @@ export function readZipEntries(buf: Buffer): ZipEntry[] {
 
     // Directory marker, not a file.
     if (name.endsWith('/')) continue;
+    if (options.only && !options.only(name)) continue;
 
     if (flags & 0x1) {
       throw new Error(`"${name}" is encrypted — encrypted archives are not supported.`);
@@ -104,9 +112,15 @@ export function readZipEntries(buf: Buffer): ZipEntry[] {
     const raw = buf.subarray(start, end);
 
     if (method === METHOD_STORE) {
+      if (options.maxEntryBytes && raw.length > options.maxEntryBytes) throw new Error(`Zip entry "${name}" is too large.`);
       entries.push({ name, data: Buffer.from(raw) });
     } else if (method === METHOD_DEFLATE) {
-      entries.push({ name, data: inflateRawSync(raw) });
+      try {
+        entries.push({ name, data: inflateRawSync(raw, options.maxEntryBytes ? { maxOutputLength: options.maxEntryBytes } : undefined) });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === 'ERR_BUFFER_TOO_LARGE') throw new Error(`Zip entry "${name}" is too large.`);
+        throw error;
+      }
     } else {
       throw new Error(`Zip entry "${name}" uses unsupported compression method ${method}.`);
     }

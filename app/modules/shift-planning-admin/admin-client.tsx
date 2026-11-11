@@ -22,6 +22,8 @@ export default function AdminClient({ initial }: { initial: AdminOverview }) {
   const [tab, setTab] = useState<TabId>('roster');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** What the last roster upload did; cleared when the scheduler moves to another month or tab. */
+  const [flash, setFlash] = useState<string | null>(null);
   const month = data.month.month;
 
   // Only the newest request may land, so a slow answer never overwrites a later one.
@@ -78,16 +80,31 @@ export default function AdminClient({ initial }: { initial: AdminOverview }) {
                 { id: 'audit', label: 'Audit log' },
               ]}
               value={tab}
-              onChange={setTab}
+              onChange={(next) => {
+                setFlash(null);
+                setTab(next);
+              }}
             />
-            {showsMonth && <MonthNav month={month} onChange={(m) => void reload(m)} disabled={loading} />}
+            {showsMonth && <MonthNav month={month} onChange={(m) => { setFlash(null); void reload(m); }} disabled={loading} />}
           </div>
         </div>
 
         {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
         <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
-          {tab === 'roster' && <RosterTab key={month} data={data} reload={reload} onOpenPeople={() => setTab('people')} />}
+          {tab === 'roster' && (
+            <RosterTab
+              key={month}
+              data={data}
+              reload={reload}
+              onOpenPeople={() => setTab('people')}
+              flash={flash}
+              onImported={async (filled, summary) => {
+                setFlash(summary);
+                await reload(filled);
+              }}
+            />
+          )}
           {tab === 'dashboard' && <DashboardTab onOpenLeave={() => setTab('leave')} />}
           {tab === 'people' && <PeopleTab data={data} reload={reload} />}
           {tab === 'leave' && <LeaveTab data={data} reload={reload} onOpenRoster={(m) => { setTab('roster'); void reload(m); }} />}

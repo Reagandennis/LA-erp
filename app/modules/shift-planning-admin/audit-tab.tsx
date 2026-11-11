@@ -11,6 +11,7 @@ import { getJson, message } from './api';
 
 const ACTION_LABEL: Record<string, string> = {
   generate: 'Generated',
+  import: 'Upload',
   override: 'Changed',
   swap: 'Swap',
   call_in: 'Call-in',

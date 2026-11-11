@@ -2019,7 +2019,7 @@ model PublicHoliday {
 /// Append-only — nothing in the app updates or deletes a row.
 model ShiftAudit {
   id              Int      @id @default(autoincrement())
-  /// generate | override | swap | call_in | actual | publish | unpublish | leave | line | holiday | config
+  /// generate | import | override | swap | call_in | actual | publish | unpublish | leave | line | holiday | config
   action          String
   actorId         Int?
   /// Kept as text so the log survives the account being removed.
