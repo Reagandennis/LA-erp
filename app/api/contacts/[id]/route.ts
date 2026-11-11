@@ -46,7 +46,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (Array.isArray(body.tags)) patch.tags = body.tags;
   if (typeof body.customerId === 'number' || body.customerId === null) patch.customerId = body.customerId;
 
-  const item = await updateContact(id, patch);
+  // Someone else's synced contact answers "not found", like one that isn't there.
+  const item = await updateContact(id, patch, auth.user.id);
   if (item === null) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
   return NextResponse.json({ item });
 }
@@ -59,7 +60,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const id = parseId(raw);
   if (!id) return NextResponse.json({ error: 'Invalid contact id' }, { status: 400 });
 
-  const ok = await deleteContact(id);
+  const ok = await deleteContact(id, auth.user.id);
   if (!ok) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
   return NextResponse.json({ deleted: true });
 }

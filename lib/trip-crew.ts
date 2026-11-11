@@ -15,6 +15,10 @@ export interface CrewOption {
   onTrip: boolean;
   /** Reference of another trip it's actively assigned to, as a heads-up. */
   busyOn: string | null;
+  /** The vendor profile it belongs to (people through their personnel record), for the trip's staged pool. */
+  vendorId: number | null;
+  /** The fleet register's type, for vehicles. */
+  vehicleType?: string;
 }
 
 export interface CrewOptions {
@@ -38,16 +42,24 @@ export async function listCrewOptions(tripId: number): Promise<CrewOptions> {
   const [drivers, officers, vehicles, assignments] = await Promise.all([
     prisma.driver.findMany({
       where: { retiredAt: null },
-      select: { id: true, name: true, phone: true, status: true },
+      select: { id: true, name: true, phone: true, status: true, personnel: { select: { vendorId: true } } },
       orderBy: [{ name: 'asc' }],
     }),
     prisma.officer.findMany({
       where: { retiredAt: null },
-      select: { id: true, name: true, callSign: true, grade: true, phone: true, status: true },
+      select: {
+        id: true,
+        name: true,
+        callSign: true,
+        grade: true,
+        phone: true,
+        status: true,
+        personnel: { select: { vendorId: true } },
+      },
       orderBy: [{ name: 'asc' }],
     }),
     prisma.vehicle.findMany({
-      select: { id: true, registration: true, make: true, model: true, type: true, status: true },
+      select: { id: true, registration: true, make: true, model: true, type: true, status: true, vendorId: true },
       orderBy: [{ registration: 'asc' }],
     }),
     prisma.tripAssignment.findMany({
@@ -83,6 +95,7 @@ export async function listCrewOptions(tripId: number): Promise<CrewOptions> {
       status: d.status,
       onTrip: onTrip.driver.has(d.id),
       busyOn: busy.driver.get(d.id) ?? null,
+      vendorId: d.personnel?.vendorId ?? null,
     })),
     officers: officers.map((o) => ({
       id: o.id,
@@ -91,6 +104,7 @@ export async function listCrewOptions(tripId: number): Promise<CrewOptions> {
       status: o.status,
       onTrip: onTrip.officer.has(o.id),
       busyOn: busy.officer.get(o.id) ?? null,
+      vendorId: o.personnel?.vendorId ?? null,
     })),
     vehicles: vehicles.map((v) => ({
       id: v.id,
@@ -99,6 +113,8 @@ export async function listCrewOptions(tripId: number): Promise<CrewOptions> {
       status: v.status,
       onTrip: onTrip.vehicle.has(v.id),
       busyOn: busy.vehicle.get(v.id) ?? null,
+      vendorId: v.vendorId,
+      vehicleType: v.type,
     })),
   };
 }

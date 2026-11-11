@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 
 import HandoverDetailDrawer from './handover-detail-drawer';
 import HandoverForm from './handover-form';
-import { HANDOVER_STATUSES, type HandoverData, type HandoverDetail, type StatusFilter } from './types';
+import { HANDOVER_STATUSES, type HandoverData, type HandoverDetail, type HandoverNotified, type StatusFilter } from './types';
 import { useSyncedState } from '@/app/ui/use-synced-state';
 
 const STATUS_FILTERS: StatusFilter[] = ['All', 'Awaiting', ...HANDOVER_STATUSES];
@@ -21,15 +21,60 @@ function formatShiftDate(value: string) {
   return new Date(value).toLocaleDateString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatDateTime(value: string | null) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString(APP_LOCALE, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+/** How long a handover waited before someone received it: "12 min", "3 h 05 min", "2 days". */
+function waited(from: string, to: string | null): string {
+  if (!to) return '—';
+  const minutes = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`;
+  return `${Math.round(minutes / 1440)} days`;
+}
+
+/** "Nimmo and Kevin", "Nimmo, Kevin and 3 others". */
+function nameList(names: string[]): string {
+  if (names.length <= 2) return names.join(' and ');
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+}
+
+/** What the writer is told after saving: who the handover was announced to. */
+function notifiedText(notified: HandoverNotified): { text: string; warn: boolean } {
+  if (notified.via === 'roster') {
+    return { text: `Handover saved. The incoming ${notified.shiftName ?? 'next'} shift was notified: ${nameList(notified.names)}.`, warn: false };
+  }
+  if (notified.via === 'access') {
+    const why = notified.shiftName
+      ? `No one rostered on the incoming ${notified.shiftName} shift has a login`
+      : 'The roster has no next shift';
+    return { text: `Handover saved. ${why}, so everyone with Handover access was notified: ${nameList(notified.names)}.`, warn: false };
+  }
+  return { text: 'Handover saved, but there was no one else to notify. Nobody on the incoming shift, or with Handover access, has a login yet.', warn: true };
+}
+
+/** What the screen is showing: the working log, or (admins) the record of what was received. */
+type View = 'log' | 'history';
+
 interface HandoverClientProps {
   currentUser: { id: number; name: string };
   isAdmin: boolean;
   initialData: HandoverData;
+  /** Open on this entry (`?handover=<id>`, from the bell), when it exists. */
+  focusId?: number | null;
 }
 
-export default function HandoverClient({ currentUser, isAdmin, initialData }: HandoverClientProps) {
+export default function HandoverClient({ currentUser, isAdmin, initialData, focusId = null }: HandoverClientProps) {
   const [handovers, setHandovers] = useSyncedState<HandoverDetail[]>(initialData.handovers);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(
+    focusId !== null && initialData.handovers.some((h) => h.id === focusId) ? focusId : null,
+  );
+  const [view, setView] = useState<View>('log');
+  /** Who the handover just saved was announced to. */
+  const [notice, setNotice] = useState<{ text: string; warn: boolean } | null>(null);
   const [formState, setFormState] = useState<
     { open: false } | { open: true; mode: 'create' } | { open: true; mode: 'edit'; handover: HandoverDetail }
   >({ open: false });
@@ -55,7 +100,8 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
         q.length === 0 ||
         (h.post?.toLowerCase().includes(q) ?? false) ||
         h.summary.toLowerCase().includes(q) ||
-        (h.createdBy?.name.toLowerCase().includes(q) ?? false);
+        (h.createdBy?.name.toLowerCase().includes(q) ?? false) ||
+        (h.acknowledgedBy?.name.toLowerCase().includes(q) ?? false);
       const matchesFilter =
         activeFilter === 'All' ||
         (activeFilter === 'Awaiting' ? !h.acknowledgedBy : h.status === activeFilter);
@@ -74,6 +120,22 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
   const remove = (id: number) => setHandovers((current) => current.filter((h) => h.id !== id));
 
   const hasAny = handovers.length > 0;
+
+  // The record of what was handed over and received, latest receipt first. Admins only.
+  const received = useMemo(
+    () => handovers.filter((h) => h.acknowledgedBy).sort((a, b) => (b.acknowledgedAt ?? '').localeCompare(a.acknowledgedAt ?? '')),
+    [handovers],
+  );
+  const history = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return received;
+    return received.filter((h) =>
+      [h.createdBy?.name, h.acknowledgedBy?.name, h.post, h.shiftPeriod, plainText(h.summary)]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(q)),
+    );
+  }, [received, searchQuery]);
+  const showHistory = isAdmin && view === 'history';
 
   return (
     <div className="min-h-screen bg-gray-50/50 p-4 sm:p-6 lg:p-10">
@@ -97,6 +159,22 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
           </button>
         </header>
 
+        {notice && (
+          <div
+            className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${
+              notice.warn ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            }`}
+            role="status"
+          >
+            <p className="flex-1">{notice.text}</p>
+            <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="opacity-60 hover:opacity-100">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
           <SummaryCard label="Awaiting receipt" value={`${stats.awaiting}`} accent={stats.awaiting > 0 ? 'text-amber-600' : 'text-gray-900'} />
           <SummaryCard label="Needs attention" value={`${stats.attention}`} accent={stats.attention > 0 ? 'text-rose-600' : 'text-gray-900'} />
@@ -105,6 +183,29 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-3 lg:flex-row lg:items-center">
+          {isAdmin && (
+            <div className="flex items-center gap-1 self-start rounded-xl bg-gray-100 p-1" role="tablist" aria-label="View">
+              {(
+                [
+                  ['log', 'Handovers'],
+                  ['history', `History · ${received.length}`],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === value}
+                  onClick={() => setView(value)}
+                  className={`whitespace-nowrap rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
+                    view === value ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="relative flex-1">
             <svg
               className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
@@ -116,13 +217,13 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
             </svg>
             <input
               type="text"
-              placeholder="Search by post, officer, or summary…"
+              placeholder={showHistory ? 'Search by who wrote it, who received it, or summary…' : 'Search by post, officer, or summary…'}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="w-full rounded-xl bg-gray-50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
-          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+          <div className={`items-center gap-1 overflow-x-auto scrollbar-hide ${showHistory ? 'hidden' : 'flex'}`}>
             {STATUS_FILTERS.map((status) => (
               <button
                 type="button"
@@ -138,8 +239,81 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
           </div>
         </div>
 
+        {showHistory && (
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
+            {history.length === 0 ? (
+              <p className="px-6 py-14 text-center text-sm text-gray-500">
+                {received.length === 0
+                  ? 'No handover has been acknowledged yet. Each one appears here once the incoming shift receives it.'
+                  : 'No acknowledged handover matches that search.'}
+              </p>
+            ) : (
+              <>
+                {/* Phones: one card per handover */}
+                <ul className="divide-y divide-gray-50 md:hidden">
+                  {history.map((h) => (
+                    <li key={h.id}>
+                      <button type="button" onClick={() => setSelectedId(h.id)} className="block w-full px-4 py-3 text-left hover:bg-gray-50/70">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {formatShiftDate(h.shiftDate)} · {h.shiftPeriod} shift
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Written by <span className="font-medium text-gray-800">{h.createdBy?.name ?? '—'}</span>
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Received by <span className="font-medium text-blue-700">{h.acknowledgedBy?.name ?? '—'}</span> ·{' '}
+                          {formatDateTime(h.acknowledgedAt)} · after {waited(h.createdAt, h.acknowledgedAt)}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-gray-400">{plainText(h.summary)}</p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <table className="hidden w-full border-collapse text-left md:table">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      {['Shift', 'Written by', 'Received by', 'Received', 'Waited', 'Summary'].map((heading) => (
+                        <th key={heading} className="px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {history.map((h) => (
+                      <tr key={h.id} onClick={() => setSelectedId(h.id)} className="group cursor-pointer transition-colors hover:bg-gray-50/70">
+                        <td className="px-5 py-3.5">
+                          <p className="whitespace-nowrap text-sm font-semibold text-gray-900 transition-colors group-hover:text-primary">
+                            {formatShiftDate(h.shiftDate)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-gray-400">
+                            {h.shiftPeriod} shift{h.post ? ` · ${h.post}` : ''}
+                          </p>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <p className="text-sm font-medium text-gray-800">{h.createdBy?.name ?? '—'}</p>
+                          <p className="mt-0.5 whitespace-nowrap text-xs text-gray-400">{formatDateTime(h.createdAt)}</p>
+                        </td>
+                        <td className="px-5 py-3.5 text-sm font-medium text-blue-700">{h.acknowledgedBy?.name ?? '—'}</td>
+                        <td className="whitespace-nowrap px-5 py-3.5 text-sm text-gray-600">{formatDateTime(h.acknowledgedAt)}</td>
+                        <td className="whitespace-nowrap px-5 py-3.5 text-sm tabular-nums text-gray-600">{waited(h.createdAt, h.acknowledgedAt)}</td>
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-2">
+                            {h.status !== 'Normal' && <StatusBadge status={h.status} />}
+                            <p className="max-w-xs truncate text-xs text-gray-500">{plainText(h.summary)}</p>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Mobile cards */}
-        <div className="space-y-3 md:hidden">
+        <div className={`space-y-3 md:hidden ${showHistory ? 'hidden' : ''}`}>
           {filtered.map((h) => (
             <button
               key={h.id}
@@ -169,7 +343,7 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
         </div>
 
         {/* Desktop table */}
-        <div className="hidden overflow-hidden rounded-2xl border border-gray-100 bg-white md:block">
+        <div className={`hidden overflow-hidden rounded-2xl border border-gray-100 bg-white ${showHistory ? '' : 'md:block'}`}>
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-gray-100">
@@ -219,10 +393,12 @@ export default function HandoverClient({ currentUser, isAdmin, initialData }: Ha
           mode={formState.mode}
           handover={formState.mode === 'edit' ? formState.handover : null}
           onClose={() => setFormState({ open: false })}
-          onSaved={(handover) => {
+          onSaved={(handover, notified) => {
             upsert(handover);
             setFormState({ open: false });
-            setSelectedId(handover.id);
+            setNotice(notified ? notifiedText(notified) : null);
+            // A new handover stays on the list so the note about who was told is seen; an edit reopens.
+            setSelectedId(notified ? null : handover.id);
           }}
         />
       )}

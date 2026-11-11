@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { computeStats, createHandover, listHandovers } from '@/lib/handover';
+import { notifyIncomingShift } from '@/lib/handover-notifications';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { userHasModule, userHasRole } from '@/lib/user';
@@ -42,7 +43,9 @@ export async function POST(request: NextRequest) {
       incidents: body.incidents ?? null,
       watchItems: body.watchItems ?? null,
     });
-    return NextResponse.json({ item }, { status: 201 });
+    // The incoming shift is told at once; `notified` says who, for the writer to see.
+    const notified = await notifyIncomingShift({ handover: item, writer: { id: auth.user.id, name: auth.user.name } });
+    return NextResponse.json({ item, notified }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not save handover';
     return NextResponse.json({ error: message }, { status: 400 });

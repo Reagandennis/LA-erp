@@ -56,6 +56,7 @@ function item(
     officer: null,
     vehicle: null,
     travelers: [],
+    resourceIds: [],
     ...extra,
   };
 }

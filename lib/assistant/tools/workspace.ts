@@ -76,9 +76,10 @@ const listContactsTool: ToolDefinition = {
       properties: { query: { type: 'string', description: 'Filter by name/company/email substring' } },
     },
   },
-  async handler(args) {
+  async handler(args, ctx) {
     const q = (asString(args.query) ?? '').toLowerCase();
-    const rows = await listContacts();
+    // What this person sees in the directory: never someone else's Google contacts.
+    const rows = await listContacts(ctx.userId);
     return rows
       .filter(
         (c) =>

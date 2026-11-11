@@ -227,6 +227,44 @@ export function zonedNow(timeZone: string, nowMs: number): { date: string; minut
   };
 }
 
+// --- The incoming shift ------------------------------------------------------
+
+/** A handover written this long after a shift change still goes to the shift that just came on. */
+export const HANDOVER_GRACE_MINUTES = 120;
+
+export interface IncomingShift {
+  /** The roster date the shift starts on. */
+  date: string;
+  code: ShiftCode;
+  /** "Day", "Swing", "Night". */
+  name: string;
+  /** 'HH:MM' on the roster's clock. */
+  start: string;
+}
+
+/**
+ * The console shift a handover written now is for: the next one to start, or
+ * the one that started within the last HANDOVER_GRACE_MINUTES, since the
+ * outgoing shift often writes up just after the change. Null when no console
+ * shift has a start time.
+ */
+export function incomingShift(rules: ShiftRules, nowMs: number): IncomingShift | null {
+  const now = zonedNow(rules.timeZone, nowMs);
+  const cutoff = dayNumber(now.date) * 1440 + now.minutes - HANDOVER_GRACE_MINUTES;
+  let best: (IncomingShift & { at: number }) | null = null;
+  for (const offset of [-1, 0, 1]) {
+    const date = addDays(now.date, offset);
+    for (const code of CONSOLE_CODES) {
+      const def = rules.codes[code];
+      if (!def?.start) continue;
+      const at = dayNumber(date) * 1440 + minutesOf(def.start);
+      if (at < cutoff || (best && best.at <= at)) continue;
+      best = { date, code, name: def.name, start: def.start, at };
+    }
+  }
+  return best ? { date: best.date, code: best.code, name: best.name, start: best.start } : null;
+}
+
 // --- Rotation ----------------------------------------------------------------
 
 function mod(value: number, by: number): number {

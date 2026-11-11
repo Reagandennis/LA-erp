@@ -38,8 +38,8 @@ export default async function CustomersPage({
   const [accounts, deals, customers, activities, quoteOptions, contractOptions] = await Promise.all([
     listCustomerAccounts(organization.defaultCurrency),
     listDeals(),
-    listCrmCustomers(),
-    listCrmActivities(),
+    listCrmCustomers(auth.user.id),
+    listCrmActivities(auth.user.id),
     listQuoteOptions(),
     listContractOptions(),
   ]);

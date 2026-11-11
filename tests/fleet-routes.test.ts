@@ -6,7 +6,8 @@ vi.mock('server-only', () => ({}));
 
 const { db, requireModuleRequest, notifyNotificationsChanged } = vi.hoisted(() => ({
   db: {
-    vehicle: { findUnique: vi.fn() },
+    vehicle: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+    tripDayLog: { groupBy: vi.fn() },
     vehicleFuelLog: {
       create: vi.fn(),
       findUnique: vi.fn(),
@@ -22,6 +23,7 @@ const { db, requireModuleRequest, notifyNotificationsChanged } = vi.hoisted(() =
       deleteMany: vi.fn(),
       findMany: vi.fn(),
       groupBy: vi.fn(),
+      count: vi.fn(),
     },
     vehicleMaintenanceNotification: { createMany: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
   },
@@ -43,7 +45,7 @@ import {
 } from '../app/api/fleet/maintenance/notifications/route';
 import { dateKeyToDate, localDateKey } from '../lib/fleet';
 import { canUseFleetMaintenance, materializeMaintenanceReminders } from '../lib/fleet-reminders';
-import { resolveCompletedAt } from '../lib/fleet-server';
+import { deleteMaintenance, listFleetVehicles, listMaintenance, listVehicleOdometers, resolveCompletedAt } from '../lib/fleet-server';
 import type { AccessUser } from '../lib/user';
 
 const vehicle = { id: 1, registration: 'KDA 123A', make: 'Toyota', model: 'Prado' };
@@ -59,6 +61,8 @@ beforeEach(() => {
   notifyNotificationsChanged.mockReset();
   db.vehicleFuelLog.groupBy.mockResolvedValue([]);
   db.vehicleMaintenance.groupBy.mockResolvedValue([]);
+  db.tripDayLog.groupBy.mockResolvedValue([]);
+  db.vehicleMaintenance.count.mockResolvedValue(0);
   db.vehicleMaintenance.findMany.mockResolvedValue([]);
   db.vehicleMaintenanceNotification.createMany.mockResolvedValue({ count: 0 });
   db.vehicleMaintenanceNotification.findMany.mockResolvedValue([]);
@@ -253,6 +257,100 @@ describe('maintenance reminders in the bell', () => {
       readAt: null,
     });
     expect(notifyNotificationsChanged).toHaveBeenCalledWith(7);
+  });
+});
+
+describe('the car maintenance screen', () => {
+  it('asks only for our own vehicles and their records', async () => {
+    db.vehicle.findMany.mockResolvedValue([vehicle]);
+
+    expect(await listFleetVehicles({ internalOnly: true })).toEqual([vehicle]);
+    expect(db.vehicle.findMany.mock.calls[0]![0].where).toEqual({ ownership: 'Internal' });
+    await listMaintenance({ internalOnly: true });
+    expect(db.vehicleMaintenance.findMany.mock.calls[0]![0].where).toEqual({ vehicle: { ownership: 'Internal' } });
+  });
+
+  it('leaves every other fleet list unfiltered', async () => {
+    db.vehicle.findMany.mockResolvedValue([vehicle]);
+
+    await listFleetVehicles();
+    expect(db.vehicle.findMany.mock.calls[0]![0].where).toBeUndefined();
+    await listMaintenance();
+    expect(db.vehicleMaintenance.findMany.mock.calls[0]![0].where).toBeUndefined();
+  });
+});
+
+describe('a vehicle in the garage', () => {
+  const inGarage = { vehicleId: 1, title: 'Gearbox', category: 'Repair', kind: 'Unscheduled', status: 'In progress' };
+
+  it('shows as in maintenance while a job on it is in progress', async () => {
+    db.vehicleMaintenance.count.mockResolvedValue(1);
+    db.vehicle.findUnique.mockResolvedValue({ id: 1, status: 'Available' });
+
+    expect((await postMaintenance(json('POST', '/api/fleet/maintenance', inGarage))).status).toBe(201);
+    expect(db.vehicle.update).toHaveBeenCalledWith({ where: { id: 1 }, data: { status: 'Maintenance' } });
+  });
+
+  it('is left as it is by work that is only planned', async () => {
+    db.vehicle.findUnique.mockResolvedValue({ id: 1, status: 'Available' });
+    await postMaintenance(json('POST', '/api/fleet/maintenance', { ...inGarage, status: 'Planned' }));
+    expect(db.vehicle.update).not.toHaveBeenCalled();
+  });
+
+  it('goes back to available when the job that put it there is done', async () => {
+    db.vehicleMaintenance.findUnique.mockResolvedValue({ status: 'In progress', completedAt: null, vehicleId: 1 });
+    db.vehicle.findUnique.mockResolvedValue({ id: 1, status: 'Maintenance' });
+
+    await patchMaintenance(json('PATCH', '/api/fleet/maintenance/21', { status: 'Completed' }), params('21'));
+    expect(db.vehicle.update).toHaveBeenCalledWith({ where: { id: 1 }, data: { status: 'Available' } });
+  });
+
+  it('stays in maintenance while another job on it is still in progress', async () => {
+    db.vehicleMaintenance.findUnique.mockResolvedValue({ status: 'In progress', completedAt: null, vehicleId: 1 });
+    db.vehicleMaintenance.count.mockResolvedValue(1);
+    db.vehicle.findUnique.mockResolvedValue({ id: 1, status: 'Maintenance' });
+
+    await patchMaintenance(json('PATCH', '/api/fleet/maintenance/21', { status: 'Completed' }), params('21'));
+    expect(db.vehicle.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps a status someone set by hand', async () => {
+    // Off duty for another reason: finishing the repair doesn't put it back on the road.
+    db.vehicleMaintenance.findUnique.mockResolvedValue({ status: 'In progress', completedAt: null, vehicleId: 1 });
+    db.vehicle.findUnique.mockResolvedValue({ id: 1, status: 'Off duty' });
+    await patchMaintenance(json('PATCH', '/api/fleet/maintenance/21', { status: 'Completed' }), params('21'));
+
+    // Marked as in maintenance by hand, with no job in progress behind it: finishing planned work leaves it.
+    db.vehicleMaintenance.findUnique.mockResolvedValue({ status: 'Planned', completedAt: null, vehicleId: 1 });
+    db.vehicle.findUnique.mockResolvedValue({ id: 1, status: 'Maintenance' });
+    await patchMaintenance(json('PATCH', '/api/fleet/maintenance/21', { status: 'Completed' }), params('21'));
+
+    expect(db.vehicle.update).not.toHaveBeenCalled();
+  });
+
+  it('is released when its in-progress job is deleted', async () => {
+    db.vehicleMaintenance.findUnique.mockResolvedValue({ vehicleId: 1, status: 'In progress' });
+    db.vehicleMaintenance.deleteMany.mockResolvedValue({ count: 1 });
+    db.vehicle.findUnique.mockResolvedValue({ id: 1, status: 'Maintenance' });
+
+    expect(await deleteMaintenance(21)).toBe(true);
+    expect(db.vehicle.update).toHaveBeenCalledWith({ where: { id: 1 }, data: { status: 'Available' } });
+  });
+});
+
+describe('odometer readings', () => {
+  it('take the highest of fuel, maintenance and the trips\' daily logs', async () => {
+    db.vehicleFuelLog.groupBy.mockResolvedValue([{ vehicleId: 1, _max: { odometerKm: 49_200 } }]);
+    db.vehicleMaintenance.groupBy.mockResolvedValue([{ vehicleId: 1, _max: { odometerKm: 40_000 } }]);
+    db.tripDayLog.groupBy.mockResolvedValue([
+      { vehicleId: 1, _max: { startOdometer: 49_900, endOdometer: 50_085 } },
+      // Only the start of the day is in yet.
+      { vehicleId: 2, _max: { startOdometer: 12_000, endOdometer: null } },
+      // The vehicle has since left the register.
+      { vehicleId: null, _max: { startOdometer: 1, endOdometer: 2 } },
+    ]);
+
+    expect(await listVehicleOdometers()).toEqual({ 1: 50_085, 2: 12_000 });
   });
 });
 

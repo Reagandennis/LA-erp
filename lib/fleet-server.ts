@@ -39,26 +39,76 @@ const toKey = (value: Date | null): string | null => (value ? dateToDateKey(valu
 const fromKey = (value: string | null | undefined): Date | null => (value ? dateKeyToDate(value) : null);
 const textOrNull = (value: string | null | undefined): string | null => value?.trim() || null;
 
-/** Every vehicle, for the pickers. */
-export async function listFleetVehicles(): Promise<FleetVehicleRef[]> {
-  return prisma.vehicle.findMany({ orderBy: [{ registration: 'asc' }], select: VEHICLE_REF_SELECT });
+/**
+ * Narrows a fleet list to our own vehicles (Vehicle.ownership "Internal").
+ * A supplier's vehicle, and one nobody has classified yet, are both left out.
+ */
+export interface FleetScope {
+  internalOnly?: boolean;
+}
+
+const INTERNAL_VEHICLE = { ownership: 'Internal' } as const;
+
+/** The vehicles for the pickers: every one, or only our own. */
+export async function listFleetVehicles(scope: FleetScope = {}): Promise<FleetVehicleRef[]> {
+  return prisma.vehicle.findMany({
+    where: scope.internalOnly ? INTERNAL_VEHICLE : undefined,
+    orderBy: [{ registration: 'asc' }],
+    select: VEHICLE_REF_SELECT,
+  });
+}
+
+/** Vehicles in the register that are not ours: a supplier's, or not classified yet. */
+export async function countVehiclesOutsideFleet(): Promise<number> {
+  return prisma.vehicle.count({ where: { OR: [{ ownership: null }, { ownership: { not: 'Internal' } }] } });
 }
 
 /**
- * Each vehicle's highest odometer reading across fill-ups and maintenance, for
- * km-based reminders. The highest, not the latest: odometers only go up.
+ * Each vehicle's highest odometer reading across fill-ups, maintenance and the
+ * trips' daily odometer logs, for km-based reminders. The highest, not the
+ * latest: odometers only go up.
  */
 export async function listVehicleOdometers(): Promise<Record<number, number>> {
-  const [fuel, work] = await Promise.all([
+  const [fuel, work, trips] = await Promise.all([
     prisma.vehicleFuelLog.groupBy({ by: ['vehicleId'], _max: { odometerKm: true } }),
     prisma.vehicleMaintenance.groupBy({ by: ['vehicleId'], _max: { odometerKm: true } }),
+    // A day's log may have only its start reading in yet.
+    prisma.tripDayLog.groupBy({
+      by: ['vehicleId'],
+      where: { vehicleId: { not: null } },
+      _max: { startOdometer: true, endOdometer: true },
+    }),
   ]);
   const readings: Record<number, number> = {};
-  for (const row of [...fuel, ...work]) {
-    const km = row._max.odometerKm;
-    if (km != null && km > (readings[row.vehicleId] ?? -1)) readings[row.vehicleId] = km;
+  const note = (vehicleId: number | null, km: number | null) => {
+    if (vehicleId != null && km != null && km > (readings[vehicleId] ?? -1)) readings[vehicleId] = km;
+  };
+  for (const row of [...fuel, ...work]) note(row.vehicleId, row._max.odometerKm);
+  for (const row of trips) {
+    note(row.vehicleId, row._max.startOdometer);
+    note(row.vehicleId, row._max.endOdometer);
   }
   return readings;
+}
+
+/**
+ * A vehicle with a job in progress is in the garage, and its status in the
+ * register says so: Task Assignment and the trips' vehicle pickers then show
+ * it as in maintenance. When the job that put it there ends and nothing else
+ * is in progress, it goes back to Available. A status someone set by hand
+ * (Off duty, or Maintenance with no job behind it) is left alone.
+ */
+async function syncGarageStatus(vehicleId: number, leftGarage: boolean): Promise<void> {
+  const [inProgress, vehicle] = await Promise.all([
+    prisma.vehicleMaintenance.count({ where: { vehicleId, status: 'In progress' } }),
+    prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { status: true } }),
+  ]);
+  if (!vehicle) return;
+  if (inProgress > 0 && vehicle.status !== 'Maintenance') {
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { status: 'Maintenance' } });
+  } else if (inProgress === 0 && leftGarage && vehicle.status === 'Maintenance') {
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { status: 'Available' } });
+  }
 }
 
 async function vehicleExists(id: number): Promise<boolean> {
@@ -222,8 +272,10 @@ export function resolveCompletedAt(status: string, completedAt: string | null, t
   return completedAt || today;
 }
 
-export async function listMaintenance(): Promise<MaintenanceDto[]> {
+/** Maintenance records, newest first: every vehicle's, or only our own vehicles'. */
+export async function listMaintenance(scope: FleetScope = {}): Promise<MaintenanceDto[]> {
   const rows = await prisma.vehicleMaintenance.findMany({
+    where: scope.internalOnly ? { vehicle: INTERNAL_VEHICLE } : undefined,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: MAINTENANCE_SELECT,
   });
@@ -257,6 +309,7 @@ export async function createMaintenance(
     },
     select: MAINTENANCE_SELECT,
   });
+  if (row.status === 'In progress') await syncGarageStatus(input.vehicleId, false);
   return { item: serializeMaintenance(row) };
 }
 
@@ -267,7 +320,7 @@ export async function updateMaintenance(
 ): Promise<FleetWriteResult<MaintenanceDto>> {
   const existing = await prisma.vehicleMaintenance.findUnique({
     where: { id },
-    select: { status: true, completedAt: true },
+    select: { status: true, completedAt: true, vehicleId: true },
   });
   if (!existing) return { error: 'Maintenance record not found', status: 404 };
   if (input.vehicleId !== undefined && !(await vehicleExists(input.vehicleId))) {
@@ -298,10 +351,18 @@ export async function updateMaintenance(
   );
 
   const row = await prisma.vehicleMaintenance.update({ where: { id }, data, select: MAINTENANCE_SELECT });
+  const wasInGarage = existing.status === 'In progress';
+  if (wasInGarage || row.status === 'In progress') {
+    await syncGarageStatus(existing.vehicleId, wasInGarage);
+    // The job was moved to another vehicle: that one is in the garage now.
+    if (row.vehicle.id !== existing.vehicleId) await syncGarageStatus(row.vehicle.id, false);
+  }
   return { item: serializeMaintenance(row) };
 }
 
 export async function deleteMaintenance(id: number): Promise<boolean> {
+  const existing = await prisma.vehicleMaintenance.findUnique({ where: { id }, select: { vehicleId: true, status: true } });
   const { count } = await prisma.vehicleMaintenance.deleteMany({ where: { id } });
+  if (count > 0 && existing?.status === 'In progress') await syncGarageStatus(existing.vehicleId, true);
   return count > 0;
 }

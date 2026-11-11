@@ -306,6 +306,8 @@ export default function TransportFields({
 
       <CrewFields
         options={crewOptions}
+        date={editor.date}
+        dayId={editor.dayId}
         driverId={editor.driverId}
         officerId={editor.officerId}
         vehicleId={editor.vehicleId}

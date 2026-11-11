@@ -83,6 +83,7 @@ function item(id: number, extra: Partial<TripItineraryItemSummary> = {}): TripIt
     officer: null,
     vehicle: null,
     travelers: [],
+    resourceIds: [],
     ...extra,
   };
 }
@@ -112,6 +113,8 @@ function trip(status: string, items: TripItineraryItemSummary[]): TripDetail {
     logCount: 0,
     items,
     days: [{ id: 1, dateKey: '2026-10-20', dayNumber: 1, title: 'Arrival', summary: null }],
+    resources: [],
+    dayLogs: [],
   };
 }
 

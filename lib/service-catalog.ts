@@ -183,10 +183,40 @@ export interface PickedService {
   code: string;
 }
 
-/** The services an event's details hold, in the order they were picked. */
+/**
+ * The catalog's own " + ", inside one name: every Vehicle Hire and Excursion
+ * service is "<vehicle> + Security Driver …" or "<vehicle> + Driver Guide …".
+ * Such a half belongs to the name before it, not to a service of its own.
+ */
+const NAME_CONTINUES = /^(security driver|driver guide)\b/i;
+
+/**
+ * The services an event's details hold, in the order they were picked.
+ *
+ * Names are split on " + ", which some catalog names contain themselves. The
+ * codes are positional, so when there are any they say how many services there
+ * really are; halves the split tore apart are put back together to match.
+ */
 export function splitServices(service: string | null | undefined, serviceCode: string | null | undefined): PickedService[] {
-  const names = (service ?? '').split(SERVICE_NAME_JOIN).map((n) => n.trim()).filter(Boolean);
+  const parts = (service ?? '').split(SERVICE_NAME_JOIN).map((n) => n.trim()).filter(Boolean);
   const codes = (serviceCode ?? '').split(SERVICE_CODE_JOIN).map((c) => c.trim());
+  const expected = (serviceCode ?? '').trim() ? codes.length : null;
+
+  let names = parts;
+  if (expected === null || parts.length > expected) {
+    let surplus = expected === null ? Infinity : parts.length - expected;
+    names = [];
+    for (const part of parts) {
+      if (names.length > 0 && surplus > 0 && NAME_CONTINUES.test(part)) {
+        names[names.length - 1] += SERVICE_NAME_JOIN + part;
+        surplus -= 1;
+      } else {
+        names.push(part);
+      }
+    }
+    // One code means one service, whatever its name looks like.
+    if (expected === 1 && names.length > 1) names = [names.join(SERVICE_NAME_JOIN)];
+  }
   return names.map((name, i) => ({ name, code: codes[i] ?? '' }));
 }
 

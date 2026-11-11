@@ -28,7 +28,7 @@ export default async function ContactListPage({
   const { open } = await searchParams;
   const openId = Number(Array.isArray(open) ? open[0] : open);
 
-  const [contacts, customers] = await Promise.all([listContacts(), listCustomerOptions()]);
+  const [contacts, customers] = await Promise.all([listContacts(auth.user.id), listCustomerOptions()]);
 
   return (
     <ContactsClient

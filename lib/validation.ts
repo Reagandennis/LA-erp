@@ -438,6 +438,8 @@ const tripItemSharedFields = {
   driverId: z.number().int().positive().optional().nullable(),
   officerId: z.number().int().positive().optional().nullable(),
   vehicleId: z.number().int().positive().optional().nullable(),
+  /** The staged resources (the trip's pool) its services were picked from. On an edit, replaces them. */
+  resourceIds: z.array(z.number().int().positive()).max(20).optional(),
 };
 
 export const tripItemTypeSchema = z.enum([
@@ -644,6 +646,107 @@ export const tripFromQuoteSchema = z.object({
 });
 
 /** The whole close-out, saved at once. `closed` closes it out (every check confirmed) or reopens it. */
+// --- Trip resources: the staged pool, its reconciliation, and the daily log ---
+
+const clockTimeSchema = z
+  .string()
+  .trim()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time must be HH:MM');
+
+const odometerSchema = z.number().int('Odometer is whole kilometres').gte(0).max(9_999_999);
+
+export const tripResourceCreateSchema = z
+  .object({
+    vendorId: z.number().int().positive(),
+    productId: z.number().int().positive(),
+    startDate: dateKeySchema.optional().nullable(),
+    endDate: dateKeySchema.optional().nullable(),
+    quantity: z.number().int().gte(1, 'Quantity must be at least 1').max(999).default(1),
+  })
+  .refine((value) => !value.startDate || !value.endDate || value.endDate >= value.startDate, 'The end date is before the start date');
+
+export const tripResourceUpdateSchema = z
+  .object({
+    startDate: dateKeySchema.optional().nullable(),
+    endDate: dateKeySchema.optional().nullable(),
+    quantity: z.number().int().gte(1, 'Quantity must be at least 1').max(999).optional(),
+    /** Null takes back a verdict given at reconciliation. */
+    resolution: z.null().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated')
+  .refine((value) => !value.startDate || !value.endDate || value.endDate >= value.startDate, 'The end date is before the start date');
+
+const tripResourceVerdictSchema = z
+  .object({
+    resourceId: z.number().int().positive(),
+    /** "unused" takes it off the bill; "used" keeps it, with whatever was logged. */
+    resolution: z.enum(['unused', 'used']),
+    billableHours: z.number().finite().gt(0, 'Hours must be more than zero').max(10_000).optional().nullable(),
+    startOdometer: odometerSchema.optional().nullable(),
+    endOdometer: odometerSchema.optional().nullable(),
+  })
+  .refine(
+    (value) => value.startOdometer == null || value.endOdometer == null || value.endOdometer >= value.startOdometer,
+    'The end odometer is behind the start',
+  )
+  .refine((value) => (value.startOdometer == null) === (value.endOdometer == null), 'Give both odometer readings, or neither');
+
+export const tripResourceReconcileSchema = z.object({
+  verdicts: z.array(tripResourceVerdictSchema).max(200),
+  /** Mark the trip Completed once the verdicts are saved. */
+  complete: z.boolean().default(false),
+});
+
+export const tripDayLogSaveSchema = z
+  .object({
+    kind: z.enum(['driver', 'officer', 'vehicle']),
+    subjectId: z.number().int().positive(),
+    shiftStart: clockTimeSchema.optional().nullable(),
+    shiftEnd: clockTimeSchema.optional().nullable(),
+    startOdometer: odometerSchema.optional().nullable(),
+    endOdometer: odometerSchema.optional().nullable(),
+  })
+  .refine(
+    (value) => value.startOdometer == null || value.endOdometer == null || value.endOdometer >= value.startOdometer,
+    'The end odometer is behind the start',
+  );
+
+// --- Vendors ---
+
+const vendorFields = {
+  name: z.string().trim().min(1, 'Give the vendor a name').max(160),
+  internal: z.boolean(),
+  status: z.enum(['Pending', 'Approved', 'Suspended']),
+  countries: z.array(z.enum(SERVICE_COUNTRIES)).max(SERVICE_COUNTRIES.length),
+  contactName: z.string().trim().max(160).optional().nullable(),
+  email: z.union([z.literal(''), z.string().trim().email('That email does not look right').max(200)]).optional().nullable(),
+  phone: z.string().trim().max(60).optional().nullable(),
+  notes: z.string().trim().max(2000).optional().nullable(),
+};
+
+export const vendorCreateSchema = z.object({
+  ...vendorFields,
+  internal: vendorFields.internal.default(false),
+  status: vendorFields.status.default('Pending'),
+  countries: vendorFields.countries.default([]),
+});
+
+export const vendorUpdateSchema = z
+  .object(vendorFields)
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be updated');
+
+const idListSchema = z.array(z.number().int().positive()).max(2000);
+
+/** Adds to and removes from a vendor's catalog, vehicles or people in one call. */
+export const vendorLinksSchema = z
+  .object({
+    kind: z.enum(['services', 'vehicles', 'people']),
+    add: idListSchema.default([]),
+    remove: idListSchema.default([]),
+  })
+  .refine((value) => value.add.length + value.remove.length > 0, 'Nothing to change');
+
 export const tripCloseoutSaveSchema = z.object({
   checks: z.array(z.enum(CLOSEOUT_CHECK_KEYS)).max(CLOSEOUT_CHECK_KEYS.length),
   summary: z.string().trim().max(4000).optional().nullable(),

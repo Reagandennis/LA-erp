@@ -47,4 +47,6 @@ export interface EditorState {
   vehicleId: number | null;
   /** Who the event is for; none is the whole party. */
   travelers: EventTraveler[];
+  /** The staged resources (the trip's pool) its services were picked from. */
+  resourceIds: number[];
 }

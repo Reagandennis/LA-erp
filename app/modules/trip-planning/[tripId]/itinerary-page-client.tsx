@@ -34,14 +34,19 @@ import {
 import { AttachmentPicker } from './_components/attachment-picker';
 import { AttachmentStrip } from './_components/attachment-strip';
 import { CrewRow } from './_components/crew-row';
+import { DayShiftLog, daySubjects } from './_components/day-shift-log';
 import { EventTravelerFields, TravelerRow, type TravelerChoices } from './_components/event-travelers';
 import { ShareDialog } from './_components/share-dialog';
+import { TripPoolProvider } from './_components/trip-pool';
+import TripResourcesPanel from './_components/trip-resources-panel';
+import { UnusedResourcesDialog } from './_components/unused-resources-dialog';
 import FlightCard from './_components/flight-card';
 import FlightFields from './_components/flight-fields';
 import ServicePicker from './_components/service-picker';
 import TransportFields from './_components/transport-fields';
 import type { EditorState } from './editor-state';
 import { EMPTY_RUN, emptyRunFor, emptyRunTitle, isEmptyRun } from './empty-run';
+import BillingLogPanel from './billing-log-panel';
 import TripLogPanel from './trip-log-panel';
 import { useItineraryDrag, type DragTarget } from './_components/use-itinerary-drag';
 import {
@@ -55,6 +60,7 @@ import {
   type TripItemCategory,
 } from './categories';
 import { useSyncedState } from '@/app/ui/use-synced-state';
+import { formatDateRange, unverifiedResources } from '@/lib/trip-resource-model';
 
 interface ItineraryPageClientProps {
   trip: TripDetail;
@@ -95,6 +101,8 @@ interface ItemPayload {
   vehicleId: number | null;
   /** Who it's for; empty is the whole party. Replaces the event's travellers on save. */
   travelers: Array<{ travelerId: number } | { name: string }>;
+  /** The staged resources its services were picked from. Replaces the event's on save. */
+  resourceIds: number[];
   /** Left out entirely for people who can't see costs, so a save never clears one. */
   unitPrice?: number | null;
 }
@@ -228,6 +236,7 @@ function blankEditor(
     officerId: null,
     vehicleId: null,
     travelers: [],
+    resourceIds: [],
   };
 }
 
@@ -277,6 +286,7 @@ function editorFromItem(item: TripItineraryItemSummary): EditorState {
     officerId: item.officer?.id ?? null,
     vehicleId: item.vehicle?.id ?? null,
     travelers: item.travelers.map((t) => ({ travelerId: t.id, name: t.name })),
+    resourceIds: item.resourceIds,
   };
 }
 
@@ -340,6 +350,8 @@ function flightToPayload(editor: EditorState, includeCost: boolean): ItemPayload
   return {
     ...crew,
     travelers: travelersPayload(editor),
+    // Tied to the pool only while the event still sells a service.
+    resourceIds: editor.details.service?.trim() ? editor.resourceIds : [],
     itemType: 'flight',
     category: 'flight',
     description:
@@ -409,6 +421,13 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
     return { error: 'Cost must be a number' };
   }
 
+  // Drop anything the category doesn't declare, so switching category can't
+  // smuggle a stale flight number onto a hotel. An empty run sells no service.
+  const details = pruneDetails(
+    editor.category,
+    emptyRun ? { ...editor.details, service: '', serviceCode: '' } : editor.details,
+  );
+
   return {
     itemType: LEGACY_TYPE[editor.category],
     category: editor.category,
@@ -421,12 +440,7 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
     phone: editor.phone.trim() || null,
     placeName: editor.placeName.trim() || null,
     address: editor.address.trim() || null,
-    // Drop anything the category doesn't declare, so switching category can't
-    // smuggle a stale flight number onto a hotel. An empty run sells no service.
-    details: pruneDetails(
-      editor.category,
-      emptyRun ? { ...editor.details, service: '', serviceCode: '' } : editor.details,
-    ),
+    details,
     scheduledAt,
     endsAt,
     durationMinutes,
@@ -437,6 +451,8 @@ function editorToPayload(editor: EditorState, includeCost: boolean): ItemPayload
     dayId: editor.dayId,
     ...crew,
     travelers: travelersPayload(editor),
+    // Tied to the pool only while the event still sells a service.
+    resourceIds: details?.service ? editor.resourceIds : [],
     ...(includeCost ? { unitPrice: price ? Number(price) : null } : {}),
   };
 }
@@ -489,8 +505,11 @@ export default function ItineraryPageClient({
     activeDayId === null || trip.days.some((day) => day.id === activeDayId)
       ? activeDayId
       : (trip.days[0]?.id ?? null);
-  /** The right-hand pane shows the trip log instead of a day. */
-  const [showLog, setShowLog] = useState(false);
+  /** What the right-hand pane shows: a day, the trip log, or the billing log. */
+  const [pane, setPane] = useState<'days' | 'log' | 'billing'>('days');
+  const showLog = pane === 'log';
+  /** The unused-resources check, opened by "Completed" or from the pool's flag. */
+  const [verifying, setVerifying] = useState(false);
   const [logCount, setLogCount] = useSyncedState(initialTrip.logCount);
   const [addingHere, setAddingHere] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
@@ -542,6 +561,18 @@ export default function ItineraryPageClient({
   const activeItems = activeGroup ? activeGroup.items : unscheduled;
 
   const applyTrip = (next: TripDetail) => setTrip(next);
+
+  /** Staged, on no event, and not yet verified: what holds the trip back from Completed. */
+  const pendingResources = useMemo(
+    () => unverifiedResources(trip.resources, trip.items),
+    [trip.resources, trip.items],
+  );
+  /** A resource taken out of the pool while an editor was open can't be tied to its event. */
+  const stillStaged = (ids: number[]) => ids.filter((id) => trip.resources.some((resource) => resource.id === id));
+  const activeDayLogs = useMemo(
+    () => trip.dayLogs.filter((log) => log.dayId === currentDayId),
+    [trip.dayLogs, currentDayId],
+  );
 
   // ── Items ───────────────────────────────────────────────────────────────
 
@@ -649,7 +680,7 @@ export default function ItineraryPageClient({
       vehicleId: item.vehicle?.id ?? null,
     });
     if (dayId !== currentDayId) setActiveDayId(dayId);
-    setShowLog(false);
+    setPane('days');
     setAddingHere(true);
   };
 
@@ -709,6 +740,7 @@ export default function ItineraryPageClient({
       return;
     }
     if (!(await clearOfClash(payload, null))) return;
+    payload.resourceIds = stillStaged(payload.resourceIds);
     setError(null);
     const placed = await placeOnDate(payload, editor.date || null);
     if (!placed) return;
@@ -755,6 +787,7 @@ export default function ItineraryPageClient({
       return;
     }
     if (!(await clearOfClash(payload, editingItemId))) return;
+    payload.resourceIds = stillStaged(payload.resourceIds);
     setError(null);
     const placed = await placeOnDate(payload, editor.date || null);
     if (!placed) return;
@@ -956,9 +989,14 @@ export default function ItineraryPageClient({
 
   const removeDay = async (dayId: number) => {
     const day = trip.days.find((d) => d.id === dayId);
+    const logged = trip.dayLogs.filter((log) => log.dayId === dayId).length;
     const ok = await confirm({
       title: day ? `Delete Day ${day.dayNumber}?` : 'Delete this day?',
-      message: 'Anything scheduled on it moves to Unscheduled rather than being deleted.',
+      message:
+        'Anything scheduled on it moves to Unscheduled rather than being deleted.' +
+        (logged > 0
+          ? ` Its shift and odometer log (${logged} line${logged === 1 ? '' : 's'}) is deleted with it, and comes off the billing log.`
+          : ''),
       confirmLabel: 'Delete day',
     });
     if (!ok) return;
@@ -972,6 +1010,12 @@ export default function ItineraryPageClient({
 
   const updateStatus = async (status: TripStatus) => {
     if (status === trip.status) return;
+    // Anything staged that no event used is verified first; the dialog completes the trip.
+    if (status === 'Completed' && pendingResources.length > 0) {
+      setError(null);
+      setVerifying(true);
+      return;
+    }
     setPending(`status:${status}`);
     setError(null);
     try {
@@ -1013,8 +1057,32 @@ export default function ItineraryPageClient({
   const activeLabel = activeGroup ? dayLabel(activeGroup.day) : null;
 
   return (
+    <TripPoolProvider
+      value={{
+        tripId: trip.id,
+        status: trip.status,
+        canEdit,
+        resources: trip.resources,
+        items: trip.items,
+        days: trip.days,
+        dayLogs: trip.dayLogs,
+        onTripChange: applyTrip,
+      }}
+    >
     <div className="flex min-h-screen flex-col bg-gray-50/50">
       {dialog}
+      {verifying && (
+        <UnusedResourcesDialog
+          tripId={trip.id}
+          resources={pendingResources}
+          completing={trip.status !== 'Completed'}
+          onClose={() => setVerifying(false)}
+          onDone={(saved) => {
+            applyTrip(saved);
+            setVerifying(false);
+          }}
+        />
+      )}
       <header className="sticky top-0 z-30 shrink-0 border-b border-gray-100 bg-white">
         <div className="flex items-center gap-4 px-4 py-3 sm:px-6">
           <Link
@@ -1126,7 +1194,7 @@ export default function ItineraryPageClient({
             <button
               type="button"
               onClick={() => {
-                setShowLog(false);
+                setPane('days');
                 void addDay();
               }}
               disabled={!canEdit || pending === 'day'}
@@ -1141,7 +1209,7 @@ export default function ItineraryPageClient({
               <button
                 type="button"
                 onClick={() => {
-                  setShowLog(false);
+                  setPane('days');
                   void addDay(true);
                 }}
                 disabled={pending === 'day'}
@@ -1155,7 +1223,7 @@ export default function ItineraryPageClient({
           {/* Above the day list so it stays in reach on a long trip. */}
           <button
             type="button"
-            onClick={() => setShowLog(true)}
+            onClick={() => setPane('log')}
             aria-pressed={showLog}
             className={`flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left transition-colors ${
               showLog ? 'bg-primary/5' : 'hover:bg-gray-50'
@@ -1170,17 +1238,27 @@ export default function ItineraryPageClient({
             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">{logCount}</span>
           </button>
 
+          {/* What the trip will use, staged from approved vendors; events pick from it. */}
+          <TripResourcesPanel
+            trip={trip}
+            canEdit={canEdit}
+            billingOpen={pane === 'billing'}
+            onTripChange={applyTrip}
+            onOpenBilling={() => setPane('billing')}
+            onVerify={() => setVerifying(true)}
+          />
+
           <div className="max-h-[22rem] overflow-y-auto lg:max-h-[calc(100vh-11rem)]">
             {groups.map(({ day, items }) => {
               const label = dayLabel(day);
-              const active = !showLog && day.id === currentDayId;
+              const active = pane === 'days' && day.id === currentDayId;
               return (
                 <button
                   key={day.id}
                   ref={registerDayCard(day.id)}
                   type="button"
                   onClick={() => {
-                    setShowLog(false);
+                    setPane('days');
                     setActiveDayId(day.id);
                   }}
                   className={`flex w-full items-start gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors ${
@@ -1232,11 +1310,11 @@ export default function ItineraryPageClient({
               ref={registerDayCard(null)}
               type="button"
               onClick={() => {
-                setShowLog(false);
+                setPane('days');
                 setActiveDayId(null);
               }}
               className={`flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left transition-colors ${
-                !showLog && currentDayId === null ? 'bg-primary/5' : 'hover:bg-gray-50'
+                pane === 'days' && currentDayId === null ? 'bg-primary/5' : 'hover:bg-gray-50'
               } ${
                 drag?.target?.dayId === null && drag.target.index === Number.MAX_SAFE_INTEGER
                   ? 'ring-2 ring-inset ring-primary/50'
@@ -1263,6 +1341,8 @@ export default function ItineraryPageClient({
                 isAdmin={isAdmin}
                 onCountChange={setLogCount}
               />
+            ) : pane === 'billing' ? (
+              <BillingLogPanel trip={trip} onVerify={canEdit && pendingResources.length > 0 ? () => setVerifying(true) : null} />
             ) : (
               <>
                 <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
@@ -1379,6 +1459,26 @@ export default function ItineraryPageClient({
                   <p className="mb-5 whitespace-pre-line text-sm text-gray-600">{activeGroup.day.summary}</p>
                 )}
 
+                {activeGroup && (
+                  <div className="mb-4 empty:hidden">
+                    <DayShiftLog
+                      key={activeGroup.day.id}
+                      tripId={trip.id}
+                      dayId={activeGroup.day.id}
+                      title={`Daily shift & odometer log · ${
+                        activeGroup.day.dateKey
+                          ? formatDateRange(activeGroup.day.dateKey, activeGroup.day.dateKey, APP_LOCALE)
+                          : `Day ${activeGroup.day.dayNumber}`
+                      }`}
+                      subjects={daySubjects(activeItems, activeDayLogs)}
+                      logs={activeDayLogs}
+                      canEdit={canEdit}
+                      defaultOpen={trip.status === 'Active'}
+                      onSaved={applyTrip}
+                    />
+                  </div>
+                )}
+
                 {activeItems.length === 0 && !addingHere && (
                   <p className="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-400">
                     Nothing here yet.
@@ -1479,6 +1579,7 @@ export default function ItineraryPageClient({
         </div>
       )}
     </div>
+    </TripPoolProvider>
   );
 }
 
@@ -2127,6 +2228,7 @@ function ItemEditor({
                 durationHours: '',
                 durationMinutes: '',
                 details: {},
+                resourceIds: [],
                 timeLabel: CATEGORY_META[category].timeLabels[0] ?? '',
               })
             }

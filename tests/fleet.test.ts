@@ -6,6 +6,7 @@ import {
   type MaintenanceDto,
   activeMaintenanceReminders,
   averageKmPerLitre,
+  buildFleetBoard,
   daysBetween,
   defaultReminderDays,
   fuelEconomyByLog,
@@ -237,5 +238,118 @@ describe('fleet validation', () => {
     expect(maintenanceUpdateSchema.safeParse({ kind: 'Sometimes' }).success).toBe(false);
     expect(maintenanceUpdateSchema.safeParse({ reminderDays: 5 }).success).toBe(false);
     expect(maintenanceUpdateSchema.safeParse({ reminderDays: null }).success).toBe(true);
+  });
+});
+
+describe('the readiness board', () => {
+  const TODAY = '2026-11-11';
+  const SUV: FleetVehicleRef = { id: 3, registration: 'KDC 789C', make: 'Toyota', model: 'V8' };
+  const SPARE: FleetVehicleRef = { id: 4, registration: 'KDD 012D', make: null, model: null };
+  const board = (
+    items: MaintenanceDto[],
+    extra: { odometers?: Record<number, number>; trips?: Parameters<typeof buildFleetBoard>[3] } = {},
+  ) => buildFleetBoard([CAR, VAN, SUV, SPARE], items, extra.odometers ?? {}, extra.trips ?? [], TODAY);
+  const rowOf = (rows: ReturnType<typeof board>, vehicle: FleetVehicleRef) => rows.find((row) => row.vehicle.id === vehicle.id)!;
+
+  it('says for each vehicle whether it can go out, worst first', () => {
+    const rows = board([
+      job({ vehicle: CAR, status: 'In progress', title: 'Gearbox', scheduledFor: '2026-11-09' }),
+      job({ vehicle: VAN, status: 'Planned', scheduledFor: '2026-11-07' }),
+      job({ vehicle: SUV, status: 'Planned', category: 'Inspection', scheduledFor: '2026-11-17' }),
+    ]);
+
+    expect(rows.map((row) => [row.vehicle.registration, row.readiness])).toEqual([
+      ['KDA 123A', 'off-road'],
+      ['KDB 456B', 'overdue'],
+      ['KDC 789C', 'due-soon'],
+      ['KDD 012D', 'no-history'],
+    ]);
+    expect(rows.map((row) => row.reason)).toEqual([
+      'In the garage: Gearbox',
+      'Service planned Nov 7, 2026 · 4 days overdue',
+      'Inspection planned Nov 17, 2026 · in 6 days',
+      'Nothing on record yet',
+    ]);
+  });
+
+  it('is ready when nothing is due, and says what comes next', () => {
+    const rows = board([
+      job({ vehicle: CAR, status: 'Completed', completedAt: '2026-10-01', nextDueAt: '2027-04-01' }),
+      job({ vehicle: VAN, status: 'Completed', completedAt: '2026-10-01' }),
+    ]);
+    expect(rowOf(rows, CAR)).toMatchObject({ readiness: 'ready', reason: 'Next: Service due Apr 1, 2027 · in 141 days' });
+    expect(rowOf(rows, VAN)).toMatchObject({ readiness: 'ready', reason: 'Nothing due' });
+    expect(rowOf(rows, CAR).lastDone?.completedAt).toBe('2026-10-01');
+  });
+
+  it('reads a next-due kilometre against the highest reading on file', () => {
+    const done = job({ vehicle: CAR, status: 'Completed', completedAt: '2026-06-01', odometerKm: 80_000, nextDueKm: 90_000 });
+
+    expect(rowOf(board([done]), CAR).readiness).toBe('ready');
+    expect(rowOf(board([done], { odometers: { 1: 89_400 } }), CAR)).toMatchObject({
+      readiness: 'due-soon',
+      odometerKm: 89_400,
+      reason: 'Service due at 90,000 km · now 89,400 km',
+    });
+    expect(rowOf(board([done], { odometers: { 1: 90_250 } }), CAR)).toMatchObject({
+      readiness: 'overdue',
+      reason: 'Service past due at 90,000 km · now 90,250 km',
+    });
+    // Once the next one is booked, the old next-due stops counting.
+    const booked = job({ vehicle: CAR, status: 'Planned', scheduledFor: '2026-12-20' });
+    expect(rowOf(board([done, booked], { odometers: { 1: 90_250 } }), CAR).readiness).toBe('ready');
+  });
+
+  it('shows each trip the vehicle is on once, from its first day to its last', () => {
+    const rows = board([], {
+      trips: [
+        // The trip's allocation, then two of its movements.
+        { vehicleId: 1, tripId: 6, reference: 'MF-UGA-0006', from: '2026-11-08', to: '2026-11-14' },
+        { vehicleId: 1, tripId: 6, reference: 'MF-UGA-0006', from: '2026-11-11', to: '2026-11-11' },
+        { vehicleId: 1, tripId: 6, reference: 'MF-UGA-0006', from: '2026-11-12', to: '2026-11-12' },
+        { vehicleId: 1, tripId: 9, reference: 'KE-NBO-0009', from: '2026-12-01', to: '2026-12-03' },
+        // Over, or not dated yet.
+        { vehicleId: 1, tripId: 2, reference: 'OLD-0002', from: '2026-10-01', to: '2026-10-05' },
+        { vehicleId: 2, tripId: 7, reference: 'TBD-0007', from: null, to: null },
+      ],
+    });
+
+    expect(rowOf(rows, CAR).trips.map((trip) => [trip.reference, trip.from, trip.to])).toEqual([
+      ['MF-UGA-0006', '2026-11-08', '2026-11-14'],
+      ['KE-NBO-0009', '2026-12-01', '2026-12-03'],
+    ]);
+    expect(rowOf(rows, CAR).onTripToday?.reference).toBe('MF-UGA-0006');
+    expect(rowOf(rows, VAN)).toMatchObject({ onTripToday: null, trips: [{ reference: 'TBD-0007' }] });
+  });
+
+  it('flags maintenance booked on a day the vehicle is on a trip, and puts it first', () => {
+    const service = job({ vehicle: SUV, status: 'Planned', scheduledFor: '2026-12-02' });
+    const rows = board([job({ vehicle: CAR, status: 'In progress', title: 'Gearbox' }), service], {
+      trips: [{ vehicleId: 3, tripId: 9, reference: 'KE-NBO-0009', from: '2026-12-01', to: '2026-12-03' }],
+    });
+
+    expect(rows[0]!.vehicle.registration).toBe('KDC 789C');
+    expect(rows[0]!.clashes.map((clash) => clash.message)).toEqual([
+      'Service is booked for Dec 2, 2026, a day it is on trip KE-NBO-0009 (Dec 1 – Dec 3, 2026)',
+    ]);
+    // Booked for a day either side of the trip is fine.
+    const clear = board([{ ...service, scheduledFor: '2026-12-04' }], {
+      trips: [{ vehicleId: 3, tripId: 9, reference: 'KE-NBO-0009', from: '2026-12-01', to: '2026-12-03' }],
+    });
+    expect(rowOf(clear, SUV).clashes).toEqual([]);
+  });
+
+  it('flags a vehicle in the garage that a trip needs within the week', () => {
+    const gearbox = job({ vehicle: CAR, status: 'In progress', title: 'Gearbox' });
+    const soon = board([gearbox], { trips: [{ vehicleId: 1, tripId: 6, reference: 'MF-UGA-0006', from: '2026-11-14', to: '2026-11-16' }] });
+    expect(rowOf(soon, CAR).clashes.map((clash) => clash.message)).toEqual([
+      'In the garage, and due on trip MF-UGA-0006 in 3 days (Nov 14 – Nov 16, 2026)',
+    ]);
+
+    const now = board([gearbox], { trips: [{ vehicleId: 1, tripId: 6, reference: 'MF-UGA-0006', from: '2026-11-10', to: '2026-11-12' }] });
+    expect(rowOf(now, CAR).clashes[0]!.message).toBe('In the garage, but on trip MF-UGA-0006 now (Nov 10 – Nov 12, 2026)');
+
+    const later = board([gearbox], { trips: [{ vehicleId: 1, tripId: 6, reference: 'MF-UGA-0006', from: '2026-12-20', to: '2026-12-22' }] });
+    expect(rowOf(later, CAR).clashes).toEqual([]);
   });
 });

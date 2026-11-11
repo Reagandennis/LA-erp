@@ -2,7 +2,12 @@
 
 import { useState } from 'react';
 
+import { APP_LOCALE } from '@/lib/locale';
+import { type DayLogKind, formatDateRange, inPool, poolCrewFilter } from '@/lib/trip-resource-model';
+
 import type { CrewOption, CrewOptions } from '../../types';
+import { DayShiftLog, type LogSubject } from './day-shift-log';
+import { useTripPool } from './trip-pool';
 
 /** Rows rendered at once; the registers run to hundreds. */
 const MAX_ROWS = 80;
@@ -12,6 +17,7 @@ function ResourcePicker({
   required,
   placeholder,
   options,
+  poolIds,
   value,
   onChange,
 }: {
@@ -19,11 +25,15 @@ function ResourcePicker({
   required: boolean;
   placeholder: string;
   options: CrewOption[];
+  /** Who the trip's staged pool puts on this event's day; empty when it names no one. */
+  poolIds: Set<number>;
   value: number | null;
   onChange: (id: number | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  /** The whole register, past what the pool offers. */
+  const [everyone, setEveryone] = useState(false);
   const selected = options.find((option) => option.id === value) ?? null;
   const normalized = query.trim().toLowerCase();
   const matches = options.filter(
@@ -32,12 +42,18 @@ function ResourcePicker({
       o.label.toLowerCase().includes(normalized) ||
       (o.hint?.toLowerCase().includes(normalized) ?? false),
   );
-  const onTrip = matches.filter((o) => o.onTrip);
-  const others = matches.filter((o) => !o.onTrip);
+  // With a pool for the day, that is the list; the register stays one click away.
+  const pooled = poolIds.size > 0;
+  const fromPool = matches.filter((o) => poolIds.has(o.id));
+  const outside = matches.filter((o) => !poolIds.has(o.id));
+  const narrowed = pooled && !everyone;
+  const onTrip = narrowed ? [] : outside.filter((o) => o.onTrip);
+  const others = narrowed ? [] : outside.filter((o) => !o.onTrip);
 
   const close = () => {
     setOpen(false);
     setQuery('');
+    setEveryone(false);
   };
   const pick = (id: number | null) => {
     onChange(id);
@@ -121,7 +137,7 @@ function ResourcePicker({
                 if (e.key === 'Escape') close();
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  const first = onTrip[0] ?? others[0];
+                  const first = fromPool[0] ?? onTrip[0] ?? others[0];
                   if (first) pick(first.id);
                 }
               }}
@@ -140,9 +156,24 @@ function ResourcePicker({
                   </button>
                 </li>
               )}
+              {group('From the staged pool', fromPool)}
               {group('On this trip', onTrip)}
-              {group(onTrip.length > 0 ? 'Everyone else' : 'Task Assignment register', others)}
-              {matches.length === 0 && <li className="px-3 py-3 text-sm text-gray-400">No match.</li>}
+              {group(onTrip.length > 0 || fromPool.length > 0 ? 'Everyone else' : 'Task Assignment register', others)}
+              {narrowed && fromPool.length === 0 && (
+                <li className="px-3 py-3 text-sm text-gray-400">No one in the staged pool matches.</li>
+              )}
+              {narrowed && outside.length > 0 && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setEveryone(true)}
+                    className="w-full border-t border-gray-100 px-3 py-2 text-left text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-primary"
+                  >
+                    Show the full register ({outside.length} more)
+                  </button>
+                </li>
+              )}
+              {!narrowed && matches.length === 0 && <li className="px-3 py-3 text-sm text-gray-400">No match.</li>}
               {others.length > MAX_ROWS && (
                 <li className="px-3 py-2 text-xs text-gray-400">Keep typing to narrow {others.length} more.</li>
               )}
@@ -159,6 +190,10 @@ function ResourcePicker({
  * registers. None is required to save: whatever is still missing is raised
  * in the notification bell and on the ops dashboard until it's assigned. An
  * imported record that only has them as text keeps working without being re-linked.
+ *
+ * When the trip's staged pool covers the event's day, each picker opens on
+ * the people and vehicles of the vendors staged for that day. Below the
+ * pickers sits that day's shift and odometer log for whoever is picked.
  */
 export function CrewFields({
   options,
@@ -168,8 +203,13 @@ export function CrewFields({
   onChange,
   legacyDriver,
   legacyVehicle,
+  date,
+  dayId,
 }: {
   options: CrewOptions;
+  /** The event's date ("YYYY-MM-DD") and itinerary day, for the pool and the day's log. */
+  date: string;
+  dayId: number | null;
   driverId: number | null;
   officerId: number | null;
   vehicleId: number | null;
@@ -181,6 +221,27 @@ export function CrewFields({
     .filter(Boolean)
     .join(' and ');
 
+  const pool = useTripPool();
+  const filter = poolCrewFilter(pool.resources, date || null);
+  const pooledIds = (kind: DayLogKind, list: CrewOption[]) =>
+    new Set(list.filter((option) => inPool(filter, kind, option)).map((option) => option.id));
+  const poolDrivers = pooledIds('driver', options.drivers);
+  const poolVehicles = pooledIds('vehicle', options.vehicles);
+  const poolOfficers = pooledIds('officer', options.officers);
+  const pooled = poolDrivers.size + poolVehicles.size + poolOfficers.size > 0;
+
+  // The day this event sits on: by its date once it has one, else the day it was opened from.
+  const day = pool.days.find((candidate) => (date ? candidate.dateKey === date : candidate.id === dayId)) ?? null;
+  const picked = (kind: DayLogKind, list: CrewOption[], id: number | null): LogSubject[] => {
+    const option = id == null ? null : list.find((candidate) => candidate.id === id);
+    return option ? [{ kind, id: option.id, label: option.label, hint: option.hint, assigned: true }] : [];
+  };
+  const subjects = [
+    ...picked('driver', options.drivers, driverId),
+    ...picked('officer', options.officers, officerId),
+    ...picked('vehicle', options.vehicles, vehicleId),
+  ];
+
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Crew · from Task Assignment</p>
@@ -190,6 +251,7 @@ export function CrewFields({
           required={false}
           placeholder="Choose a driver"
           options={options.drivers}
+          poolIds={poolDrivers}
           value={driverId}
           onChange={(id) => onChange({ driverId: id })}
         />
@@ -198,6 +260,7 @@ export function CrewFields({
           required={false}
           placeholder="Choose a vehicle"
           options={options.vehicles}
+          poolIds={poolVehicles}
           value={vehicleId}
           onChange={(id) => onChange({ vehicleId: id })}
         />
@@ -206,14 +269,42 @@ export function CrewFields({
           required={false}
           placeholder="None"
           options={options.officers}
+          poolIds={poolOfficers}
           value={officerId}
           onChange={(id) => onChange({ officerId: id })}
         />
       </div>
+      {pooled && (
+        <p className="mt-2 text-xs text-gray-500">
+          Each list opens on the vendors staged for {date ? formatDateRange(date, date, APP_LOCALE) : 'this trip'} in Trip Resources.
+        </p>
+      )}
       {imported && (!driverId || !vehicleId) && (
         <p className="mt-2 text-xs text-gray-500">
           Imported record lists {imported}. Pick them here to link the Task Assignment record.
         </p>
+      )}
+      {pool.tripId > 0 && subjects.length > 0 && (
+        <div className="mt-3">
+          {day ? (
+            <DayShiftLog
+              key={day.id}
+              tripId={pool.tripId}
+              dayId={day.id}
+              title={`Daily shift & odometer log · ${day.dateKey ? formatDateRange(day.dateKey, day.dateKey, APP_LOCALE) : `Day ${day.dayNumber}`}`}
+              subjects={subjects}
+              logs={pool.dayLogs.filter((log) => log.dayId === day.id)}
+              canEdit={pool.canEdit}
+              // The day's full log sits open at the top of the day; this is the same lines, for this event's crew.
+              defaultOpen={false}
+              onSaved={pool.onTripChange}
+            />
+          ) : (
+            <p className="text-xs text-gray-400">
+              The daily shift and odometer log opens once this event is saved on a day.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

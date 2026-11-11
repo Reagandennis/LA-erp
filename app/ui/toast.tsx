@@ -15,7 +15,7 @@ import {
   TruckIcon,
 } from './icons';
 
-export type ToastSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance' | 'escalation';
+export type ToastSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance' | 'escalation' | 'handover';
 
 const SOURCE_META: Record<
   ToastSource,
@@ -34,6 +34,7 @@ const SOURCE_META: Record<
   calendar: { Icon: CalendarIcon, label: 'Calendar', accent: 'bg-rose-100 text-rose-600' },
   maintenance: { Icon: CogIcon, label: 'Maintenance', accent: 'bg-orange-100 text-orange-600' },
   escalation: { Icon: TruckIcon, label: 'Escalation', accent: 'bg-rose-100 text-rose-700' },
+  handover: { Icon: ClipboardCheckIcon, label: 'Handover', accent: 'bg-primary/10 text-primary' },
 };
 
 /** Short relative time — "just now", "4m", "2h", "3d". */

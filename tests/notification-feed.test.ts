@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   listMaintenanceNotifications: vi.fn(),
   materializeMaintenanceReminders: vi.fn(),
   listTripEscalationNotifications: vi.fn(),
+  listHandoverNotifications: vi.fn(),
 }));
 
 vi.mock('../lib/prisma', () => ({ prisma: { $queryRaw: mocks.queryRaw } }));
@@ -36,6 +37,7 @@ vi.mock('../lib/fleet-reminders', () => ({
   materializeMaintenanceReminders: mocks.materializeMaintenanceReminders,
 }));
 vi.mock('../lib/trip-escalations', () => ({ listTripEscalationNotifications: mocks.listTripEscalationNotifications }));
+vi.mock('../lib/handover-notifications', () => ({ listHandoverNotifications: mocks.listHandoverNotifications }));
 
 import { listPersonalTodoNotifications, loadNotificationFeed } from '../lib/notification-feed';
 
@@ -53,6 +55,7 @@ describe('notification feed', () => {
     mocks.materializeDueCalendarReminders.mockResolvedValue(0);
     mocks.listMaintenanceNotifications.mockResolvedValue([{ id: 8 }]);
     mocks.listTripEscalationNotifications.mockResolvedValue([]);
+    mocks.listHandoverNotifications.mockResolvedValue([{ id: 9 }]);
     mocks.materializeMaintenanceReminders.mockResolvedValue(0);
   });
 
@@ -62,6 +65,14 @@ describe('notification feed', () => {
 
     expect((await loadNotificationFeed(42, { maintenance: true })).maintenance).toEqual([{ id: 8 }]);
     expect(mocks.materializeMaintenanceReminders).toHaveBeenCalledWith(42);
+  });
+
+  it('adds handovers only for those who can open Handover', async () => {
+    expect((await loadNotificationFeed(42)).handover).toEqual([]);
+    expect(mocks.listHandoverNotifications).not.toHaveBeenCalled();
+
+    expect((await loadNotificationFeed(42, { handover: true })).handover).toEqual([{ id: 9 }]);
+    expect(mocks.listHandoverNotifications).toHaveBeenCalledWith(42);
   });
 
   it('serialises personal todo notifications with ISO timestamps', async () => {
@@ -101,6 +112,7 @@ describe('notification feed', () => {
       calendar: [{ id: 6 }],
       maintenance: [],
       escalation: [],
+      handover: [],
     });
     for (const fn of [
       mocks.listQuoteNotifications,

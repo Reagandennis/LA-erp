@@ -11,7 +11,7 @@ import { subscribeServerEvents } from './messaging-alerts-store';
 import { dismissPushedToast, Toast, ToastStack, usePushedToasts } from './toast';
 import { useIsClient } from './use-client';
 
-type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance' | 'escalation';
+type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance' | 'escalation' | 'handover';
 
 type RawTodoNotification = {
   id: number;
@@ -95,6 +95,15 @@ type RawEscalationNotification = {
   readAt: string | null;
 };
 
+type RawHandoverNotification = {
+  id: number;
+  handoverId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
 type NotificationItem = {
   source: NotificationSource;
   id: number;
@@ -122,6 +131,7 @@ type NotificationFeed = {
   calendar?: RawCalendarNotification[];
   maintenance?: RawMaintenanceNotification[];
   escalation?: RawEscalationNotification[];
+  handover?: RawHandoverNotification[];
 };
 
 const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
@@ -134,6 +144,7 @@ const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   calendar: '/api/calendar/notifications',
   maintenance: '/api/fleet/maintenance/notifications',
   escalation: '/api/planning/trip-escalations',
+  handover: '/api/handover/notifications',
 };
 
 function compositeKey(item: { source: NotificationSource; id: number }): string {
@@ -158,6 +169,9 @@ function buildToastTitle(source: NotificationSource, type: string): string {
   }
   if (source === 'escalation') {
     return 'Trip escalated';
+  }
+  if (source === 'handover') {
+    return 'Shift handover for you';
   }
   if (source === 'message') {
     return 'New message';
@@ -196,6 +210,10 @@ function buildHref(item: { source: NotificationSource; entityId: number }): stri
   }
   if (item.source === 'maintenance') {
     return '/modules/car-maintenance';
+  }
+  if (item.source === 'handover') {
+    // Opens the Handover screen on that entry, ready to acknowledge.
+    return `/modules/handover?handover=${item.entityId}`;
   }
   return '/modules/todo-personal';
 }
@@ -350,6 +368,20 @@ export default function NotificationsBell() {
             readAt: item.readAt,
             href: buildHref({ source: 'escalation', entityId: item.tripId }),
             toastTitle: buildToastTitle('escalation', item.type),
+          });
+        }
+
+        for (const item of feed?.handover ?? []) {
+          merged.push({
+            source: 'handover',
+            id: item.id,
+            entityId: item.handoverId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'handover', entityId: item.handoverId }),
+            toastTitle: buildToastTitle('handover', item.type),
           });
         }
 

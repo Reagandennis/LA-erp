@@ -1,6 +1,25 @@
 import 'server-only';
 
+import type { Prisma } from '@prisma/client';
+
 import { prisma } from '@/lib/prisma';
+
+/**
+ * Who may see a contact. The directory is shared, with one exception: a
+ * contact someone synced from their Google account is theirs alone, since it
+ * is their personal address book. Nobody else sees it, admins included.
+ *
+ * Every read and write of a contact goes through this, so a contact that is
+ * not the viewer's behaves exactly as if it did not exist.
+ */
+export function contactVisibleTo(userId: number): Prisma.ContactWhereInput {
+  return { OR: [{ source: { not: 'google' } }, { createdById: userId }] };
+}
+
+/** The same rule for a row already loaded. */
+export function isContactVisibleTo(contact: { source: string; createdById: number }, userId: number): boolean {
+  return contact.source !== 'google' || contact.createdById === userId;
+}
 
 export const CONTACT_CATEGORIES = ['Internal', 'Client', 'Vendor', 'Partner'] as const;
 export type ContactCategory = (typeof CONTACT_CATEGORIES)[number];
@@ -45,6 +64,8 @@ export type ContactSummary = {
   tags: string[];
   hasPhoto: boolean;
   customer: { id: number; name: string; company: string | null } | null;
+  /** Synced from the viewer's own Google account: only they can see it. */
+  private: boolean;
   createdAt: string;
 };
 
@@ -59,6 +80,7 @@ const CONTACT_SELECT = {
   notes: true,
   tags: true,
   photoName: true,
+  source: true,
   createdAt: true,
   customer: { select: { id: true, name: true, company: true } },
 } as const;
@@ -74,6 +96,7 @@ type ContactRow = {
   notes: string | null;
   tags: string[];
   photoName: string | null;
+  source: string;
   createdAt: Date;
   customer: { id: number; name: string; company: string | null } | null;
 };
@@ -91,14 +114,17 @@ function serializeContact(row: ContactRow): ContactSummary {
     tags: row.tags ?? [],
     hasPhoto: Boolean(row.photoName),
     customer: row.customer,
+    private: row.source === 'google',
     createdAt: row.createdAt.toISOString(),
   };
 }
 
 // --- Reads -----------------------------------------------------------------
 
-export async function listContacts(): Promise<ContactSummary[]> {
+/** The directory as this user sees it: the shared contacts, plus their own Google ones. */
+export async function listContacts(viewerId: number): Promise<ContactSummary[]> {
   const rows = await prisma.contact.findMany({
+    where: contactVisibleTo(viewerId),
     orderBy: [{ name: 'asc' }],
     select: CONTACT_SELECT,
   });
@@ -180,8 +206,9 @@ export async function updateContact(
     tags?: unknown;
     customerId?: number | null;
   },
+  viewerId: number,
 ): Promise<ContactSummary | null> {
-  const existing = await prisma.contact.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.contact.findFirst({ where: { id, ...contactVisibleTo(viewerId) }, select: { id: true } });
   if (!existing) return null;
 
   const data: Record<string, unknown> = {};
@@ -202,8 +229,8 @@ export async function updateContact(
   return serializeContact(row);
 }
 
-export async function deleteContact(id: number): Promise<boolean> {
-  const existing = await prisma.contact.findUnique({ where: { id }, select: { id: true } });
+export async function deleteContact(id: number, viewerId: number): Promise<boolean> {
+  const existing = await prisma.contact.findFirst({ where: { id, ...contactVisibleTo(viewerId) }, select: { id: true } });
   if (!existing) return false;
   await prisma.contact.delete({ where: { id } });
   return true;
@@ -213,9 +240,10 @@ export async function deleteContact(id: number): Promise<boolean> {
 
 export async function getContactPhoto(
   id: number,
+  viewerId: number,
 ): Promise<{ name: string; mime: string; content: Buffer } | null> {
-  const row = await prisma.contact.findUnique({
-    where: { id },
+  const row = await prisma.contact.findFirst({
+    where: { id, ...contactVisibleTo(viewerId) },
     select: { photoName: true, photoMime: true, photoContent: true },
   });
   if (!row || !row.photoContent || !row.photoMime) return null;
@@ -226,8 +254,8 @@ export async function getContactPhoto(
   };
 }
 
-export async function setContactPhoto(id: number, photo: PhotoInput): Promise<boolean> {
-  const existing = await prisma.contact.findUnique({ where: { id }, select: { id: true } });
+export async function setContactPhoto(id: number, photo: PhotoInput, viewerId: number): Promise<boolean> {
+  const existing = await prisma.contact.findFirst({ where: { id, ...contactVisibleTo(viewerId) }, select: { id: true } });
   if (!existing) return false;
   await prisma.contact.update({
     where: { id },

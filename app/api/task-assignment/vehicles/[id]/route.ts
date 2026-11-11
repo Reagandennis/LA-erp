@@ -25,7 +25,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const patch: { registration?: string; make?: string | null; model?: string | null; type?: string; status?: string; capacity?: number | null; notes?: string | null } = {};
+  const patch: Parameters<typeof updateVehicle>[1] = {};
   if (typeof body.registration === 'string') patch.registration = body.registration;
   if (typeof body.make === 'string' || body.make === null) patch.make = body.make;
   if (typeof body.model === 'string' || body.model === null) patch.model = body.model;
@@ -33,6 +33,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (typeof body.status === 'string') patch.status = body.status;
   if (typeof body.capacity === 'number' || body.capacity === null) patch.capacity = body.capacity;
   if (typeof body.notes === 'string' || body.notes === null) patch.notes = body.notes;
+  // "Internal" or "External"; null puts it back to unclassified.
+  if (typeof body.ownership === 'string' || body.ownership === null) patch.ownership = body.ownership;
 
   const item = await updateVehicle(id, patch);
   if (item === null) return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 });

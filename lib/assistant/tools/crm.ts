@@ -243,9 +243,9 @@ const listCrmCustomersTool: ToolDefinition = {
       },
     },
   },
-  async handler(args) {
+  async handler(args, ctx) {
     const entity = asString(args.entity);
-    const rows = await listCrmCustomers();
+    const rows = await listCrmCustomers(ctx.userId);
     return rows
       .filter((c) => !entity || c.entity === entity)
       .slice(0, 50)
@@ -281,7 +281,7 @@ const setEntityTool: ToolDefinition = {
     const entity = asString(args.entity);
     if (!customerId) return { error: 'A valid customerId is required.' };
     if (!entity) return { error: 'An entity is required.' };
-    const result = await updateCrmCustomer(customerId, { entity });
+    const result = await updateCrmCustomer(customerId, { entity }, ctx.userId);
     if (result === null) return { error: 'Client not found' };
     if ('error' in result) return result;
     await recordAuditEvent({

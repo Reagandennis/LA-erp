@@ -33,4 +33,12 @@ export type HandoverData = {
   stats: HandoverStats;
 };
 
+/** Who a new handover was announced to (mirrors lib/handover-notifications.ts). */
+export type HandoverNotified = {
+  /** `roster`: the next shift's people. `access`: everyone with Handover. `none`: nobody else to tell. */
+  via: 'roster' | 'access' | 'none';
+  shiftName: string | null;
+  names: string[];
+};
+
 export type StatusFilter = 'All' | 'Awaiting' | (typeof HANDOVER_STATUSES)[number];

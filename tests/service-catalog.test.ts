@@ -228,6 +228,41 @@ describe('several services on one event', () => {
     expect(removeServicePatch(first, 0).details).toEqual({ mode: 'Point-to-Point Transfer' });
   });
 
+  it('keeps a catalog name that has its own " + " in one piece', async () => {
+    const { removeServicePatch, servicePatch } = await import('../app/modules/trip-planning/[tripId]/_components/service-picker');
+    const { joinServices, splitServices } = await import('../lib/service-catalog');
+    // Every Vehicle Hire and Excursion service is named like these two.
+    const hire = { ...transfer, id: 3, code: 'UGA-HIR-SUV-STA-FD-EBB', name: 'SUV Standard + Security Driver - Full Day - Within Kampala', category: 'Vehicle Hire', subCategory: 'Full Day' };
+    const safari = { ...transfer, id: 4, code: 'UGA-EXC-SLC-EBB', name: 'Safari Land Cruiser + Driver Guide - Full Day - Uganda', category: 'Excursion & Safari', subCategory: 'Full Day' };
+
+    expect(splitServices(hire.name, hire.code)).toEqual([{ name: hire.name, code: hire.code }]);
+    // Typed in before codes existed: the name alone still reads as one service.
+    expect(splitServices(hire.name, '')).toEqual([{ name: hire.name, code: '' }]);
+
+    const first = { ...editor('transportation'), ...servicePatch(editor('transportation'), hire) } as EditorState;
+    const second = { ...first, details: servicePatch(first, greet).details! } as EditorState;
+    const all = servicePatch(second, safari).details!;
+    const picked = splitServices(all.service, all.serviceCode);
+    expect(picked).toEqual([
+      { name: hire.name, code: hire.code },
+      { name: greet.name, code: greet.code },
+      { name: safari.name, code: safari.code },
+    ]);
+    expect(joinServices(picked)).toEqual({ service: all.service, serviceCode: all.serviceCode });
+    // Taking the hire off leaves the other two whole.
+    expect(removeServicePatch({ ...first, details: all } as EditorState, 0).details).toMatchObject({
+      service: `${greet.name} + ${safari.name}`,
+      serviceCode: `${greet.code}, ${safari.code}`,
+    });
+    // A lone code says there is one service, whatever its name looks like.
+    expect(splitServices('Day Tour + Lunch', 'X-1')).toEqual([{ name: 'Day Tour + Lunch', code: 'X-1' }]);
+    // And two typed services with nothing to merge stay two.
+    expect(splitServices('Day Tour + Lunch', '')).toEqual([
+      { name: 'Day Tour', code: '' },
+      { name: 'Lunch', code: '' },
+    ]);
+  });
+
   it('still fits the event details once several long names are joined', () => {
     const service = Array.from({ length: 8 }, (_, i) => `Airport Transfer - SUV Executive - Nairobi (NBO) option ${i + 1}`).join(' + ');
     const parsed = tripItemDetailsSchema.safeParse({ service, serviceCode: Array(8).fill('KEN-TRF-APT-SUV-EXE-NBO').join(', '), mode: 'Airport Transfer' });

@@ -260,10 +260,10 @@ export function FleetModal({
   );
 }
 
-export function NoVehiclesNotice() {
+export function NoVehiclesNotice({ message }: { message?: string }) {
   return (
     <div className="mb-6 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-      There are no vehicles yet. Add them in the Vehicles module first, then record them here.
+      {message ?? 'There are no vehicles yet. Add them in the Vehicles module first, then record them here.'}
     </div>
   );
 }

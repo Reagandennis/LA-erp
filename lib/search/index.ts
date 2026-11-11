@@ -3,6 +3,7 @@ import 'server-only';
 import { PEOPLE_VIEWS } from '../people-views';
 import { plainText } from '../rich-text';
 import { prisma } from '../prisma';
+import { contactVisibleTo } from '@/lib/contacts';
 import { buildAccessFilter as quoteAccessFilter } from '../quotes';
 import { ADMIN_ROLE_NAME } from '../rbac';
 import { buildAccessFilter as tripAccessFilter } from '../trips';
@@ -219,9 +220,15 @@ const searchers: Searcher[] = [
     id: 'contacts',
     label: 'Contacts',
     modules: ['contact-list'],
-    async run({ term }) {
+    async run({ term, userId }) {
       const rows = await prisma.contact.findMany({
-        where: { OR: [{ name: like(term) }, { email: like(term) }, { phone: like(term) }, { role: like(term) }, { location: like(term) }] },
+        where: {
+          AND: [
+            // The shared directory, plus this person's own Google contacts; never anyone else's.
+            contactVisibleTo(userId),
+            { OR: [{ name: like(term) }, { email: like(term) }, { phone: like(term) }, { role: like(term) }, { location: like(term) }] },
+          ],
+        },
         select: { id: true, name: true, role: true, category: true, email: true, phone: true, location: true },
         orderBy: { name: 'asc' },
         take: FETCH,

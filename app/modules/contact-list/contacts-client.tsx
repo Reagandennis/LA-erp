@@ -292,7 +292,7 @@ export default function ContactsClient({
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Contacts</h1>
             <p className="text-gray-500 mt-1 text-sm">
-              Operational contacts, teams, and external relationships.
+              Operational contacts, teams, and external relationships. Contacts you import from Google stay private to you.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
@@ -389,6 +389,7 @@ export default function ContactsClient({
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-semibold text-gray-900 truncate">{c.name}</p>
                       <CategoryBadge category={c.category} />
+                      {c.private && <PrivateBadge />}
                     </div>
                     <p className="text-sm text-gray-500 truncate mt-0.5">{c.role || '—'}</p>
                     {c.customer && (
@@ -590,9 +591,13 @@ export default function ContactsClient({
                     <h3 className="text-xl font-semibold text-gray-900 truncate">{selected.name}</h3>
                   </div>
                   <p className="text-sm text-gray-500">{selected.role || '—'}</p>
-                  <div className="mt-1.5">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <CategoryBadge category={selected.category} />
+                    {selected.private && <PrivateBadge />}
                   </div>
+                  {selected.private && (
+                    <p className="mt-1.5 text-xs text-gray-400">Synced from your Google account. Nobody else can see it.</p>
+                  )}
                 </div>
               </div>
 
@@ -682,6 +687,21 @@ function DetailRow({ label, value, href }: { label: string; value: string | null
         <span className="text-sm text-gray-300">—</span>
       )}
     </div>
+  );
+}
+
+/** On a contact synced from the viewer's own Google account: theirs alone. */
+function PrivateBadge() {
+  return (
+    <span
+      title="Synced from your Google account. Only you can see this contact."
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[11px] font-medium text-gray-500"
+    >
+      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+      </svg>
+      Only you
+    </span>
   );
 }
 

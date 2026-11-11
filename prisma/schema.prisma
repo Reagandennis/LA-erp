@@ -54,6 +54,10 @@ model User {
   closedOutTrips                 TripCloseout[]                   @relation("TripCloseoutClosedBy")
   editedTripCloseouts            TripCloseout[]                   @relation("TripCloseoutUpdatedBy")
   tripShareLinks                 TripShareLink[]                  @relation("TripShareLinkCreatedBy")
+  createdVendors                 Vendor[]                         @relation("VendorCreatedBy")
+  stagedTripResources            TripResource[]                   @relation("TripResourceCreatedBy")
+  resolvedTripResources          TripResource[]                   @relation("TripResourceResolvedBy")
+  tripDayLogs                    TripDayLog[]                     @relation("TripDayLogUpdatedBy")
   ownedTrips                     Trip[]                           @relation("TripOwner")
   tripItineraryItemNotifications TripItineraryItemNotification[]
   createdConversations           Conversation[]                   @relation("ConversationCreatedBy")
@@ -82,6 +86,7 @@ model User {
   createdIntelAssessments        IntelAssessment[]                @relation("IntelAssessmentCreatedBy")
   createdHandovers               HandoverEntry[]                  @relation("HandoverCreatedBy")
   acknowledgedHandovers          HandoverEntry[]                  @relation("HandoverAcknowledgedBy")
+  handoverNotifications          HandoverNotification[]           @relation("HandoverNotificationUser")
   bulletinPosts                  BulletinPost[]                   @relation("BulletinAuthor")
   bulletinReads                  BulletinRead[]                   @relation("BulletinReader")
   createdContacts                Contact[]                        @relation("ContactCreatedBy")
@@ -359,10 +364,14 @@ model Contact {
   photoMime          String?
   photoSize          Int?
   photoContent       Bytes?
-  // Provenance: "manual" or "google". Google rows carry the People API resource
-  // name so a re-sync updates the same row instead of creating a duplicate.
+  // Provenance: "manual" or "google". A manual contact is in the shared
+  // directory. A Google one is private to whoever synced it (createdById):
+  // nobody else sees it (lib/contacts.ts, contactVisibleTo). Google rows carry
+  // the People API resource name so a re-sync updates the same row instead of
+  // creating a duplicate; it is unique per owner, not across them, since two
+  // people may sync the same Google account.
   source             String        @default("manual")
-  googleResourceName String?       @unique
+  googleResourceName String?
   syncedAt           DateTime?
   createdById        Int
   createdAt          DateTime      @default(now())
@@ -371,6 +380,7 @@ model Contact {
   customer           Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
   crmActivities      CrmActivity[]
 
+  @@unique([createdById, googleResourceName])
   @@index([createdById, createdAt])
   @@index([category])
   @@index([name])
@@ -523,14 +533,14 @@ model QuoteNotification {
 /// follow the Standardized Naming Master: `name` is the Standardized Service Name
 /// and `sku` the Service Code, unique and never reused.
 model Product {
-  id               Int           @id @default(autoincrement())
+  id               Int             @id @default(autoincrement())
   name             String
   description      String?
   sku              String?
-  defaultUnitPrice Decimal       @default(0) @db.Decimal(14, 2)
-  currency         String        @default("USD")
-  taxable          Boolean       @default(true)
-  archived         Boolean       @default(false)
+  defaultUnitPrice Decimal         @default(0) @db.Decimal(14, 2)
+  currency         String          @default("USD")
+  taxable          Boolean         @default(true)
+  archived         Boolean         @default(false)
   quickbooksName   String?
   /// Airport Services, Transfers, Vehicle Hire, Personnel, …
   category         String?
@@ -549,11 +559,13 @@ model Product {
   /// Notes / open items.
   notes            String?
   createdById      Int
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  createdBy        User          @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  createdBy        User            @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   quoteItems       QuoteItem[]
   invoiceItems     InvoiceItem[]
+  vendors          VendorService[]
+  tripResources    TripResource[]
 
   @@index([archived, name])
   @@index([createdById])
@@ -913,6 +925,9 @@ model Trip {
   logEntries    TripLogEntry[]
   closeout      TripCloseout?
   shareLink     TripShareLink?
+  /// The staged resource pool (lib/trip-resources.ts).
+  resources     TripResource[]
+  dayLogs       TripDayLog[]
 
   @@index([createdById, status])
   @@index([ownerId, status])
@@ -971,6 +986,8 @@ model TripItineraryItem {
   notifications         TripItineraryItemNotification[]
   attachments           TripItemAttachment[]
   travelers             TripItemTraveler[]
+  /// The staged resources this event draws on (see TripItemResource).
+  resources             TripItemResource[]
 
   @@index([dayId, position])
   @@index([tripId, category])
@@ -1033,6 +1050,7 @@ model TripDay {
   updatedAt DateTime            @updatedAt
   trip      Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
   items     TripItineraryItem[]
+  logs      TripDayLog[]
 
   @@index([tripId, dayNumber])
   @@index([tripId, dateKey])
@@ -1141,6 +1159,137 @@ model TripShareLink {
   createdBy          User?     @relation("TripShareLinkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 }
 
+// --- Vendors and the trip resource pool ---
+
+/// A supplier of services, vehicles and people (lib/vendors.ts). Our own fleet
+/// and staff sit under an `internal` vendor, so a trip stages everything the same way.
+model Vendor {
+  id            Int             @id @default(autoincrement())
+  name          String          @unique
+  internal      Boolean         @default(false)
+  /// Pending | Approved | Suspended. Only approved vendors are offered to trips.
+  status        String          @default("Pending")
+  /// The service countries (lib/service-catalog.ts) it works in.
+  countries     String[]        @default([])
+  contactName   String?
+  email         String?
+  phone         String?
+  notes         String?
+  createdById   Int?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  createdBy     User?           @relation("VendorCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  /// Its catalog: the Products & Services it supplies.
+  services      VendorService[]
+  vehicles      Vehicle[]
+  personnel     Personnel[]
+  tripResources TripResource[]
+
+  @@index([status])
+}
+
+/// One service in a vendor's catalog.
+model VendorService {
+  vendorId  Int
+  productId Int
+  createdAt DateTime @default(now())
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([vendorId, productId])
+  @@index([productId])
+}
+
+/// A service staged for a trip from an approved vendor's catalog: one entry in
+/// the trip's resource pool (lib/trip-resources.ts). Events pick their service
+/// from the pool, and what no event used is verified before the trip completes.
+model TripResource {
+  id            Int                @id @default(autoincrement())
+  tripId        Int
+  /// SetNull on both: the names below are copies, so the pool and the billing
+  /// log read the same after a vendor or a service is removed.
+  vendorId      Int?
+  productId     Int?
+  vendorName    String
+  serviceName   String
+  serviceCode   String?
+  category      String?
+  serviceClass  String?
+  unitOfMeasure String?
+  /// "YYYY-MM-DD", inclusive. Strings for the same reason as TripDay.dateKey.
+  startDate     String?
+  endDate       String?
+  quantity      Int                @default(1)
+  /// The Controller's verdict on a resource no event used, given before the
+  /// trip completes: "unused" (not billed) or "used" (billed, with the figures below).
+  resolution    String?
+  billableHours Decimal?           @db.Decimal(8, 2)
+  startOdometer Int?
+  endOdometer   Int?
+  resolvedAt    DateTime?
+  resolvedById  Int?
+  createdById   Int?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  trip          Trip               @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  vendor        Vendor?            @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  product       Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
+  createdBy     User?              @relation("TripResourceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  resolvedBy    User?              @relation("TripResourceResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  items         TripItemResource[]
+
+  @@index([tripId])
+  @@index([vendorId])
+  @@index([productId])
+}
+
+/// An event drawing on a staged resource. A resource with none was never used.
+model TripItemResource {
+  itemId     Int
+  resourceId Int
+  item       TripItineraryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  resource   TripResource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, resourceId])
+  @@index([resourceId])
+}
+
+/// One person's shift, or one vehicle's odometer, on one day of a trip: the
+/// daily hours and kilometres that billing reads (lib/trip-resources.ts).
+model TripDayLog {
+  id            Int      @id @default(autoincrement())
+  tripId        Int
+  dayId         Int
+  /// driver | officer | vehicle, and which one. SetNull keeps the line (and
+  /// its label) for billing after the person or vehicle leaves the register.
+  kind          String
+  driverId      Int?
+  officerId     Int?
+  vehicleId     Int?
+  /// Their name, or the vehicle's registration, as it was when logged.
+  label         String
+  /// "HH:MM" on the trip's clock. An end before the start ran past midnight.
+  shiftStart    String?
+  shiftEnd      String?
+  /// Kilometres on the clock.
+  startOdometer Int?
+  endOdometer   Int?
+  updatedById   Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  day           TripDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  driver        Driver?  @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  officer       Officer? @relation(fields: [officerId], references: [id], onDelete: SetNull)
+  vehicle       Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  updatedBy     User?    @relation("TripDayLogUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([dayId, driverId])
+  @@unique([dayId, officerId])
+  @@unique([dayId, vehicleId])
+  @@index([tripId])
+}
+
 // --- Task assignment: fleet & protection resources allocated to trips ---
 
 model Vehicle {
@@ -1156,17 +1305,25 @@ model Vehicle {
   photoMime      String?
   photoSize      Int?
   photoContent   Bytes?
+  /// "Internal" (our own fleet) or "External" (a supplier's); null on vehicles
+  /// nobody has classified yet. Follows the vendor's type once tagged to one.
+  ownership      String?
+  /// Whose vehicle it is; our own fleet sits under an internal vendor. Null until tagged.
+  vendorId       Int?
   createdById    Int
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   createdBy      User                 @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  vendor         Vendor?              @relation(fields: [vendorId], references: [id], onDelete: SetNull)
   assignments    TripAssignment[]
   itineraryItems TripItineraryItem[]
   fuelLogs       VehicleFuelLog[]
   maintenance    VehicleMaintenance[]
+  tripDayLogs    TripDayLog[]
 
   @@index([status])
   @@index([registration])
+  @@index([vendorId])
 }
 
 /// A fill-up for a fleet vehicle (lib/fleet-server.ts). History goes with the
@@ -1274,6 +1431,7 @@ model Driver {
   personnel      Personnel?          @relation(fields: [personnelId], references: [id], onDelete: SetNull)
   assignments    TripAssignment[]
   itineraryItems TripItineraryItem[]
+  tripDayLogs    TripDayLog[]
 
   @@index([status])
   @@index([name])
@@ -1302,6 +1460,7 @@ model Officer {
   personnel      Personnel?          @relation(fields: [personnelId], references: [id], onDelete: SetNull)
   assignments    TripAssignment[]
   itineraryItems TripItineraryItem[]
+  tripDayLogs    TripDayLog[]
 
   @@index([status])
   @@index([name])
@@ -1363,25 +1522,44 @@ model IntelAssessment {
 // Shift handover log — an outgoing shift records the situation; the incoming
 // shift acknowledges receipt. One row per handover.
 model HandoverEntry {
-  id               Int       @id @default(autoincrement())
+  id               Int                    @id @default(autoincrement())
   shiftDate        DateTime
-  shiftPeriod      String    @default("Day")
+  shiftPeriod      String                 @default("Day")
   post             String?
-  status           String    @default("Normal")
+  status           String                 @default("Normal")
   summary          String
   incidents        String?
   watchItems       String?
   createdById      Int
   acknowledgedById Int?
   acknowledgedAt   DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  createdBy        User      @relation("HandoverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  acknowledgedBy   User?     @relation("HandoverAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  createdBy        User                   @relation("HandoverCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  acknowledgedBy   User?                  @relation("HandoverAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  notifications    HandoverNotification[]
 
   @@index([shiftDate])
   @@index([status])
   @@index([acknowledgedById])
+}
+
+/// A handover waiting in the bell of someone on the incoming shift
+/// (lib/handover-notifications.ts). Read once they open it, or once anyone
+/// acknowledges the handover.
+model HandoverNotification {
+  id         Int           @id @default(autoincrement())
+  userId     Int
+  handoverId Int
+  type       String        @default("handover.new")
+  message    String
+  createdAt  DateTime      @default(now())
+  readAt     DateTime?
+  handover   HandoverEntry @relation(fields: [handoverId], references: [id], onDelete: Cascade)
+  user       User          @relation("HandoverNotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([handoverId])
 }
 
 /// A notice on the Bulletin Board (lib/bulletin.ts): company-wide, read by
@@ -1994,6 +2172,9 @@ model Personnel {
   engagement     String          @default("Employee")
   /// Vendor/consultancy that supplied them, when engagement is not Employee.
   supplierName   String?
+  /// The vendor profile they work under (Vendors/Suppliers); our own staff sit
+  /// under an internal vendor. Drivers and CPOs take it through their personnel record.
+  vendorId       Int?
   /// Radio call sign — CPOs.
   callSign       String?
   /// CPO | Team Leader | Detail Leader — CPOs.
@@ -2009,6 +2190,7 @@ model Personnel {
   updatedAt      DateTime        @updatedAt
   createdBy      User            @relation("PersonnelCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   user           User?           @relation("PersonnelUser", fields: [userId], references: [id], onDelete: SetNull)
+  vendor         Vendor?         @relation(fields: [vendorId], references: [id], onDelete: SetNull)
   licenses       DriverLicense[]
   driverProfile  Driver?
   officerProfile Officer?
@@ -2016,6 +2198,7 @@ model Personnel {
   @@index([department])
   @@index([status])
   @@index([name])
+  @@index([vendorId])
 }
 
 // A personal, user-scoped quick note (sticky-board style).

@@ -37,7 +37,7 @@ export const MODULE_SOURCES: Record<string, readonly string[]> = {
   'ops-dashboard': ['Trip', 'Vehicle', 'Driver', 'Officer', 'HandoverEntry', 'PersonalTodo', 'MessagingAccount', 'Map', 'Traveler'],
   handover: ['HandoverEntry'],
   map: ['Map'],
-  'trip-planning': ['Trip', 'Traveler', 'Vehicle', 'Driver', 'Officer', 'Personnel', 'Customer', 'Quote'],
+  'trip-planning': ['Trip', 'Traveler', 'Vehicle', 'Driver', 'Officer', 'Personnel', 'Customer', 'Quote', 'Vendor'],
   'trip-closeout': ['Trip'],
   'task-assignment': ['Trip', 'Vehicle', 'Driver', 'Officer', 'Personnel'],
   'task-log-entry': ['Trip', 'HandoverEntry'],
@@ -49,7 +49,7 @@ export const MODULE_SOURCES: Record<string, readonly string[]> = {
   // Fleet
   vehicles: ['Vehicle', 'TripAssignment', 'Driver'],
   'car-fuel': ['Vehicle'],
-  'car-maintenance': ['Vehicle'],
+  'car-maintenance': ['Vehicle', 'Trip'],
 
   // Workforce and time
   personnel: PEOPLE,
@@ -67,6 +67,7 @@ export const MODULE_SOURCES: Record<string, readonly string[]> = {
   customers: ['Customer', 'Contact', 'Deal', 'CrmActivity', 'Quote', 'Invoice'],
   'contact-list': ['Contact', 'Customer'],
   'products-services': ['Product', 'ServiceCatalogImport'],
+  'vendors-suppliers': ['Vendor', 'Vehicle', 'Personnel', 'Product', 'TripResource'],
   'contract-renewal': ['Contract'],
   reports: ['Quote', 'Invoice', 'Trip', 'Customer', 'Deal', 'Vehicle', 'Feedback'],
 
@@ -94,7 +95,6 @@ export const MODULE_SOURCES: Record<string, readonly string[]> = {
   'countdown-timer': [],
   phone: [],
   weather: [],
-  'vendors-suppliers': [],
   'google-drive-storage': [],
 };
 

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.crm);
   if (response || !auth) return response;
 
-  return NextResponse.json({ activities: await listCrmActivities() });
+  return NextResponse.json({ activities: await listCrmActivities(auth.user.id) });
 }
 
 export async function POST(request: NextRequest) {

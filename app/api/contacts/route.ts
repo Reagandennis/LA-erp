@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const { auth, response } = await requireModuleRequest(request, ...API_ACCESS.contacts);
   if (response || !auth) return response;
 
-  const [contacts, customers] = await Promise.all([listContacts(), listCustomerOptions()]);
+  const [contacts, customers] = await Promise.all([listContacts(auth.user.id), listCustomerOptions()]);
   return NextResponse.json({ contacts, customers });
 }
 

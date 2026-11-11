@@ -454,6 +454,8 @@ export default function FlightFields({
       {/* Who meets them at arrivals, or takes them to departures. */}
       <CrewFields
         options={crewOptions}
+        date={editor.date}
+        dayId={editor.dayId}
         driverId={editor.driverId}
         officerId={editor.officerId}
         vehicleId={editor.vehicleId}

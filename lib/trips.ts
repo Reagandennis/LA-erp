@@ -7,6 +7,15 @@ import { crewGaps } from './crew-gaps';
 import { addDays, dateKey, parseDateKey } from './date-grid';
 import { prisma } from './prisma';
 import { syncCrewGapNotifications } from './trip-notifications';
+import {
+  type DayLogKind,
+  type ResourceResolution,
+  type TripDayLogSummary,
+  type TripResourceSummary,
+  resourceKind,
+  unverifiedResources,
+  verificationNotice,
+} from './trip-resource-model';
 import type { ServiceCountry } from './service-catalog';
 import {
   buildTripReference,
@@ -50,6 +59,8 @@ export interface TripItineraryItemDraft {
   vehicleId?: number | null;
   /** Who the event is for; none means the whole party. */
   travelers?: TripTravelerInput[];
+  /** The staged resources (the trip's pool) its services were picked from. */
+  resourceIds?: number[];
 }
 
 export interface TripDaySummary {
@@ -97,6 +108,8 @@ export interface TripItineraryItemSummary {
   vehicle: { id: number; registration: string; make: string | null; model: string | null; type: string } | null;
   /** The trip's travellers this event is for, lead first. Empty means the whole party. */
   travelers: Array<{ id: number; name: string }>;
+  /** The staged resources this event draws on (ids into the trip's `resources`). */
+  resourceIds: number[];
 }
 
 export interface TripItemAttachmentSummary {
@@ -155,6 +168,10 @@ export interface TravelerOption {
 export interface TripDetail extends TripSummary {
   items: TripItineraryItemSummary[];
   days: TripDaySummary[];
+  /** The staged resource pool, in the order it was staged (lib/trip-resources.ts). */
+  resources: TripResourceSummary[];
+  /** Each day's shift and odometer lines. */
+  dayLogs: TripDayLogSummary[];
   /** Set when item costs were left out because the viewer can't see quotes (see lib/trip-costs.ts). */
   costsHidden?: boolean;
 }
@@ -185,7 +202,45 @@ interface TripRecord {
   sourceQuote: { id: number; reference: string } | null;
   items: TripItineraryItemRecord[];
   days: TripDayRecord[];
+  resources?: TripResourceRecord[];
+  dayLogs?: TripDayLogRecord[];
   _count?: { assignments: number; logEntries?: number; items?: number };
+}
+
+interface TripResourceRecord {
+  id: number;
+  vendorId: number | null;
+  productId: number | null;
+  vendorName: string;
+  serviceName: string;
+  serviceCode: string | null;
+  category: string | null;
+  serviceClass: string | null;
+  unitOfMeasure: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  quantity: number;
+  resolution: string | null;
+  billableHours: Prisma.Decimal | null;
+  startOdometer: number | null;
+  endOdometer: number | null;
+  resolvedAt: Date | null;
+  resolvedBy: { id: number; name: string } | null;
+  product: { subCategory: string | null } | null;
+}
+
+interface TripDayLogRecord {
+  id: number;
+  dayId: number;
+  kind: string;
+  driverId: number | null;
+  officerId: number | null;
+  vehicleId: number | null;
+  label: string;
+  shiftStart: string | null;
+  shiftEnd: string | null;
+  startOdometer: number | null;
+  endOdometer: number | null;
 }
 
 /** What the list query returns: counts in place of the itinerary. */
@@ -241,6 +296,7 @@ interface TripItineraryItemRecord {
   officer?: TripItineraryItemSummary['officer'];
   vehicle?: TripItineraryItemSummary['vehicle'];
   travelers?: Array<{ tripTravelerId: number; tripTraveler: { traveler: { id: number; name: string } } }>;
+  resources?: Array<{ resourceId: number }>;
 }
 
 const tripInclude = {
@@ -271,10 +327,21 @@ const tripInclude = {
         // The trip's order: lead first, then as they joined.
         orderBy: [{ tripTraveler: { isPrimary: 'desc' as const } }, { tripTravelerId: 'asc' as const }],
       },
+      resources: { select: { resourceId: true }, orderBy: [{ resourceId: 'asc' as const }] },
     },
   },
   days: {
     orderBy: [{ dayNumber: 'asc' as const }],
+  },
+  resources: {
+    orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
+    include: {
+      resolvedBy: { select: { id: true, name: true } },
+      product: { select: { subCategory: true } },
+    },
+  },
+  dayLogs: {
+    orderBy: [{ id: 'asc' as const }],
   },
   _count: { select: { assignments: true, logEntries: true } },
 };
@@ -484,7 +551,56 @@ function serializeItem(item: TripItineraryItemRecord): TripItineraryItemSummary 
     officer: item.officer ?? null,
     vehicle: item.vehicle ?? null,
     travelers: (item.travelers ?? []).map((link) => link.tripTraveler.traveler),
+    resourceIds: (item.resources ?? []).map((link) => link.resourceId),
   };
+}
+
+function serializeResource(row: TripResourceRecord): TripResourceSummary {
+  return {
+    id: row.id,
+    vendorId: row.vendorId,
+    vendorName: row.vendorName,
+    productId: row.productId,
+    serviceName: row.serviceName,
+    serviceCode: row.serviceCode,
+    category: row.category,
+    subCategory: row.product?.subCategory ?? null,
+    serviceClass: row.serviceClass,
+    unitOfMeasure: row.unitOfMeasure,
+    kind: resourceKind(row.category),
+    startDate: row.startDate,
+    endDate: row.endDate,
+    quantity: row.quantity,
+    resolution: row.resolution === 'used' || row.resolution === 'unused' ? (row.resolution as ResourceResolution) : null,
+    billableHours: toNumber(row.billableHours),
+    startOdometer: row.startOdometer,
+    endOdometer: row.endOdometer,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    resolvedBy: row.resolvedBy,
+  };
+}
+
+function serializeDayLog(row: TripDayLogRecord): TripDayLogSummary {
+  const kind: DayLogKind = row.kind === 'vehicle' ? 'vehicle' : row.kind === 'officer' ? 'officer' : 'driver';
+  return {
+    id: row.id,
+    dayId: row.dayId,
+    kind,
+    subjectId: kind === 'vehicle' ? row.vehicleId : kind === 'officer' ? row.officerId : row.driverId,
+    label: row.label,
+    shiftStart: row.shiftStart,
+    shiftEnd: row.shiftEnd,
+    startOdometer: row.startOdometer,
+    endOdometer: row.endOdometer,
+  };
+}
+
+/** The staged resources an event names must be in this trip's pool. */
+function resourceProblem(trip: TripRecord, lists: Array<number[] | undefined>): string | null {
+  const pool = new Set((trip.resources ?? []).map((resource) => resource.id));
+  return lists.some((ids) => (ids ?? []).some((id) => !pool.has(id)))
+    ? 'That staged resource is no longer in the trip\'s pool'
+    : null;
 }
 
 /**
@@ -569,6 +685,8 @@ function serializeDetail(record: TripRecord): TripDetail {
     ...serializeSummary(record),
     items: record.items.map(serializeItem),
     days: (record.days ?? []).map(serializeDay),
+    resources: (record.resources ?? []).map(serializeResource),
+    dayLogs: (record.dayLogs ?? []).map(serializeDayLog),
   };
 }
 
@@ -804,6 +922,23 @@ export async function getTripForUser(params: {
 export async function getTripDetail(id: number): Promise<TripDetail | null> {
   const record = await tripClient.findUnique({ where: { id }, include: tripInclude });
   return record ? serializeDetail(record) : null;
+}
+
+/**
+ * The trip, when this user may change it; otherwise why not. For the modules
+ * that hang their own records on a trip (lib/trip-resources.ts).
+ */
+export async function getEditableTrip(params: {
+  id: number;
+  userId: number;
+  isAdmin: boolean;
+}): Promise<{ trip: TripDetail } | { error: string; status: number }> {
+  const record = await tripClient.findUnique({ where: { id: params.id }, include: tripInclude });
+  if (!record) return { error: 'Trip not found', status: 404 };
+  if (!canEditTrip(record, params.userId, params.isAdmin)) {
+    return { error: `Cannot edit a trip in status "${record.status}"`, status: 400 };
+  }
+  return { trip: serializeDetail(record) };
 }
 
 /** Who may change a trip and its itinerary. Shared with the attachment routes. */
@@ -1079,6 +1214,15 @@ export async function updateTrip(params: {
   if (!canEditTrip(existing, params.userId, params.isAdmin)) {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
+  // A staged resource no event used is verified (billed or not) before the
+  // trip closes; the trip page does that and completes it in one step.
+  if (params.input.status === 'Completed' && existing.status !== 'Completed') {
+    const detail = serializeDetail(existing);
+    const pending = unverifiedResources(detail.resources, detail.items);
+    if (pending.length > 0) {
+      return { error: `${verificationNotice(pending.length)} before this trip can be completed`, status: 409 };
+    }
+  }
 
   const customerId = params.input.customerId ?? existing.customerId;
   try {
@@ -1157,6 +1301,8 @@ export async function addTripItems(params: {
   }
   const crewError = await crewProblem(params.items);
   if (crewError) return { error: crewError, status: 400 };
+  const resourceError = resourceProblem(existing, params.items.map((item) => item.resourceIds));
+  if (resourceError) return { error: resourceError, status: 400 };
 
   let outcome: { detail: TripDetail; createdIds: number[] };
   try {
@@ -1215,6 +1361,10 @@ export async function addTripItems(params: {
         createdIds.map((itemId, idx) => ({ itemId, travelers: params.items[idx].travelers ?? [] })),
         params.userId,
       );
+      const resourceLinks = createdIds.flatMap((itemId, idx) =>
+        [...new Set(params.items[idx].resourceIds ?? [])].map((resourceId) => ({ itemId, resourceId })),
+      );
+      if (resourceLinks.length > 0) await tx.tripItemResource.createMany({ data: resourceLinks });
       const fresh = await trip.findUnique({ where: { id: params.tripId }, include: tripInclude });
       return { detail: serializeDetail(fresh!), createdIds };
     });
@@ -1265,6 +1415,8 @@ export interface TripItineraryItemUpdateInput {
   vehicleId?: number | null;
   /** Replaces the event's travellers; left out, they stay as they are. */
   travelers?: TripTravelerInput[];
+  /** Replaces the staged resources it draws on; left out, they stay as they are. */
+  resourceIds?: number[];
 }
 
 export async function updateTripItem(params: {
@@ -1288,6 +1440,8 @@ export async function updateTripItem(params: {
   }
   const crewError = await crewProblem([params.input], item);
   if (crewError) return { error: crewError, status: 400 };
+  const resourceError = resourceProblem(existing, [params.input.resourceIds]);
+  if (resourceError) return { error: resourceError, status: 400 };
 
   // Crew before and after the edit, so the gap note can follow it.
   const pick = <K extends 'category' | 'driverId' | 'officerId' | 'vehicleId' | 'details'>(key: K) =>
@@ -1374,6 +1528,15 @@ export async function updateTripItem(params: {
           [{ itemId: params.itemId, travelers: params.input.travelers }],
           params.userId,
         );
+      }
+      if (params.input.resourceIds !== undefined) {
+        await tx.tripItemResource.deleteMany({ where: { itemId: params.itemId } });
+        const resourceIds = [...new Set(params.input.resourceIds)];
+        if (resourceIds.length > 0) {
+          await tx.tripItemResource.createMany({
+            data: resourceIds.map((resourceId) => ({ itemId: params.itemId, resourceId })),
+          });
+        }
       }
       const fresh = await trip.findUnique({ where: { id: params.tripId }, include: tripInclude });
       return serializeDetail(fresh!);
@@ -1847,6 +2010,11 @@ export async function duplicateTripDay(params: {
         })),
       );
       if (travelers.length > 0) await tx.tripItemTraveler.createMany({ data: travelers });
+      // And the same staged resources: the repeated day draws on the same pool.
+      const resources = copies.flatMap((copy) =>
+        (sourceItems[copy.position]?.resources ?? []).map((link) => ({ itemId: copy.id, resourceId: link.resourceId })),
+      );
+      if (resources.length > 0) await tx.tripItemResource.createMany({ data: resources });
     }
 
     const ordered = [...days];

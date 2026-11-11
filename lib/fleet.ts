@@ -363,3 +363,254 @@ export function vehicleLabel(vehicle: FleetVehicleRef): string {
   const name = [vehicle.make, vehicle.model].filter(Boolean).join(' ');
   return name ? `${vehicle.registration} · ${name}` : vehicle.registration;
 }
+
+// --- Readiness board -----------------------------------------------------------
+//
+// Car Maintenance as operations sees it: not a ledger of jobs but one line per
+// vehicle saying whether it can go out, what will take it off the road next,
+// and whether that collides with a trip it is on.
+
+/** A vehicle's time on a trip, in calendar days; null dates are a trip still to be dated. */
+export type VehicleTripUse = {
+  vehicleId: number;
+  tripId: number;
+  reference: string;
+  from: string | null;
+  to: string | null;
+};
+
+/** Can it go out? Worst first. */
+export type VehicleReadiness = 'off-road' | 'overdue' | 'due-soon' | 'ready' | 'no-history';
+
+export const READINESS_ORDER: VehicleReadiness[] = ['off-road', 'overdue', 'due-soon', 'ready', 'no-history'];
+
+export const READINESS_LABEL: Record<VehicleReadiness, string> = {
+  'off-road': 'Off the road',
+  overdue: 'Overdue',
+  'due-soon': 'Due soon',
+  ready: 'Ready',
+  'no-history': 'No history',
+};
+
+/** Something a vehicle is due for: a planned job, or the next-due a finished job left behind. */
+export type UpcomingDue = {
+  /** The planned job, or the completed job whose next-due this is. */
+  item: MaintenanceDto;
+  basis: 'planned' | 'next-date' | 'next-km';
+  dueDate: string | null;
+  dueKm: number | null;
+  /** Days until dueDate, negative once passed; null without a date. */
+  daysLeft: number | null;
+  state: 'overdue' | 'due-soon' | 'later';
+};
+
+/** Maintenance and a trip wanting the same vehicle on the same day. */
+export type TripClash = {
+  job: MaintenanceDto;
+  trip: VehicleTripUse;
+  message: string;
+};
+
+export type FleetBoardRow = {
+  vehicle: FleetVehicleRef;
+  readiness: VehicleReadiness;
+  /** One line saying why it has that readiness. */
+  reason: string;
+  /** Jobs in progress: what is keeping it in the garage. */
+  inGarage: MaintenanceDto[];
+  /** What it is due for, most pressing first. */
+  dues: UpcomingDue[];
+  /** Finished and cancelled work, latest first. */
+  closed: MaintenanceDto[];
+  lastDone: MaintenanceDto | null;
+  /** The highest reading on file, from fuel, maintenance and trip logs. */
+  odometerKm: number | null;
+  /** Trips it is on now or later, soonest first, one line per trip. */
+  trips: VehicleTripUse[];
+  onTripToday: VehicleTripUse | null;
+  clashes: TripClash[];
+};
+
+/** How soon a vehicle in the garage must be flagged against a trip it is due on. */
+export const GARAGE_CLASH_DAYS = 7;
+
+const DUE_RANK: Record<UpcomingDue['state'], number> = { overdue: 0, 'due-soon': 1, later: 2 };
+
+function dueState(daysLeft: number): UpcomingDue['state'] {
+  if (daysLeft < 0) return 'overdue';
+  return daysLeft <= DUE_SOON_DAYS ? 'due-soon' : 'later';
+}
+
+/** "4 days overdue", "today", "in 6 days". */
+export function dueWhen(daysLeft: number): string {
+  if (daysLeft < 0) return `${dayCount(-daysLeft)} overdue`;
+  if (daysLeft === 0) return 'today';
+  return `in ${dayCount(daysLeft)}`;
+}
+
+/** "Service planned <date> · 4 days overdue", "Service due at 90,000 km · now 89,400 km". */
+export function dueSentence(due: UpcomingDue, currentKm: number | null): string {
+  const what = due.item.category;
+  if (due.basis === 'next-km') {
+    const now = currentKm != null ? ` · now ${km(currentKm)}` : '';
+    return due.state === 'overdue' ? `${what} past due at ${km(due.dueKm!)}${now}` : `${what} due at ${km(due.dueKm!)}${now}`;
+  }
+  const verb = due.basis === 'planned' ? 'planned' : 'due';
+  if (!due.dueDate) return `${what} planned, no date yet`;
+  return `${what} ${verb} ${formatDateKey(due.dueDate)} · ${dueWhen(due.daysLeft!)}`;
+}
+
+/** A trip's days as one phrase, in the app's date style: a range, a single day, or "dates to be set". */
+export function tripDays(trip: Pick<VehicleTripUse, 'from' | 'to'>): string {
+  if (!trip.from || !trip.to) return 'dates to be set';
+  if (trip.from === trip.to) return formatDateKey(trip.from);
+  // The year is said once, at the end, unless the trip runs over New Year.
+  const start = dateKeyToDate(trip.from).toLocaleDateString(APP_LOCALE, {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'short',
+    ...(trip.from.slice(0, 4) === trip.to.slice(0, 4) ? {} : { year: 'numeric' }),
+  });
+  return `${start} – ${formatDateKey(trip.to)}`;
+}
+
+/** One line per vehicle and trip: the bookings of one trip (allocation and movements) span its first to last day. */
+function mergeTripUse(uses: VehicleTripUse[], today: string): Map<number, VehicleTripUse[]> {
+  const merged = new Map<string, VehicleTripUse>();
+  for (const use of uses) {
+    const key = `${use.vehicleId}:${use.tripId}`;
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, { ...use });
+      continue;
+    }
+    if (use.from && (!current.from || use.from < current.from)) current.from = use.from;
+    if (use.to && (!current.to || use.to > current.to)) current.to = use.to;
+  }
+  const byVehicle = new Map<number, VehicleTripUse[]>();
+  for (const use of merged.values()) {
+    // Over and done with: no longer holds the vehicle.
+    if (use.to && use.to < today) continue;
+    byVehicle.set(use.vehicleId, [...(byVehicle.get(use.vehicleId) ?? []), use]);
+  }
+  for (const list of byVehicle.values()) {
+    // Dated trips soonest first; undated ones after them.
+    list.sort((a, b) => (a.from ?? '9999').localeCompare(b.from ?? '9999') || a.reference.localeCompare(b.reference));
+  }
+  return byVehicle;
+}
+
+/**
+ * The fleet as operations needs it: each vehicle with whether it can go out,
+ * why, what it is due for, the trips it is on, and where maintenance and a
+ * trip want it on the same day. Sorted with what needs a decision at the top.
+ */
+export function buildFleetBoard(
+  vehicles: FleetVehicleRef[],
+  items: MaintenanceDto[],
+  odometers: Record<number, number>,
+  tripUse: VehicleTripUse[],
+  today: string,
+): FleetBoardRow[] {
+  const byVehicle = new Map<number, MaintenanceDto[]>();
+  for (const item of items) byVehicle.set(item.vehicle.id, [...(byVehicle.get(item.vehicle.id) ?? []), item]);
+  const tripsByVehicle = mergeTripUse(tripUse, today);
+
+  const rows = vehicles.map((vehicle): FleetBoardRow => {
+    const mine = byVehicle.get(vehicle.id) ?? [];
+    const readings = [odometers[vehicle.id], ...mine.map((item) => item.odometerKm)].filter((n): n is number => n != null);
+    const odometerKm = readings.length > 0 ? Math.max(...readings) : null;
+
+    const inGarage = mine.filter((item) => item.status === 'In progress');
+    const dues: UpcomingDue[] = [];
+    for (const item of mine) {
+      if (item.status !== 'Planned') continue;
+      const daysLeft = item.scheduledFor ? daysBetween(today, item.scheduledFor) : null;
+      dues.push({
+        item,
+        basis: 'planned',
+        dueDate: item.scheduledFor,
+        dueKm: null,
+        daysLeft,
+        state: daysLeft === null ? 'later' : dueState(daysLeft),
+      });
+    }
+    for (const item of outstandingNextDue(mine)) {
+      if (item.nextDueAt) {
+        const daysLeft = daysBetween(today, item.nextDueAt);
+        dues.push({ item, basis: 'next-date', dueDate: item.nextDueAt, dueKm: null, daysLeft, state: dueState(daysLeft) });
+      }
+      if (item.nextDueKm != null) {
+        const state =
+          odometerKm == null ? 'later' : odometerKm > item.nextDueKm ? 'overdue' : odometerKm >= item.nextDueKm - KM_REMINDER_MARGIN ? 'due-soon' : 'later';
+        dues.push({ item, basis: 'next-km', dueDate: null, dueKm: item.nextDueKm, daysLeft: null, state });
+      }
+    }
+    dues.sort(
+      (a, b) =>
+        DUE_RANK[a.state] - DUE_RANK[b.state] ||
+        (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') ||
+        (a.dueKm ?? 0) - (b.dueKm ?? 0) ||
+        a.item.id - b.item.id,
+    );
+
+    const closed = mine
+      .filter((item) => !isOpenMaintenance(item))
+      .sort((a, b) => (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt) || b.id - a.id);
+    const lastDone = closed.find((item) => item.status === 'Completed') ?? null;
+
+    const trips = tripsByVehicle.get(vehicle.id) ?? [];
+    const onTripToday = trips.find((trip) => trip.from && trip.to && trip.from <= today && today <= trip.to) ?? null;
+
+    const clashes: TripClash[] = [];
+    for (const trip of trips) {
+      if (!trip.from || !trip.to) continue;
+      for (const due of dues) {
+        if (due.basis !== 'planned' || !due.dueDate || due.dueDate < trip.from || due.dueDate > trip.to) continue;
+        clashes.push({
+          job: due.item,
+          trip,
+          message: `${due.item.category} is booked for ${formatDateKey(due.dueDate)}, a day it is on trip ${trip.reference} (${tripDays(trip)})`,
+        });
+      }
+      const startsIn = daysBetween(today, trip.from);
+      if (inGarage.length > 0 && startsIn <= GARAGE_CLASH_DAYS) {
+        clashes.push({
+          job: inGarage[0]!,
+          trip,
+          message:
+            startsIn <= 0
+              ? `In the garage, but on trip ${trip.reference} now (${tripDays(trip)})`
+              : `In the garage, and due on trip ${trip.reference} ${dueWhen(startsIn)} (${tripDays(trip)})`,
+        });
+      }
+    }
+
+    const worst = dues[0];
+    const readiness: VehicleReadiness =
+      inGarage.length > 0
+        ? 'off-road'
+        : worst?.state === 'overdue'
+          ? 'overdue'
+          : worst?.state === 'due-soon'
+            ? 'due-soon'
+            : mine.length === 0
+              ? 'no-history'
+              : 'ready';
+    const reason =
+      readiness === 'off-road'
+        ? `In the garage: ${inGarage[0]!.title}${inGarage.length > 1 ? ` (+${inGarage.length - 1} more)` : ''}`
+        : readiness === 'no-history'
+          ? 'Nothing on record yet'
+          : worst
+            ? readiness === 'ready'
+              ? `Next: ${dueSentence(worst, odometerKm)}`
+              : dueSentence(worst, odometerKm)
+            : 'Nothing due';
+
+    return { vehicle, readiness, reason, inGarage, dues, closed, lastDone, odometerKm, trips, onTripToday, clashes };
+  });
+
+  const rank = (row: FleetBoardRow) => (row.clashes.length > 0 ? -1 : READINESS_ORDER.indexOf(row.readiness));
+  return rows.sort((a, b) => rank(a) - rank(b) || a.vehicle.registration.localeCompare(b.vehicle.registration));
+}

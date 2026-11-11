@@ -4,6 +4,7 @@ import { listCalendarNotifications, materializeDueCalendarReminders } from './ca
 import { listMessageNotifications } from './communication';
 import { listFileNotifications } from './files';
 import { listMaintenanceNotifications, materializeMaintenanceReminders } from './fleet-reminders';
+import { listHandoverNotifications } from './handover-notifications';
 import { listInvoiceNotifications } from './invoices';
 import { prisma } from './prisma';
 import { listQuoteNotifications } from './quotes';
@@ -63,8 +64,8 @@ async function settle<T>(source: string, work: Promise<T[]>): Promise<T[]> {
  * separate round-trips (each re-authenticating) with a single request whose
  * queries run concurrently on the server.
  */
-export async function loadNotificationFeed(userId: number, access: { maintenance?: boolean } = {}) {
-  const [todo, quote, invoice, trip, message, file, calendar, maintenance, escalation] = await Promise.all([
+export async function loadNotificationFeed(userId: number, access: { maintenance?: boolean; handover?: boolean } = {}) {
+  const [todo, quote, invoice, trip, message, file, calendar, maintenance, escalation, handover] = await Promise.all([
     settle('todo', listPersonalTodoNotifications(userId)),
     settle('quote', listQuoteNotifications(userId)),
     settle('invoice', listInvoiceNotifications(userId)),
@@ -86,9 +87,11 @@ export async function loadNotificationFeed(userId: number, access: { maintenance
         )
       : Promise.resolve([]),
     settle('escalation', listTripEscalationNotifications(userId)),
+    // Only for those who can still open Handover.
+    access.handover ? settle('handover', listHandoverNotifications(userId)) : Promise.resolve([]),
   ]);
 
-  return { todo, quote, invoice, trip, message, file, calendar, maintenance, escalation };
+  return { todo, quote, invoice, trip, message, file, calendar, maintenance, escalation, handover };
 }
 
 export type NotificationFeed = Awaited<ReturnType<typeof loadNotificationFeed>>;

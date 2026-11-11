@@ -13,6 +13,8 @@ import {
 // --- Option sets -----------------------------------------------------------
 
 export const VEHICLE_TYPES = ['Sedan', 'SUV', 'Van', 'Truck', 'Armoured', 'Motorcycle'] as const;
+/** Our own fleet, or a supplier's. A vehicle nobody has classified yet has neither. */
+export const VEHICLE_OWNERSHIPS = ['Internal', 'External'] as const;
 export const RESOURCE_STATUSES = ['Available', 'Assigned', 'Maintenance', 'Off duty'] as const;
 export const OFFICER_GRADES = ['CPO', 'Team Leader', 'Detail Leader', 'Driver/CPO'] as const;
 export const ASSIGNMENT_STATUSES = ['Planned', 'Confirmed', 'Active', 'Completed', 'Cancelled'] as const;
@@ -50,6 +52,7 @@ function isActiveStatus(status: string): boolean {
 }
 
 export type VehicleType = (typeof VEHICLE_TYPES)[number];
+export type VehicleOwnership = (typeof VEHICLE_OWNERSHIPS)[number];
 export type ResourceStatus = (typeof RESOURCE_STATUSES)[number];
 export type OfficerGrade = (typeof OFFICER_GRADES)[number];
 export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
@@ -58,6 +61,9 @@ function pickStatus(value: unknown): ResourceStatus {
   return (RESOURCE_STATUSES as readonly string[]).includes(value as string)
     ? (value as ResourceStatus)
     : 'Available';
+}
+function pickOwnership(value: unknown): VehicleOwnership | null {
+  return (VEHICLE_OWNERSHIPS as readonly string[]).includes(value as string) ? (value as VehicleOwnership) : null;
 }
 function pickVehicleType(value: unknown): VehicleType {
   return (VEHICLE_TYPES as readonly string[]).includes(value as string)
@@ -92,6 +98,10 @@ export type VehicleSummary = {
   status: string;
   capacity: number | null;
   notes: string | null;
+  /** Ours or a supplier's; null until someone says. */
+  ownership: VehicleOwnership | null;
+  /** The vendor profile it is tagged to in Vendors/Suppliers, if any. */
+  vendor: { id: number; name: string } | null;
   hasPhoto: boolean;
   createdAt: string;
 };
@@ -167,6 +177,8 @@ const VEHICLE_SELECT = {
   status: true,
   capacity: true,
   notes: true,
+  ownership: true,
+  vendor: { select: { id: true, name: true } },
   photoName: true,
   createdAt: true,
 } as const;
@@ -218,11 +230,12 @@ const ASSIGNMENT_INCLUDE = {
 type VehicleRow = {
   id: number; registration: string; make: string | null; model: string | null;
   type: string; status: string; capacity: number | null; notes: string | null;
+  ownership: string | null; vendor: { id: number; name: string } | null;
   photoName: string | null; createdAt: Date;
 };
 function serializeVehicle(row: VehicleRow): VehicleSummary {
-  const { photoName, createdAt, ...rest } = row;
-  return { ...rest, hasPhoto: Boolean(photoName), createdAt: createdAt.toISOString() };
+  const { photoName, createdAt, ownership, ...rest } = row;
+  return { ...rest, ownership: pickOwnership(ownership), hasPhoto: Boolean(photoName), createdAt: createdAt.toISOString() };
 }
 
 type DriverRow = {
@@ -531,6 +544,8 @@ export async function createVehicle(input: {
   status?: string;
   capacity?: number | null;
   notes?: string | null;
+  /** "Internal" or "External"; left out, the vehicle is unclassified. */
+  ownership?: string | null;
   photo?: PhotoInput | null;
 }): Promise<VehicleSummary> {
   const registration = input.registration.trim();
@@ -544,6 +559,7 @@ export async function createVehicle(input: {
       status: pickStatus(input.status),
       capacity: input.capacity && Number.isFinite(input.capacity) ? Math.trunc(input.capacity) : null,
       notes: trimOrNull(input.notes),
+      ownership: pickOwnership(input.ownership),
       createdById: input.userId,
       ...photoData(input.photo),
     },
@@ -554,9 +570,21 @@ export async function createVehicle(input: {
 
 export async function updateVehicle(
   id: number,
-  patch: { registration?: string; make?: string | null; model?: string | null; type?: string; status?: string; capacity?: number | null; notes?: string | null },
+  patch: {
+    registration?: string;
+    make?: string | null;
+    model?: string | null;
+    type?: string;
+    status?: string;
+    capacity?: number | null;
+    notes?: string | null;
+    ownership?: string | null;
+  },
 ): Promise<VehicleSummary | null> {
-  const existing = await prisma.vehicle.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.vehicle.findUnique({
+    where: { id },
+    select: { id: true, vendor: { select: { internal: true } } },
+  });
   if (!existing) return null;
   const data: Record<string, unknown> = {};
   if (patch.registration !== undefined) {
@@ -569,6 +597,15 @@ export async function updateVehicle(
   if (patch.status !== undefined) data.status = pickStatus(patch.status);
   if (patch.capacity !== undefined) data.capacity = patch.capacity && Number.isFinite(patch.capacity) ? Math.trunc(patch.capacity) : null;
   if (patch.notes !== undefined) data.notes = trimOrNull(patch.notes);
+  if (patch.ownership !== undefined) {
+    const ownership = pickOwnership(patch.ownership);
+    data.ownership = ownership;
+    // A vehicle tagged to a vendor is that vendor's kind. Saying it is the
+    // other kind takes it off the vendor, so the two can never disagree.
+    if (ownership && existing.vendor && (existing.vendor.internal ? 'Internal' : 'External') !== ownership) {
+      data.vendorId = null;
+    }
+  }
   const row = await prisma.vehicle.update({ where: { id }, data, select: VEHICLE_SELECT });
   return serializeVehicle(row);
 }

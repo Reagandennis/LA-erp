@@ -44,6 +44,7 @@ const SIGNED_IN_ONLY: Record<string, string> = {
   'planning/notifications': "the caller's own notifications (polled by the bell)",
   'planning/trip-notifications': "the caller's own notifications (polled by the bell)",
   'planning/trip-escalations': "the caller's own escalation notifications (polled by the bell)",
+  'handover/notifications': "the caller's own handover notifications (polled by the bell)",
   'quotes/notifications': "the caller's own notifications (polled by the bell)",
   'messaging/stream': "the caller's own live updates",
   presence: 'who is online, for everyone signed in',

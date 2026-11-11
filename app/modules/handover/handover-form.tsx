@@ -3,13 +3,14 @@
 import { useState } from 'react';
 
 import RichTextEditor from '../_components/rich-text-editor';
-import { SHIFT_PERIODS, type HandoverDetail } from './types';
+import { SHIFT_PERIODS, type HandoverDetail, type HandoverNotified } from './types';
 
 interface HandoverFormProps {
   mode: 'create' | 'edit';
   handover: HandoverDetail | null;
   onClose: () => void;
-  onSaved: (handover: HandoverDetail) => void;
+  /** `notified` says who a new handover was announced to; null for an edit. */
+  onSaved: (handover: HandoverDetail, notified: HandoverNotified | null) => void;
 }
 
 const inputClass =
@@ -54,12 +55,14 @@ export default function HandoverForm({ mode, handover, onClose, onSaved }: Hando
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const payload = (await res.json().catch(() => null)) as { item?: HandoverDetail; error?: string } | null;
+      const payload = (await res.json().catch(() => null)) as
+        | { item?: HandoverDetail; notified?: HandoverNotified; error?: string }
+        | null;
       if (!res.ok || !payload?.item) {
         setError(payload?.error ?? 'Could not save the handover.');
         return;
       }
-      onSaved(payload.item);
+      onSaved(payload.item, payload.notified ?? null);
     } catch {
       setError('Network error. Please try again.');
     } finally {

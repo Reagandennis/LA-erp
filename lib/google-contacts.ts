@@ -141,7 +141,10 @@ export async function fetchGoogleConnections(
 }
 
 /**
- * Upserts mapped contacts by Google resource name.
+ * Upserts mapped contacts by Google resource name, among this user's own
+ * synced contacts only: what they import is theirs alone (see
+ * contactVisibleTo in lib/contacts.ts), and someone else syncing the same
+ * Google account gets their own copies rather than touching these.
  *
  * Google owns name/email/phone/role/location, so those are refreshed on every
  * run. Locally-set fields — category, tags, notes, linked customer — are left
@@ -155,7 +158,7 @@ export async function upsertGoogleContacts(
   let updated = 0;
 
   const existing = await prisma.contact.findMany({
-    where: { googleResourceName: { in: mapped.map((entry) => entry.resourceName) } },
+    where: { createdById: userId, googleResourceName: { in: mapped.map((entry) => entry.resourceName) } },
     select: { id: true, googleResourceName: true, notes: true },
   });
   const byResource = new Map(

@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Return the refreshed directory so the client doesn't need a second round trip.
-    return NextResponse.json({ result, contacts: await listContacts() });
+    return NextResponse.json({ result, contacts: await listContacts(auth.user.id) });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Could not sync Google contacts';

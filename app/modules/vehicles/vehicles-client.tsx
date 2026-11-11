@@ -13,8 +13,18 @@ const ACCENT = '#f9b232';
 
 const VEHICLE_TYPES = ['Sedan', 'SUV', 'Van', 'Truck', 'Armoured', 'Motorcycle'] as const;
 const STATUSES = ['Available', 'Assigned', 'Maintenance', 'Off duty'] as const;
+/** Our own fleet, or a supplier's. Vehicles nobody has classified yet have neither. */
+const OWNERSHIPS = ['Internal', 'External'] as const;
 
 type Status = (typeof STATUSES)[number];
+type Ownership = (typeof OWNERSHIPS)[number];
+/** The fleet filter: everything, one kind, or the ones still to classify. */
+type OwnershipFilter = 'All' | Ownership | 'Not set';
+
+const OWNERSHIP_BADGE: Record<Ownership, string> = {
+  Internal: 'bg-[#03458f]/10 text-[#03458f] border-[#03458f]/15',
+  External: 'bg-amber-50 text-amber-700 border-amber-100',
+};
 
 // Minimalist status indicator colour (a dot, not a loud pill).
 const STATUS_DOT: Record<string, string> = {
@@ -38,6 +48,8 @@ type VehicleForm = {
   status: string;
   capacity: string;
   notes: string;
+  /** Empty only when editing a vehicle that was never classified. */
+  ownership: Ownership | '';
 };
 
 const EMPTY_FORM: VehicleForm = {
@@ -48,6 +60,7 @@ const EMPTY_FORM: VehicleForm = {
   status: 'Available',
   capacity: '',
   notes: '',
+  ownership: 'Internal',
 };
 
 const inputClass =
@@ -57,6 +70,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
   const [vehicles, setVehicles] = useSyncedState<VehicleSummary[]>(initialVehicles);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Status | 'All'>('All');
+  const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>('All');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -89,12 +103,28 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
     return vehicles.filter((v) => {
       const matchesStatus = statusFilter === 'All' || v.status === statusFilter;
       if (!matchesStatus) return false;
+      const matchesOwnership =
+        ownershipFilter === 'All' || (ownershipFilter === 'Not set' ? v.ownership === null : v.ownership === ownershipFilter);
+      if (!matchesOwnership) return false;
       if (!q) return true;
       return [v.registration, v.make, v.model, v.type]
         .filter(Boolean)
         .some((field) => String(field).toLowerCase().includes(q));
     });
-  }, [vehicles, search, statusFilter]);
+  }, [vehicles, search, statusFilter, ownershipFilter]);
+
+  const ownershipCounts = useMemo(
+    () => ({
+      All: vehicles.length,
+      Internal: vehicles.filter((v) => v.ownership === 'Internal').length,
+      External: vehicles.filter((v) => v.ownership === 'External').length,
+      'Not set': vehicles.filter((v) => v.ownership === null).length,
+    }),
+    [vehicles],
+  );
+  // "Not set" is offered only while some vehicles are still unclassified.
+  const ownershipFilters: OwnershipFilter[] =
+    ownershipCounts['Not set'] > 0 || ownershipFilter === 'Not set' ? ['All', ...OWNERSHIPS, 'Not set'] : ['All', ...OWNERSHIPS];
   const { visible, hiddenCount, showMore, showAll } = useShowMore(filtered);
 
   const stats = useMemo(
@@ -130,6 +160,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
       status: v.status,
       capacity: v.capacity != null ? String(v.capacity) : '',
       notes: v.notes ?? '',
+      ownership: v.ownership ?? '',
     });
     setPendingPhoto(null);
     setPhotoPreview(null);
@@ -183,6 +214,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
       status: form.status,
       capacity: form.capacity.trim() ? Number(form.capacity) : null,
       notes: form.notes.trim() || null,
+      ownership: form.ownership || null,
     };
 
     try {
@@ -281,7 +313,7 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
         </div>
 
         {/* Search + filters */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-5">
+        <div className="flex flex-col lg:flex-row gap-3 mb-5">
           <div className="relative flex-1">
             <svg
               className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
@@ -310,6 +342,25 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
                 style={statusFilter === s ? { backgroundColor: BRAND } : undefined}
               >
                 {s}
+              </button>
+            ))}
+          </div>
+          {/* Whose vehicles: our own fleet, or a supplier's. */}
+          <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl p-1 overflow-x-auto" role="group" aria-label="Ownership">
+            {ownershipFilters.map((o) => (
+              <button
+                key={o}
+                onClick={() => setOwnershipFilter(o)}
+                aria-pressed={ownershipFilter === o}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                  ownershipFilter === o ? 'text-white' : 'text-gray-500 hover:bg-gray-50'
+                }`}
+                style={ownershipFilter === o ? { backgroundColor: BRAND } : undefined}
+              >
+                {o === 'All' ? 'All fleet' : o}
+                <span className={`ml-1.5 tabular-nums ${ownershipFilter === o ? 'text-white/70' : 'text-gray-400'}`}>
+                  {ownershipCounts[o]}
+                </span>
               </button>
             ))}
           </div>
@@ -374,7 +425,12 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
                       <p className="text-sm text-gray-500 truncate mt-0.5">
                         {[v.make, v.model].filter(Boolean).join(' ') || '—'}
                       </p>
-                      <div className="flex items-center gap-2 mt-3 text-xs text-gray-400">
+                      <div className="flex flex-wrap items-center gap-2 mt-3 text-xs text-gray-400">
+                        {v.ownership && (
+                          <span className={`px-2 py-0.5 rounded-md border font-medium ${OWNERSHIP_BADGE[v.ownership]}`}>
+                            {v.ownership}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 bg-gray-50 rounded-md border border-gray-100">{v.type}</span>
                         {v.capacity != null && (
                           <span className="px-2 py-0.5 bg-gray-50 rounded-md border border-gray-100">
@@ -425,6 +481,38 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
                   placeholder="e.g. KDA 123A"
                   autoFocus
                 />
+              </div>
+
+              <div>
+                <Label>Ownership</Label>
+                <div className="grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1" role="radiogroup" aria-label="Ownership">
+                  {OWNERSHIPS.map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      role="radio"
+                      aria-checked={form.ownership === o}
+                      onClick={() => setForm({ ...form, ownership: o })}
+                      className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                        form.ownership === o ? 'bg-white text-[#03458f] shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs text-gray-400">
+                  {form.ownership === 'Internal'
+                    ? 'Part of our own fleet.'
+                    : form.ownership === 'External'
+                      ? 'Belongs to a supplier.'
+                      : 'Not set yet: choose whether this is our own vehicle or a supplier’s.'}
+                </p>
+                {editing && selected?.vendor && form.ownership && form.ownership !== selected.ownership && (
+                  <p className="mt-1.5 text-xs text-amber-700">
+                    This vehicle is tagged to {selected.vendor.name} in Vendors/Suppliers. Saving it as {form.ownership} takes it off that vendor.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -584,6 +672,8 @@ export default function VehiclesClient({ initialVehicles }: { initialVehicles: V
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Type" value={selected.type} />
                 <Field label="Capacity" value={selected.capacity != null ? `${selected.capacity} seats` : '—'} />
+                <Field label="Ownership" value={selected.ownership ?? 'Not set'} />
+                <Field label="Vendor" value={selected.vendor?.name ?? '—'} />
               </div>
 
               <div>

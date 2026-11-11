@@ -24,14 +24,15 @@ import { tripItineraryItemAddSchema } from '../lib/validation';
 describe('listCrewOptions', () => {
   beforeEach(() => {
     driverFindMany.mockResolvedValue([
-      { id: 1, name: 'Amina Driver', phone: '0700 000 001', status: 'Available' },
+      // Tagged to a vendor through her personnel record; Brian isn't tagged.
+      { id: 1, name: 'Amina Driver', phone: '0700 000 001', status: 'Available', personnel: { vendorId: 4 } },
       { id: 2, name: 'Brian Driver', phone: null, status: 'Off duty' },
     ]);
     officerFindMany.mockResolvedValue([
       { id: 7, name: 'Chege CPO', callSign: 'Lion 2', grade: 'CPO', phone: null, status: 'Available' },
     ]);
     vehicleFindMany.mockResolvedValue([
-      { id: 30, registration: 'KDA 001A', make: 'Toyota', model: 'Land Cruiser', type: 'SUV', status: 'Available' },
+      { id: 30, registration: 'KDA 001A', make: 'Toyota', model: 'Land Cruiser', type: 'SUV', status: 'Available', vendorId: 4 },
     ]);
     assignmentFindMany.mockResolvedValue([
       // On this trip: offered first.
@@ -44,11 +45,14 @@ describe('listCrewOptions', () => {
   it('marks who is on this trip and who is busy on another', async () => {
     const options = await listCrewOptions(9);
     expect(options.drivers).toEqual([
-      { id: 1, label: 'Amina Driver', hint: '0700 000 001', status: 'Available', onTrip: true, busyOn: null },
-      { id: 2, label: 'Brian Driver', hint: null, status: 'Off duty', onTrip: false, busyOn: 'TR-2026-0004' },
+      { id: 1, label: 'Amina Driver', hint: '0700 000 001', status: 'Available', onTrip: true, busyOn: null, vendorId: 4 },
+      { id: 2, label: 'Brian Driver', hint: null, status: 'Off duty', onTrip: false, busyOn: 'TR-2026-0004', vendorId: null },
     ]);
     expect(options.officers[0]).toMatchObject({ hint: 'CPO · Lion 2', busyOn: 'TR-2026-0004' });
     expect(options.vehicles[0]).toMatchObject({ label: 'KDA 001A', hint: 'Toyota Land Cruiser · SUV', onTrip: true });
+    // Whose it is and what it is, for the trip's staged pool.
+    expect(options.vehicles[0]).toMatchObject({ vendorId: 4, vehicleType: 'SUV' });
+    expect(options.officers[0]).toMatchObject({ vendorId: null });
   });
 
   it('only offers people still on the register', async () => {

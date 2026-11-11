@@ -22,7 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const id = parseId(raw);
   if (!id) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
-  const photo = await getContactPhoto(id);
+  const photo = await getContactPhoto(id, auth.user.id);
   if (!photo) return NextResponse.json({ error: 'No photo on file' }, { status: 404 });
 
   return fileResponse({
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     mime: file.type || 'application/octet-stream',
     size: file.size,
     content: Buffer.from(await file.arrayBuffer()),
-  });
+  }, auth.user.id);
   if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   return NextResponse.json({ ok: true }, { status: 201 });

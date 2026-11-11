@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { acknowledgeHandover } from '@/lib/handover';
+import { settleHandoverNotifications } from '@/lib/handover-notifications';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { requireRequestAuth } from '@/lib/request-auth';
 import { userHasModule, userHasRole } from '@/lib/user';
@@ -27,6 +28,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const item = await acknowledgeHandover(id, auth.user.id);
     if (item === null) return NextResponse.json({ error: 'Handover not found' }, { status: 404 });
+    // Received: it leaves the bell of everyone else it was sent to.
+    await settleHandoverNotifications(id);
     return NextResponse.json({ item });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not acknowledge handover';

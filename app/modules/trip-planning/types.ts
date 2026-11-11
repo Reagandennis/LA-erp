@@ -1,3 +1,5 @@
+import type { TripDayLogSummary, TripResourceSummary } from '@/lib/trip-resource-model';
+
 export type TripStatus = 'Draft' | 'Planned' | 'Active' | 'Completed' | 'Cancelled';
 
 export const TRIP_STATUSES: TripStatus[] = ['Draft', 'Planned', 'Active', 'Completed', 'Cancelled'];
@@ -65,6 +67,8 @@ export interface TripItineraryItemSummary {
   vehicle: { id: number; registration: string; make: string | null; model: string | null; type: string } | null;
   /** The trip's travellers this event is for, lead first. Empty means the whole party. */
   travelers: { id: number; name: string }[];
+  /** The staged resources this event draws on (ids into the trip's `resources`). */
+  resourceIds: number[];
 }
 
 /** A driver, CPO or vehicle offered by the crew pickers (see lib/trip-crew). */
@@ -77,6 +81,10 @@ export interface CrewOption {
   onTrip: boolean;
   /** Another trip it's actively assigned to. */
   busyOn: string | null;
+  /** The vendor profile it belongs to, for the trip's staged pool. */
+  vendorId: number | null;
+  /** The fleet register's type, for vehicles. */
+  vehicleType?: string;
 }
 
 export interface CrewOptions {
@@ -146,6 +154,10 @@ export type TripStatusCounts = Record<TripStatus, number> & { total: number };
 export interface TripDetail extends TripSummary {
   items: TripItineraryItemSummary[];
   days: TripDaySummary[];
+  /** The staged resource pool, in the order it was staged. */
+  resources: TripResourceSummary[];
+  /** Each day's shift and odometer lines. */
+  dayLogs: TripDayLogSummary[];
   /** Item costs were left out: the viewer doesn't have access to quotes. */
   costsHidden?: boolean;
 }

@@ -36,7 +36,7 @@ export async function PATCH(
         ? body.billingAddress
         : undefined,
     entity: typeof body.entity === 'string' ? body.entity : undefined,
-  });
+  }, auth.user.id);
 
   if (result === null) return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   if ('error' in result) return NextResponse.json({ error: result.error }, { status: 400 });

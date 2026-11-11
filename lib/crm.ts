@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { contactVisibleTo, isContactVisibleTo } from './contacts';
 import { prisma } from './prisma';
 
 // ---------------------------------------------------------------------------
@@ -181,11 +182,13 @@ export async function listDeals(): Promise<DealSummary[]> {
   return rows.map(serializeDeal);
 }
 
-export async function listCrmCustomers(): Promise<CrmCustomer[]> {
+/** Clients with their contacts, as this user may see them (someone else's Google contacts are left out). */
+export async function listCrmCustomers(viewerId: number): Promise<CrmCustomer[]> {
   const rows = await prisma.customer.findMany({
     orderBy: [{ name: 'asc' }],
     include: {
       contacts: {
+        where: contactVisibleTo(viewerId),
         orderBy: { name: 'asc' },
         select: { id: true, name: true, role: true, email: true, phone: true },
       },
@@ -207,26 +210,33 @@ export async function listCrmCustomers(): Promise<CrmCustomer[]> {
   }));
 }
 
-export async function listCrmActivities(limit = 500): Promise<CrmActivitySummary[]> {
+/**
+ * The activity log as this user may see it. An activity someone logged against
+ * their own Google contact still shows, but without naming that contact.
+ */
+export async function listCrmActivities(viewerId: number, limit = 500): Promise<CrmActivitySummary[]> {
   const rows = await prisma.crmActivity.findMany({
     orderBy: { occurredAt: 'desc' },
     take: limit,
     include: {
-      contact: { select: { name: true } },
+      contact: { select: { name: true, source: true, createdById: true } },
       createdBy: { select: { name: true } },
     },
   });
-  return rows.map((row) => ({
-    id: row.id,
-    customerId: row.customerId,
-    dealId: row.dealId,
-    contactId: row.contactId,
-    contactName: row.contact?.name ?? null,
-    type: row.type as ActivityType,
-    summary: row.summary,
-    occurredAt: row.occurredAt.toISOString(),
-    createdBy: row.createdBy.name,
-  }));
+  return rows.map((row) => {
+    const contact = row.contact && isContactVisibleTo(row.contact, viewerId) ? row.contact : null;
+    return {
+      id: row.id,
+      customerId: row.customerId,
+      dealId: row.dealId,
+      contactId: contact ? row.contactId : null,
+      contactName: contact?.name ?? null,
+      type: row.type as ActivityType,
+      summary: row.summary,
+      occurredAt: row.occurredAt.toISOString(),
+      createdBy: row.createdBy.name,
+    };
+  });
 }
 
 /** Quotes available for linking to deals (all non-void quotes, newest first). */
@@ -398,6 +408,14 @@ export async function createActivity(
 
   const customer = await prisma.customer.findUnique({ where: { id: input.customerId }, select: { id: true } });
   if (!customer) return { error: 'Client not found' };
+  if (input.contactId != null) {
+    // Only a contact this person can see: never someone else's Google contact.
+    const contact = await prisma.contact.findFirst({
+      where: { id: input.contactId, ...contactVisibleTo(userId) },
+      select: { id: true },
+    });
+    if (!contact) return { error: 'Contact not found' };
+  }
 
   const row = await prisma.crmActivity.create({
     data: {
@@ -440,6 +458,8 @@ export interface UpdateCrmCustomerInput {
 export async function updateCrmCustomer(
   id: number,
   patch: UpdateCrmCustomerInput,
+  /** Whose view of the client's contacts to hand back. */
+  viewerId: number,
 ): Promise<CrmCustomer | { error: string } | null> {
   const existing = await prisma.customer.findUnique({ where: { id }, select: { id: true } });
   if (!existing) return null;
@@ -462,6 +482,6 @@ export async function updateCrmCustomer(
 
   await prisma.customer.update({ where: { id }, data });
 
-  const rows = await listCrmCustomers();
+  const rows = await listCrmCustomers(viewerId);
   return rows.find((row) => row.id === id) ?? null;
 }

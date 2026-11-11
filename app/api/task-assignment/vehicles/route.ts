@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
       status: typeof body.status === 'string' ? body.status : undefined,
       capacity: typeof body.capacity === 'number' ? body.capacity : null,
       notes: body.notes ?? null,
+      ownership: typeof body.ownership === 'string' ? body.ownership : null,
     });
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
