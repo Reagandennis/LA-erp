@@ -30,6 +30,18 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+/** Someone changing their own password from the sign-in screen. */
+export const changePasswordSchema = z
+  .object({
+    email: emailSchema,
+    currentPassword: z.string().min(1, 'Enter your current password'),
+    newPassword: passwordSchema,
+  })
+  .refine((value) => value.newPassword !== value.currentPassword, {
+    message: 'Choose a new password that is different from your current one',
+    path: ['newPassword'],
+  });
+
 export const managedUserSchema = z.object({
   email: emailSchema,
   name: z.string().trim().min(2, 'Name must be at least 2 characters').max(80),

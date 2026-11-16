@@ -98,6 +98,8 @@ const ACTION_LABELS: Record<string, string> = {
   'auth.login.succeeded': 'Signed in',
   'auth.login.failed': 'Failed sign-in',
   'auth.logout': 'Signed out',
+  'auth.password.changed': 'Changed their password',
+  'auth.password.change.failed': 'Failed password change',
   'admin.user.created': 'Created a user',
   'admin.user.updated': 'Updated a user',
   'admin.user.deleted': 'Deleted a user',

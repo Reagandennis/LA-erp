@@ -101,3 +101,10 @@ body:has(.ticker-bar) .screen-fit {
     opacity: 1;
   }
 }
+
+/* The password fields have their own Show / Hide switch (app/auth), so hide
+   the reveal button Edge adds on top of it. */
+.password-input::-ms-reveal,
+.password-input::-ms-clear {
+  display: none;
+}

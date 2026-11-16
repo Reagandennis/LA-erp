@@ -18,13 +18,14 @@
 
 - Passwords are hashed with `bcryptjs`.
 - Authentication and admin mutation routes are rate limited through the database.
-- Audit events are written for login success/failure, logout, user creation, updates, and deletions.
+- Audit events are written for login success/failure, logout, password changes, user creation, updates, and deletions.
 - Missing `JWT_SECRET` now fails at runtime instead of silently falling back.
 
 ## Relevant routes
 
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
+- `POST /api/auth/change-password` (self-service, from the sign-in screen: email + current password + new password; revokes all of the account's sessions)
 - `GET /api/auth/session`
 - `POST /api/admin/users`
 - `PUT /api/admin/users/[userId]`

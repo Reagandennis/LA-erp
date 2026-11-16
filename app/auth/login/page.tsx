@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+import { PasswordInput } from '@/app/auth/_components/password-input';
 import { GoogleSignInButton } from '@/app/ui/google-sign-in-button';
 
 export default function LoginPage() {
@@ -66,7 +67,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
+            <label htmlFor="email" style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
               Email
             </label>
             <input
@@ -81,21 +82,14 @@ export default function LoginPage() {
             />
           </div>
 
-          <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value)}
-              placeholder="Enter your password"
-              autoComplete="current-password"
-              required
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', fontSize: '14px', fontFamily: 'monospace' }}
-            />
-          </div>
+          <PasswordInput
+            id="password"
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            placeholder="Enter your password"
+            autoComplete="current-password"
+          />
 
           <button
             type="submit"
@@ -118,6 +112,10 @@ export default function LoginPage() {
         <GoogleSignInButton onError={handleGoogleError} onStart={handleGoogleStart} />
 
         <p style={{ textAlign: 'center', fontSize: '12px', marginTop: '16px', color: '#666' }}>
+          <Link href="/auth/change-password" style={{ color: '#666', textDecoration: 'underline' }}>
+            Change password
+          </Link>
+          {' · '}
           <Link href="/" style={{ color: '#666', textDecoration: 'underline' }}>
             Back to home
           </Link>

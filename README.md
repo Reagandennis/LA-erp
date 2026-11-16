@@ -403,7 +403,7 @@ Route handlers live under `app/api/`, grouped by domain:
 | `ai-chatbot`     | AI assistant                                  |
 
 Example auth routes: `POST /api/auth/login`, `POST /api/auth/logout`,
-`GET /api/auth/session`; admin routes: `POST /api/admin/users`,
+`POST /api/auth/change-password`, `GET /api/auth/session`; admin routes: `POST /api/admin/users`,
 `PUT /api/admin/users/[userId]`, `DELETE /api/admin/users/[userId]`,
 `GET|POST /api/admin/roles`, `PUT|DELETE /api/admin/roles/[roleId]`,
 `GET|DELETE /api/admin/sessions`, `GET /api/admin/overview`,
