@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+import { DeviceStep } from '@/app/auth/_components/device-step';
 import { PasswordInput } from '@/app/auth/_components/password-input';
 import { GoogleSignInButton } from '@/app/ui/google-sign-in-button';
 
@@ -13,6 +14,16 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Set once the password is accepted for an account limited to approved work
+  // devices: the device check replaces the form until it passes.
+  const [deviceCheck, setDeviceCheck] = useState<{ hasDevices: boolean } | null>(null);
+
+  const handleDeviceCheck = useCallback((hasDevices: boolean) => {
+    setError('');
+    setIsLoading(false);
+    setPassword('');
+    setDeviceCheck({ hasDevices });
+  }, []);
 
   const handleGoogleError = useCallback((message: string) => {
     setError(message);
@@ -44,6 +55,11 @@ export default function LoginPage() {
         return;
       }
 
+      if (data.deviceCheck) {
+        handleDeviceCheck(Boolean(data.deviceCheck.hasDevices));
+        return;
+      }
+
       router.push('/dashboard');
       router.refresh();
     } catch (caughtError) {
@@ -53,6 +69,27 @@ export default function LoginPage() {
       setIsLoading(false);
     }
   };
+
+  if (deviceCheck) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', padding: '16px' }}>
+        <div style={{ width: '100%', maxWidth: '400px' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '24px', textAlign: 'center' }}>Confirm this device</h1>
+          <DeviceStep
+            hasDevices={deviceCheck.hasDevices}
+            onExpired={(message) => {
+              setDeviceCheck(null);
+              setError(message);
+            }}
+            onCancel={() => {
+              setDeviceCheck(null);
+              setError('');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', padding: '16px' }}>
@@ -109,7 +146,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <GoogleSignInButton onError={handleGoogleError} onStart={handleGoogleStart} />
+        <GoogleSignInButton onError={handleGoogleError} onStart={handleGoogleStart} onDeviceCheck={handleDeviceCheck} />
 
         <p style={{ textAlign: 'center', fontSize: '12px', marginTop: '16px', color: '#666' }}>
           <Link href="/auth/change-password" style={{ color: '#666', textDecoration: 'underline' }}>

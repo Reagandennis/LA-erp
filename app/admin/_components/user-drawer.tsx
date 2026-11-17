@@ -6,7 +6,8 @@ import { useMemo, useState } from 'react';
 import { APP_LOCALE } from '@/lib/locale';
 
 import { adminFetch, errorMessage } from './admin-api';
-import { ADMIN_ROLE, type AdminModule, type AdminRole, type AdminSession, type AdminUser } from './admin-types';
+import { ADMIN_ROLE, type AdminDevice, type AdminModule, type AdminRole, type AdminSession, type AdminUser } from './admin-types';
+import { DeviceActions, DeviceStatusPill, type DeviceAction } from './devices-panel';
 import {
   Avatar,
   Drawer,
@@ -65,6 +66,7 @@ export default function UserDrawer({
   roles,
   modules,
   sessions,
+  devices,
   currentUserId,
   now,
   onClose,
@@ -72,12 +74,16 @@ export default function UserDrawer({
   onDeleted,
   onRevokeSession,
   onRevokeAll,
+  onDeviceAction,
+  onRequireDevice,
   notify,
 }: {
   user: AdminUser;
   roles: AdminRole[];
   modules: AdminModule[];
   sessions: AdminSession[];
+  /** This person's registered work devices. */
+  devices: AdminDevice[];
   currentUserId: number;
   now: number;
   onClose: () => void;
@@ -86,6 +92,9 @@ export default function UserDrawer({
   onDeleted: () => Promise<void>;
   onRevokeSession: (sessionId: string) => Promise<void>;
   onRevokeAll: (userId: number) => Promise<void>;
+  onDeviceAction: (deviceId: string, action: DeviceAction) => Promise<void>;
+  /** Turns the approved-device rule on or off for this person. */
+  onRequireDevice: (required: boolean) => Promise<void>;
   notify: (message: { error?: string; success?: string }) => void;
 }) {
   const router = useRouter();
@@ -96,6 +105,32 @@ export default function UserDrawer({
   const [resetting, setResetting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [busySession, setBusySession] = useState<string | null>(null);
+  const [busyDevice, setBusyDevice] = useState(false);
+
+  const approvedDevices = devices.filter((d) => d.status === 'approved').length;
+
+  const withDeviceBusy = async (work: () => Promise<void>) => {
+    setBusyDevice(true);
+    try {
+      await work();
+    } finally {
+      setBusyDevice(false);
+    }
+  };
+
+  const toggleRequireDevice = () => {
+    const next = !user.requireApprovedDevice;
+    const first = user.name.split(' ')[0];
+    if (
+      next &&
+      !isSelf &&
+      approvedDevices === 0 &&
+      !window.confirm(`${first} has no approved device yet. They will be asked to register their work computer at their next sign-in and cannot get in until you approve it. Continue?`)
+    ) {
+      return;
+    }
+    void withDeviceBusy(() => onRequireDevice(next));
+  };
 
   const isSelf = user.id === currentUserId;
   const adminRole = roles.find((r) => r.isAdmin);
@@ -382,6 +417,51 @@ export default function UserDrawer({
               </button>
             )}
           </>
+        )}
+      </Section>
+
+      <Section
+        title="Work devices"
+        description={
+          user.requireApprovedDevice
+            ? `Can only sign in from an approved device (${approvedDevices} approved).`
+            : 'Can sign in from any device.'
+        }
+      >
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-100 px-3 py-2.5 hover:bg-gray-50">
+          <input
+            type="checkbox"
+            checked={user.requireApprovedDevice}
+            disabled={busyDevice}
+            onChange={toggleRequireDevice}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded accent-[#03458f]"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-gray-900">Only allow approved work devices</span>
+            <span className="block text-xs text-gray-500">
+              Applies straight away: sessions on devices that are not approved stop working.
+            </span>
+          </span>
+        </label>
+        {devices.length > 0 && (
+          <ul className="mt-3 divide-y divide-gray-100 rounded-xl border border-gray-100">
+            {devices.map((d) => (
+              <li key={d.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                <div className="min-w-0 text-sm">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="truncate font-medium text-gray-900">{d.label}</span>
+                    <DeviceStatusPill status={d.status} />
+                    {d.current && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700">This device</span>}
+                  </p>
+                  <p className="truncate text-xs text-gray-500">
+                    {describeDevice(d.userAgent)} · registered {formatDateTime(d.createdAt)}
+                    {d.lastUsedAt ? ` · last used ${relativeTime(d.lastUsedAt, now).toLowerCase()}` : ''}
+                  </p>
+                </div>
+                <DeviceActions device={d} busy={busyDevice} onAction={(id, action) => withDeviceBusy(() => onDeviceAction(id, action))} />
+              </li>
+            ))}
+          </ul>
         )}
       </Section>
 

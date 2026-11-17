@@ -14,6 +14,8 @@ model User {
   passwordHash                   String
   status                         String                           @default("active")
   sessionVersion                 Int                              @default(1)
+  /// When true this person can only sign in from a work device an admin approved.
+  requireApprovedDevice          Boolean                          @default(false)
   dashboardHighlights            String[]                         @default([])
   worldClockZones                String[]                         @default([])
   createdAt                      DateTime                         @default(now())
@@ -27,6 +29,8 @@ model User {
   personalTodoNotifications      PersonalTodoNotification[]
   personalTodoComments           PersonalTodoComment[]
   sessions                       Session[]
+  devices                        Device[]
+  deviceChallenges               DeviceChallenge[]
   auditLogs                      AuditLog[]                       @relation("AuditActor")
   auditTargets                   AuditLog[]                       @relation("AuditTarget")
   createdCustomers               Customer[]                       @relation("CustomerCreatedBy")
@@ -291,8 +295,56 @@ model Session {
   revokedAt  DateTime?
   ipAddress  String?
   userAgent  String?
+  /// The approved work device this session was opened from, when the sign-in went through the device check.
+  deviceId   String?
   createdAt  DateTime  @default(now())
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     Device?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([deviceId])
+}
+
+/// A work device, identified by a passkey whose private key never leaves that
+/// device's hardware. An admin approves it before it can be used to sign in.
+model Device {
+  id           String    @id @default(cuid())
+  userId       Int
+  label        String
+  /// WebAuthn credential id, base64url.
+  credentialId String    @unique
+  /// COSE public key of the credential.
+  publicKey    Bytes
+  counter      BigInt    @default(0)
+  transports   String[]  @default([])
+  aaguid       String?
+  /// pending | approved | revoked
+  status       String    @default("pending")
+  ipAddress    String?
+  userAgent    String?
+  approvedById Int?
+  approvedAt   DateTime?
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+/// One-time WebAuthn challenge issued for registering or checking a device.
+model DeviceChallenge {
+  id        String   @id @default(cuid())
+  userId    Int
+  /// register | verify
+  purpose   String
+  challenge String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])

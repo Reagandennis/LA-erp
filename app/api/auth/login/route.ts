@@ -9,6 +9,7 @@ import { isPrismaDatabaseUnavailableError } from '@/lib/prisma-errors';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { getSessionCookieOptions } from '@/lib/session-token';
 import { getUserByEmail } from '@/lib/user';
+import { deviceGateResponse } from '@/lib/work-devices';
 import { loginSchema } from '@/lib/validation';
 
 function getRequestIp(request: NextRequest) {
@@ -104,6 +105,13 @@ export async function POST(request: NextRequest) {
         { error: 'Account access has been restricted' },
         { status: 403 },
       );
+    }
+
+    // Limited to approved work devices: the password only earns the device
+    // check. The session is opened by /api/auth/device/verify once this
+    // machine has proved it is an approved one.
+    if (user.requireApprovedDevice) {
+      return await deviceGateResponse(user, 'password');
     }
 
     const { session, token } = await createSession({

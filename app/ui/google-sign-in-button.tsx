@@ -28,9 +28,12 @@ function getGoogleApi(): GoogleIdApi | null {
 export function GoogleSignInButton({
   onError,
   onStart,
+  onDeviceCheck,
 }: Readonly<{
   onError: (message: string) => void;
   onStart: () => void;
+  /** The account is limited to approved work devices: run the device check next. */
+  onDeviceCheck: (hasDevices: boolean) => void;
 }>) {
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -60,6 +63,11 @@ export function GoogleSignInButton({
           return;
         }
 
+        if (data.deviceCheck) {
+          onDeviceCheck(Boolean(data.deviceCheck.hasDevices));
+          return;
+        }
+
         // Full reload so the new session cookie is picked up server-side.
         window.location.assign('/dashboard');
       } catch (caughtError) {
@@ -67,7 +75,7 @@ export function GoogleSignInButton({
         onError('An unexpected error occurred. Please try again.');
       }
     },
-    [onError, onStart],
+    [onDeviceCheck, onError, onStart],
   );
 
   useEffect(() => {

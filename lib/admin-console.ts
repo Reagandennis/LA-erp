@@ -84,7 +84,7 @@ export interface AttentionItem {
   title: string;
   detail: string;
   /** Where the console should take the admin to deal with it. */
-  action?: { label: string; tab: 'users' | 'roles' | 'sessions' | 'audit' | 'settings'; filter?: string };
+  action?: { label: string; tab: 'users' | 'roles' | 'sessions' | 'devices' | 'audit' | 'settings'; filter?: string };
 }
 
 export type HealthState = 'ok' | 'warning' | 'down';
@@ -192,7 +192,7 @@ export async function getAdminOverview(now = new Date()): Promise<AdminOverview>
   chartStart.setHours(0, 0, 0, 0);
   chartStart.setDate(chartStart.getDate() - (SIGN_IN_DAYS - 1));
 
-  const [users, liveSessions, lastSeenBy, signInEvents, health] = await Promise.all([
+  const [users, liveSessions, lastSeenBy, signInEvents, health, pendingDevices] = await Promise.all([
     prisma.user.findMany({
       select: {
         id: true,
@@ -216,6 +216,7 @@ export async function getAdminOverview(now = new Date()): Promise<AdminOverview>
       emailCheck(),
       ...checks.slice(1),
     ]),
+    prisma.device.count({ where: { status: 'pending' } }),
   ]);
 
   const isAdmin = (u: (typeof users)[number]) => u.userRoles.some((r) => r.role.name === ADMIN_ROLE_NAME);
@@ -254,6 +255,16 @@ export async function getAdminOverview(now = new Date()): Promise<AdminOverview>
       title: `${plural(last24h.failed, 'failed sign-in', 'failed sign-ins')} in the last 24 hours`,
       detail: 'Check whether they come from one address or target one account.',
       action: { label: 'Review in audit log', tab: 'audit', filter: 'auth.login.failed' },
+    });
+  }
+
+  if (pendingDevices > 0) {
+    attention.push({
+      id: 'pending-devices',
+      tone: 'warning',
+      title: `${plural(pendingDevices, 'work device is', 'work devices are')} waiting for approval`,
+      detail: 'Their owners cannot sign in from them until you approve them. Check each one really is a company device.',
+      action: { label: 'Review devices', tab: 'devices' },
     });
   }
 

@@ -246,6 +246,8 @@ export interface ManagedUser extends AccessUser {
   lastSeenAt: string | null;
   /** Sessions that are neither revoked nor expired. */
   activeSessions: number;
+  /** Can only sign in from a work device an admin approved. */
+  requireApprovedDevice: boolean;
 }
 
 /**
@@ -296,6 +298,7 @@ export async function listManagedUsers(): Promise<ManagedUser[]> {
     directModuleIds: user.userModules.map((assignment) => assignment.moduleId),
     lastSeenAt: lastSeen.get(user.id)?.toISOString() ?? null,
     activeSessions: activeBy.get(user.id) ?? 0,
+    requireApprovedDevice: user.requireApprovedDevice,
   }));
 }
 

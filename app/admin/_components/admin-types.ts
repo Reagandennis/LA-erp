@@ -5,13 +5,14 @@
 import type { AdminOverview, AdminSession, AttentionItem, HealthCheck } from '@/lib/admin-console';
 import type { AuditLogEntry, AuditQueryResult } from '@/lib/audit';
 import type { AdminRoleSummary, ManagedUser, ModuleSummary } from '@/lib/user';
+import type { AdminDevice } from '@/lib/work-devices';
 
 export type AdminUser = ManagedUser;
 export type AdminRole = AdminRoleSummary;
 export type AdminModule = ModuleSummary;
-export type { AdminOverview, AdminSession, AttentionItem, AuditLogEntry, AuditQueryResult, HealthCheck };
+export type { AdminDevice, AdminOverview, AdminSession, AttentionItem, AuditLogEntry, AuditQueryResult, HealthCheck };
 
-export type AdminTab = 'overview' | 'users' | 'roles' | 'sessions' | 'audit' | 'settings';
+export type AdminTab = 'overview' | 'users' | 'roles' | 'sessions' | 'devices' | 'audit' | 'settings';
 
 /** Quick filters on the Users tab, opened from the overview's attention list. */
 export type UserQuickFilter = 'no-access' | 'never-signed-in' | 'dormant';

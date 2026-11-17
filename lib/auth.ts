@@ -35,6 +35,8 @@ export async function createSession(input: {
   sessionVersion: number;
   ipAddress?: string | null;
   userAgent?: string | null;
+  /** The approved work device the sign-in was checked against, if it was. */
+  deviceId?: string | null;
 }) {
   const session = await prisma.session.create({
     data: {
@@ -42,6 +44,7 @@ export async function createSession(input: {
       expiresAt: new Date(Date.now() + getSessionDurationSeconds() * 1000),
       ipAddress: input.ipAddress ?? null,
       userAgent: input.userAgent ?? null,
+      deviceId: input.deviceId ?? null,
     },
   });
 
@@ -85,6 +88,7 @@ async function resolveAuthenticatedUser(token: string | null) {
     session = await prisma.session.findUnique({
       where: { id: payload.sid },
       include: {
+        device: { select: { status: true } },
         user: {
           include: userAccessInclude,
         },
@@ -116,6 +120,14 @@ async function resolveAuthenticatedUser(token: string | null) {
     return null;
   }
 
+  // People limited to approved work devices can only hold a session that was
+  // opened from one, and only while that device stays approved. Checked on
+  // every request, so revoking a device or switching the rule on takes effect
+  // at once rather than when the session expires.
+  if (user.requireApprovedDevice && session.device?.status !== 'approved') {
+    return null;
+  }
+
   // Presence heartbeat. Throttled so an active user costs at most one write a
   // minute rather than one per request.
   if (Date.now() - session.lastSeenAt.getTime() > PRESENCE_HEARTBEAT_MS) {
@@ -131,6 +143,7 @@ async function resolveAuthenticatedUser(token: string | null) {
 
   return {
     sessionId: session.id,
+    deviceId: session.deviceId ?? null,
     expiresAt: session.expiresAt.toISOString(),
     user: buildAccessUser(user),
     // Per-user UI preferences that the root layout needs on every render.

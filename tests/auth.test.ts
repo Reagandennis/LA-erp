@@ -76,4 +76,40 @@ describe('auth session resolution', () => {
     expect(auth).toBeNull();
     expect(warnSpy).toHaveBeenCalledOnce();
   });
+
+  describe('people limited to approved work devices', () => {
+    const resolveWith = (session: { deviceId: string | null; device: { status: string } | null }, requireApprovedDevice = true) => {
+      verifySessionToken.mockReturnValue({ sid: 'session_123', sub: '1', ver: 1, email: 'pat@example.com' });
+      sessionFindUnique.mockResolvedValue({
+        id: 'session_123',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+        lastSeenAt: new Date(),
+        ...session,
+        user: { id: 1, status: 'active', sessionVersion: 1, requireApprovedDevice, worldClockZones: [] },
+      });
+      return getRequestAuth(
+        new NextRequest('http://localhost/api/trips', { headers: { cookie: 'auth_token=token' } }),
+      );
+    };
+
+    it('rejects a session that did not come through a device check', async () => {
+      expect(await resolveWith({ deviceId: null, device: null })).toBeNull();
+    });
+
+    it('rejects a session whose device is pending or has been revoked', async () => {
+      expect(await resolveWith({ deviceId: 'dev_1', device: { status: 'pending' } })).toBeNull();
+      expect(await resolveWith({ deviceId: 'dev_1', device: { status: 'revoked' } })).toBeNull();
+    });
+
+    it('accepts a session opened from an approved device', async () => {
+      const auth = await resolveWith({ deviceId: 'dev_1', device: { status: 'approved' } });
+      expect(auth).toMatchObject({ sessionId: 'session_123', deviceId: 'dev_1' });
+    });
+
+    it('leaves everyone else alone', async () => {
+      const auth = await resolveWith({ deviceId: null, device: null }, false);
+      expect(auth).toMatchObject({ sessionId: 'session_123', deviceId: null });
+    });
+  });
 });

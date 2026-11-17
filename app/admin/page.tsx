@@ -8,10 +8,11 @@ import { getServerAuth } from '@/lib/auth';
 import { isEmailConfigured } from '@/lib/email';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { listAllModules, listManagedUsers, listRolesForAdmin, userHasRole } from '@/lib/user';
+import { listDevices } from '@/lib/work-devices';
 
 export const dynamic = 'force-dynamic';
 
-const TABS: AdminTab[] = ['overview', 'users', 'roles', 'sessions', 'audit', 'settings'];
+const TABS: AdminTab[] = ['overview', 'users', 'roles', 'sessions', 'devices', 'audit', 'settings'];
 
 export default async function AdminPage({
   searchParams,
@@ -28,7 +29,7 @@ export default async function AdminPage({
     redirect('/dashboard');
   }
 
-  const [{ tab }, users, roles, modules, audit, overview, sessions] = await Promise.all([
+  const [{ tab }, users, roles, modules, audit, overview, sessions, devices] = await Promise.all([
     searchParams,
     listManagedUsers(),
     listRolesForAdmin(),
@@ -36,6 +37,7 @@ export default async function AdminPage({
     queryAuditLogs({ page: 1, pageSize: 25 }),
     getAdminOverview(),
     listActiveSessions(auth.sessionId),
+    listDevices(auth.deviceId),
   ]);
   const requested = (Array.isArray(tab) ? tab[0] : tab) as AdminTab | undefined;
 
@@ -49,6 +51,7 @@ export default async function AdminPage({
       initialAudit={audit}
       initialOverview={overview}
       initialSessions={sessions}
+      initialDevices={devices}
       emailConfigured={isEmailConfigured()}
       renderedAt={overview.generatedAt}
     />

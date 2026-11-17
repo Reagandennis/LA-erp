@@ -4,8 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useBanner } from '@/app/ui/banner';
 
+import { registerThisDevice } from '@/app/ui/device-check-client';
+
 import { adminFetch, errorMessage } from './_components/admin-api';
 import type {
+  AdminDevice,
   AdminModule,
   AdminOverview,
   AdminRole,
@@ -17,6 +20,7 @@ import type {
 } from './_components/admin-types';
 import AuditPanel from './_components/audit-panel';
 import CreateUserModal from './_components/create-user-modal';
+import DevicesPanel, { type DeviceAction } from './_components/devices-panel';
 import OverviewPanel from './_components/overview-panel';
 import RolesPanel from './_components/roles-panel';
 import SessionsPanel from './_components/sessions-panel';
@@ -34,6 +38,7 @@ interface AdminClientProps {
   initialAudit: AuditQueryResult;
   initialOverview: AdminOverview;
   initialSessions: AdminSession[];
+  initialDevices: AdminDevice[];
   emailConfigured: boolean;
   /** Server render time, so relative times match during hydration. */
   renderedAt: string;
@@ -44,6 +49,7 @@ const TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'users', label: 'Users' },
   { id: 'roles', label: 'Roles' },
   { id: 'sessions', label: 'Sessions' },
+  { id: 'devices', label: 'Devices' },
   { id: 'audit', label: 'Audit log' },
   { id: 'settings', label: 'Settings' },
 ];
@@ -59,6 +65,7 @@ export default function AdminClient({
   initialAudit,
   initialOverview,
   initialSessions,
+  initialDevices,
   emailConfigured,
   renderedAt,
 }: AdminClientProps) {
@@ -68,6 +75,7 @@ export default function AdminClient({
   const [modules, setModules] = useSyncedState(initialModules);
   const [overview, setOverview] = useSyncedState(initialOverview);
   const [sessions, setSessions] = useSyncedState(initialSessions);
+  const [devices, setDevices] = useSyncedState(initialDevices);
   const [recentAudit, setRecentAudit] = useSyncedState(initialAudit);
   const [quickFilter, setQuickFilter] = useState<UserQuickFilter | null>(null);
   const [auditAction, setAuditAction] = useState('');
@@ -135,10 +143,15 @@ export default function AdminClient({
     setSessions(payload.sessions);
   }, [setSessions]);
 
+  const reloadDevices = useCallback(async () => {
+    const payload = await adminFetch<{ devices: AdminDevice[] }>('/api/admin/devices');
+    setDevices(payload.devices);
+  }, [setDevices]);
+
   const refreshAll = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([reloadUsers(), reloadOverview(), reloadSessions()]);
+      await Promise.all([reloadUsers(), reloadOverview(), reloadSessions(), reloadDevices()]);
     } catch (err) {
       notify({ error: errorMessage(err, 'Refresh failed.') });
     } finally {
@@ -148,8 +161,71 @@ export default function AdminClient({
 
   /** After a change to people or roles: everything that counts them may move. */
   const afterChange = useCallback(async () => {
-    await Promise.all([reloadUsers(), reloadOverview(), reloadSessions()]).catch(() => {});
-  }, [reloadUsers, reloadOverview, reloadSessions]);
+    await Promise.all([reloadUsers(), reloadOverview(), reloadSessions(), reloadDevices()]).catch(() => {});
+  }, [reloadUsers, reloadOverview, reloadSessions, reloadDevices]);
+
+  // --- Work devices -----------------------------------------------------------
+
+  const deviceAction = async (deviceId: string, action: DeviceAction) => {
+    const device = devices.find((d) => d.id === deviceId);
+    const who = device ? `${device.user.name}'s "${device.label}"` : 'The device';
+    try {
+      const payload =
+        action === 'remove'
+          ? await adminFetch<{ devices: AdminDevice[] }>(`/api/admin/devices?id=${encodeURIComponent(deviceId)}`, { method: 'DELETE' })
+          : await adminFetch<{ devices: AdminDevice[] }>('/api/admin/devices', {
+              method: 'PATCH',
+              body: JSON.stringify({ id: deviceId, action }),
+            });
+      setDevices(payload.devices);
+      notify({
+        success:
+          action === 'approve'
+            ? `${who} is approved. They can sign in from it now.`
+            : action === 'revoke'
+              ? `${who} was revoked and signed out.`
+              : `${who} was removed.`,
+      });
+      void Promise.all([reloadSessions(), reloadOverview()]).catch(() => {});
+    } catch (err) {
+      notify({ error: errorMessage(err, 'Could not change that device.') });
+    }
+  };
+
+  const registerMyDevice = async (label: string) => {
+    try {
+      await registerThisDevice('session', label);
+      await Promise.all([reloadDevices(), reloadOverview()]);
+      notify({ success: 'This device is registered. Approve it in the list below to start using it.' });
+    } catch (err) {
+      notify({ error: errorMessage(err, 'Could not register this device.') });
+    }
+  };
+
+  /** Switches the approved-device rule for one person, or for everyone when no id is given. */
+  const requireDevice = async (required: boolean, userId?: number) => {
+    try {
+      const payload = await adminFetch<{ updated: number; skippedSelf: boolean }>('/api/admin/devices/policy', {
+        method: 'PUT',
+        body: JSON.stringify(userId ? { required, userId } : { required, everyone: true }),
+      });
+      const person = userId ? users.find((u) => u.id === userId)?.name ?? 'This person' : null;
+      notify({
+        success: person
+          ? required
+            ? `${person} can now only sign in from an approved device.`
+            : `${person} can sign in from any device again.`
+          : required
+            ? `Approved devices are now required for ${payload.updated} more ${payload.updated === 1 ? 'person' : 'people'}.${
+                payload.skippedSelf ? ' Your own account was left out: register and approve this device first.' : ''
+              }`
+            : 'Approved devices are no longer required for anyone.',
+      });
+      await afterChange();
+    } catch (err) {
+      notify({ error: errorMessage(err, 'Could not change the device rule.') });
+    }
+  };
 
   // --- Sessions ---------------------------------------------------------------
 
@@ -183,7 +259,13 @@ export default function AdminClient({
   };
 
   const openUser = users.find((u) => u.id === openUserId) ?? null;
-  const counts: Partial<Record<AdminTab, number>> = { users: users.length, roles: roles.length, sessions: sessions.length };
+  const counts: Partial<Record<AdminTab, number>> = {
+    users: users.length,
+    roles: roles.length,
+    sessions: sessions.length,
+    devices: devices.length,
+  };
+  const pendingDevices = devices.some((d) => d.status === 'pending');
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -236,7 +318,7 @@ export default function AdminClient({
                       {counts[t.id]}
                     </span>
                   )}
-                  {t.id === 'overview' && overview.attention.some((a) => a.tone !== 'info') && (
+                  {((t.id === 'overview' && overview.attention.some((a) => a.tone !== 'info')) || (t.id === 'devices' && pendingDevices)) && (
                     <span className={`h-2 w-2 rounded-full ${active ? 'bg-amber-300' : 'bg-amber-500'}`} aria-label="Needs attention" />
                   )}
                 </button>
@@ -273,6 +355,18 @@ export default function AdminClient({
           />
         )}
         {tab === 'sessions' && <SessionsPanel sessions={sessions} now={now} onRevoke={revokeSession} onOpenUser={setOpenUserId} />}
+        {tab === 'devices' && (
+          <DevicesPanel
+            devices={devices}
+            users={users}
+            currentUserId={currentUserId}
+            now={now}
+            onAction={deviceAction}
+            onRegisterThisDevice={registerMyDevice}
+            onRequireEveryone={(required) => requireDevice(required)}
+            onOpenUser={setOpenUserId}
+          />
+        )}
         {tab === 'audit' && <AuditPanel key={auditAction} initial={initialAudit} initialAction={auditAction} users={users} />}
         {tab === 'settings' && <SettingsPanel notify={notify} />}
       </main>
@@ -284,6 +378,9 @@ export default function AdminClient({
           roles={roles}
           modules={modules}
           sessions={sessions.filter((s) => s.user.id === openUser.id)}
+          devices={devices.filter((d) => d.user.id === openUser.id)}
+          onDeviceAction={deviceAction}
+          onRequireDevice={(required) => requireDevice(required, openUser.id)}
           currentUserId={currentUserId}
           now={now}
           onClose={() => setOpenUserId(null)}
