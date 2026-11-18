@@ -36,9 +36,11 @@ export default async function TravelersPage({
     listCustomerOptions(),
   ]);
 
+  // Reaching this page already needs the module (or admin), and holding the
+  // module is what grants editing — so everyone here may add, edit and remove.
   return (
     <TravelersClient
-      isAdmin={isAdmin}
+      canEdit
       initialItems={firstPage.items}
       initialTotal={firstPage.total}
       initialStats={stats}

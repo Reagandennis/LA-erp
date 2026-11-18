@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { deleteTraveler, getTravelerById, updateTraveler } from '@/lib/travelers';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +28,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireAdminRequest(request);
+  // Holding the module grants editing as well as reading, as with personnel.
+  const { auth, response } = await requireModuleRequest(request, TRAVELERS_MODULE);
   if (response || !auth) return response;
 
   const { id: raw } = await params;
@@ -88,7 +89,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireAdminRequest(request);
+  // Holding the module grants editing as well as reading, as with personnel.
+  const { auth, response } = await requireModuleRequest(request, TRAVELERS_MODULE);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

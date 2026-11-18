@@ -104,8 +104,8 @@ describe('travelers collection route', () => {
     expect(searchTravelers).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: null }));
   });
 
-  it('requires admin to create a traveller', async () => {
-    requireAdminRequest.mockResolvedValue({
+  it('requires the travelers module, not admin, to create a traveller', async () => {
+    requireModuleRequest.mockResolvedValue({
       auth: null,
       response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
     });
@@ -118,11 +118,13 @@ describe('travelers collection route', () => {
     );
 
     expect(response.status).toBe(403);
+    expect(requireModuleRequest).toHaveBeenCalledWith(expect.anything(), 'travelers');
+    expect(requireAdminRequest).not.toHaveBeenCalled();
     expect(createTraveler).not.toHaveBeenCalled();
   });
 
   it('creates a traveller and stamps the acting user', async () => {
-    requireAdminRequest.mockResolvedValue(authed);
+    requireModuleRequest.mockResolvedValue(authed);
     createTraveler.mockResolvedValue({ id: 3, name: 'Jane Doe' });
 
     const response = await POST(
@@ -141,7 +143,7 @@ describe('travelers collection route', () => {
   });
 
   it('surfaces a validation failure as a 400', async () => {
-    requireAdminRequest.mockResolvedValue(authed);
+    requireModuleRequest.mockResolvedValue(authed);
     createTraveler.mockRejectedValue(new Error('Name is required'));
 
     const response = await POST(

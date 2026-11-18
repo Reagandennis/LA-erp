@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { fileResponse } from '@/lib/file-response';
-import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { getUploadLimitMb, mbToBytes } from '@/lib/upload-limits';
 import { getTravelerPhoto, setTravelerPhoto } from '@/lib/travelers';
 
@@ -30,7 +30,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { auth, response } = await requireAdminRequest(request);
+  // Holding the module grants editing as well as reading, as with personnel.
+  const { auth, response } = await requireModuleRequest(request, TRAVELERS_MODULE);
   if (response || !auth) return response;
 
   const { id: raw } = await params;

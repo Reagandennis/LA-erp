@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { listCustomerOptions } from '@/lib/contacts';
-import { requireAdminRequest, requireModuleRequest } from '@/lib/request-auth';
+import { requireModuleRequest } from '@/lib/request-auth';
 import { createTraveler, listTravelers, searchTravelers, travelerStats } from '@/lib/travelers';
 
 export const dynamic = 'force-dynamic';
@@ -39,7 +39,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { auth, response } = await requireAdminRequest(request);
+  // Holding the module grants editing as well as reading, as with personnel.
+  const { auth, response } = await requireModuleRequest(request, TRAVELERS_MODULE);
   if (response || !auth) return response;
 
   const body = await request.json().catch(() => null);

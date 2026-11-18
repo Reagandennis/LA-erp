@@ -55,7 +55,7 @@ function daysUntil(iso: string | null): number | null {
 }
 
 type Props = {
-  isAdmin: boolean;
+  canEdit: boolean;
   /** The first page, unfiltered; later pages and searches come from /api/travelers. */
   initialItems: TravelerListItem[];
   initialTotal: number;
@@ -128,7 +128,7 @@ const EMPTY_FORM: Form = {
 };
 
 export default function TravelersClient({
-  isAdmin,
+  canEdit,
   initialItems,
   initialTotal,
   initialStats,
@@ -465,7 +465,7 @@ export default function TravelersClient({
             <h1 className="text-2xl font-semibold text-gray-900">Travellers</h1>
             <p className="text-gray-500 mt-1 text-sm">The people we protect — principals, family and accompanying guests.</p>
           </div>
-          {isAdmin && (
+          {canEdit && (
             <button onClick={openCreate} className="self-start md:self-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-95" style={{ backgroundColor: BRAND }}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -520,7 +520,7 @@ export default function TravelersClient({
               {listLoading
                 ? ''
                 : stats.total === 0
-                  ? (isAdmin ? 'Add the first person you are protecting.' : 'No travellers have been added yet.')
+                  ? (canEdit ? 'Add the first person you are protecting.' : 'No travellers have been added yet.')
                   : 'Try a different search or filter.'}
             </p>
           </div>
@@ -644,7 +644,7 @@ export default function TravelersClient({
             </div>
             )}
 
-            {isAdmin && selected && (
+            {canEdit && selected && (
               <div className="p-6 border-t border-gray-100 sticky bottom-0 bg-white flex gap-3">
                 <button onClick={() => remove(selected.id)} disabled={busy} className="px-4 py-2.5 rounded-xl border border-rose-200 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">
                   Delete
