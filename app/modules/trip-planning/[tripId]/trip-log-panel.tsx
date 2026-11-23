@@ -2,6 +2,7 @@
 
 import { APP_LOCALE } from '@/lib/locale';
 import { useEffect, useMemo, useState } from 'react';
+import RichText from '@/app/modules/_components/rich-text';
 import { useConfirm } from '@/app/ui/confirm-dialog';
 
 export interface TripLogEntry {
@@ -197,13 +198,10 @@ export default function TripLogPanel({
       {notesText && (
         <section className="mb-6 rounded-xl border border-gray-100 bg-white p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Trip notes</p>
-          <p
-            className={`whitespace-pre-line text-sm leading-relaxed text-gray-700 ${
-              longNotes && !notesOpen ? 'line-clamp-[8]' : ''
-            }`}
-          >
-            {notesText}
-          </p>
+          {/* The description is written with the rich-text editor; notes are plain and render as they are. */}
+          <div className={`text-sm leading-relaxed text-gray-700 ${longNotes && !notesOpen ? 'line-clamp-[8]' : ''}`}>
+            <RichText value={notesText} className="whitespace-pre-line" />
+          </div>
           {longNotes && (
             <button
               type="button"

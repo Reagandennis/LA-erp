@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react';
 import { SERVICE_COUNTRIES, SERVICE_COUNTRY_CODES } from '@/lib/service-catalog';
 import { isServiceCountry, normalizeClientCode, referenceMonth, referenceNumber } from '@/lib/trip-reference';
 
+import RichTextEditor from '../_components/rich-text-editor';
+
 import { localDateKeyPlusDays } from './list-model';
 import type { CustomerOption, OwnerOption, TravelerOption, TripDetail, TripStatus } from './types';
 
@@ -335,11 +337,14 @@ export default function TripBuilder({
                 />
               </Field>
               <Field label="Description" wide>
-                <textarea
+                {/* Room for a full brief: bold, italic and lists, stored as plain text (lib/rich-text.ts). */}
+                <RichTextEditor
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={2}
-                  className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-primary"
+                  onChange={setDescription}
+                  rows={8}
+                  aria-label="Description"
+                  placeholder="The brief: who is travelling, what they need, special instructions…"
+                  className="w-full min-h-48 resize-y px-4 py-3 bg-gray-50 rounded-2xl text-sm font-medium leading-relaxed focus:ring-2 focus:ring-primary"
                 />
               </Field>
               <Field label="Start date">
