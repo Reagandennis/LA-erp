@@ -11,7 +11,7 @@
  * Pure: the public page and the server-side PDF both import it.
  */
 import { APP_LOCALE } from '@/lib/locale';
-import { isValidTimeZone } from '@/lib/zoned-time';
+import { flightEndZones, zoneAbbreviation } from '@/lib/flight-zones';
 
 import type { TripDetail, TripItineraryItemSummary } from '../types';
 import { type TripItemCategory, categoryMeta, isTripItemCategory } from './categories';
@@ -112,23 +112,21 @@ function clock(iso: string, timeZone: string | undefined): string {
   return new Date(iso).toLocaleTimeString(APP_LOCALE, { hour: 'numeric', minute: '2-digit', timeZone });
 }
 
-function zoneName(iso: string, timeZone: string): string {
-  return (
-    new Intl.DateTimeFormat(APP_LOCALE, { timeZone, timeZoneName: 'short' })
-      .formatToParts(new Date(iso))
-      .find((part) => part.type === 'timeZoneName')?.value ?? ''
-  );
-}
-
-/** A flight's times are local to its airport (as on the flight card); everything else is our local time. */
+/** A flight's times are local to each end's airport (as on the flight card); everything else is our local time. */
 function timeParts(item: TripItineraryItemSummary): { time: string; timeLabel: string } {
   const timeLabel = item.timeLabel ? sentenceCase(item.timeLabel) : '';
   if (!item.scheduledAt) return { time: '', timeLabel };
-  const zone = item.details?.timezone;
-  const timeZone = item.category === 'flight' && zone && isValidTimeZone(zone) ? zone : undefined;
-  const start = clock(item.scheduledAt, timeZone);
-  let time = item.endsAt ? `${start} – ${clock(item.endsAt, timeZone)}` : start;
-  if (timeZone) time = `${time} ${zoneName(item.scheduledAt, timeZone)}`;
+  if (item.category !== 'flight') {
+    const start = clock(item.scheduledAt, undefined);
+    return { time: item.endsAt ? `${start} – ${clock(item.endsAt, undefined)}` : start, timeLabel };
+  }
+  const arrival = item.timeLabel === 'ARRIVAL';
+  const zones = flightEndZones({ arrival, enteredZone: item.details?.timezone, airports: item.airportZones });
+  const at = (iso: string, zone: string | null) =>
+    zone ? `${clock(iso, zone)} ${zoneAbbreviation(iso, zone, APP_LOCALE)}` : clock(iso, undefined);
+  const start = at(item.scheduledAt, arrival ? zones.arrive : zones.depart);
+  // A departure's end is its landing, at the other airport.
+  const time = !arrival && item.endsAt ? `${start} – ${at(item.endsAt, zones.arrive)}` : start;
   return { time, timeLabel };
 }
 

@@ -2,6 +2,7 @@ import 'server-only';
 
 import { Prisma } from '@prisma/client';
 
+import { airportTimeZone } from './airports';
 import { isPreviewableImage } from './attachment-types';
 import { crewGaps } from './crew-gaps';
 import { addDays, dateKey, parseDateKey } from './date-grid';
@@ -87,6 +88,8 @@ export interface TripItineraryItemSummary {
   placeName: string | null;
   address: string | null;
   details: Record<string, string> | null;
+  /** A flight's airports' time zones, from their codes. */
+  airportZones?: { depart: string | null; arrive: string | null };
   description: string;
   subtitle: string | null;
   quantity: number;
@@ -504,7 +507,17 @@ function asDecimal(value: number | Prisma.Decimal): Prisma.Decimal {
   return new Prisma.Decimal(value);
 }
 
+/** A flight's airports' zones, so each end reads in its own clock (lib/flight-zones). */
+function flightAirportZones(category: string | null, details: Record<string, string> | null) {
+  if (category !== 'flight' || !details) return undefined;
+  return { depart: airportTimeZone(details.departAirport), arrive: airportTimeZone(details.arriveAirport) };
+}
+
 function serializeItem(item: TripItineraryItemRecord): TripItineraryItemSummary {
+  const details =
+    item.details && typeof item.details === 'object' && !Array.isArray(item.details)
+      ? (item.details as Record<string, string>)
+      : null;
   return {
     id: item.id,
     dayId: item.dayId,
@@ -518,10 +531,8 @@ function serializeItem(item: TripItineraryItemRecord): TripItineraryItemSummary 
     phone: item.phone,
     placeName: item.placeName,
     address: item.address,
-    details:
-      item.details && typeof item.details === 'object' && !Array.isArray(item.details)
-        ? (item.details as Record<string, string>)
-        : null,
+    details,
+    airportZones: flightAirportZones(item.category, details),
     description: item.description,
     subtitle: item.subtitle,
     quantity: toNumber(item.quantity) ?? 0,

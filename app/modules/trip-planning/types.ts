@@ -46,6 +46,8 @@ export interface TripItineraryItemSummary {
   placeName: string | null;
   address: string | null;
   details: Record<string, string> | null;
+  /** A flight's airports' time zones, from their codes (server-side airport table). */
+  airportZones?: { depart: string | null; arrive: string | null };
   description: string;
   subtitle: string | null;
   quantity: number;

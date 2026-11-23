@@ -102,13 +102,18 @@ export function classifyQuery(raw: string): LookupQuery | null {
 const FILTER: Record<LookupQuery['kind'], string> = { flight: 'flights', callsign: 'callsigns', registration: 'registrations' };
 
 /** The median of some instants as "HH:MM" in `zone`, to the nearest five minutes; a single run to the minute. */
-function typicalTime(instants: number[], zone: string): string | null {
+export function typicalTime(instants: number[], zone: string): string | null {
   const minutes = instants
     .map((at) => utcToZoned(new Date(at).toISOString(), zone).time)
     .filter(Boolean)
     .map((time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)));
   if (minutes.length === 0) return null;
-  const typical = roundTo(median(minutes), minutes.length === 1 ? 1 : 5) % (24 * 60);
+  // A flight around midnight (23:50 one night, 00:05 the next) must not
+  // average to midday: read the early-morning runs as after midnight.
+  const day = 24 * 60;
+  const spread = Math.max(...minutes) - Math.min(...minutes);
+  const unwrapped = spread > day / 2 ? minutes.map((m) => (m < day / 2 ? m + day : m)) : minutes;
+  const typical = ((roundTo(median(unwrapped), minutes.length === 1 ? 1 : 5) % day) + day) % day;
   return `${String(Math.floor(typical / 60)).padStart(2, '0')}:${String(typical % 60).padStart(2, '0')}`;
 }
 

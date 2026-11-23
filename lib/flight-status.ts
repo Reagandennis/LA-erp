@@ -200,6 +200,24 @@ export const TAXI_OUT_MINUTES = 15;
 /** Past this, a flight FR24 still hasn't seen is more likely untracked than delayed. */
 const UNSEEN_GIVE_UP_MINUTES = 180;
 
+/**
+ * A run this far from the itinerary's time is more likely a wrong time on the
+ * itinerary (a.m. for p.m., the wrong zone) than a delay, so it is flagged
+ * for checking rather than reported as "Delayed 11h".
+ */
+export const MISMATCH_MINUTES = 6 * 60;
+
+function mismatch(phase: FlightPhase, deltaMinutes: number, what: string): FlightProgress {
+  const amount = formatDuration(deltaMinutes * 60_000);
+  return {
+    phase,
+    status: 'unknown',
+    deltaMinutes: null,
+    label: 'Check time',
+    detail: `FlightRadar24 shows it ${what} ${amount} ${deltaMinutes > 0 ? 'after' : 'before'} the time on the itinerary. Check the date, time and time zone.`,
+  };
+}
+
 export interface FlightProgress {
   phase: FlightPhase;
   status: Punctuality;
@@ -252,11 +270,23 @@ export function flightProgress(
   const arr = schedule.arrival ? new Date(schedule.arrival).getTime() : null;
   const minutes = (from: number, to: string) => Math.round((new Date(to).getTime() - from) / 60_000);
 
+  // Wheels-down is a few minutes before the gate time a schedule quotes.
+  const atGate = (iso: string) => new Date(new Date(iso).getTime() + TAXI_IN_MINUTES * 60_000).toISOString();
+  const takeoffDelta = track?.takeoffAt && dep !== null ? minutes(dep + TAXI_OUT_MINUTES * 60_000, track.takeoffAt) : null;
+  // The matched run is far from the itinerary's times: say so instead of reporting it as a delay.
+  if (takeoffDelta !== null && Math.abs(takeoffDelta) > MISMATCH_MINUTES) {
+    return mismatch(track?.landedAt || track?.ended ? 'landed' : 'airborne', takeoffDelta, 'took off');
+  }
+  if (dep === null && track?.landedAt && arr !== null) {
+    const landingDelta = minutes(arr, atGate(track.landedAt));
+    if (Math.abs(landingDelta) > MISMATCH_MINUTES) return mismatch('landed', landingDelta, 'landed');
+  }
+
   if (track?.landedAt) {
     if (arr === null) {
       return { phase: 'landed', status: 'unknown', deltaMinutes: null, label: 'Landed', detail: null };
     }
-    return judged('landed', minutes(arr, track.landedAt), (status, amount) =>
+    return judged('landed', minutes(arr, atGate(track.landedAt)), (status, amount) =>
       status === 'early'
         ? `Landed ${amount} ahead of schedule`
         : status === 'late'
@@ -265,9 +295,23 @@ export function flightProgress(
     );
   }
 
+  // FR24 stopped tracking it without recording a landing: it is down, not still in the air.
+  if (track?.takeoffAt && track.ended) {
+    if (takeoffDelta === null) {
+      return { phase: 'landed', status: 'unknown', deltaMinutes: null, label: 'Flight ended', detail: 'Landing time not recorded' };
+    }
+    return judged('landed', takeoffDelta, (status, amount) =>
+      status === 'early'
+        ? `Flight ended · took off ${amount} early, landing time not recorded`
+        : status === 'late'
+          ? `Flight ended · took off ${amount} late, landing time not recorded`
+          : 'Flight ended · took off on time, landing time not recorded',
+    );
+  }
+
   if (track?.takeoffAt) {
     if (track.eta && arr !== null) {
-      return judged('airborne', minutes(arr, track.eta), (status, amount) =>
+      return judged('airborne', minutes(arr, atGate(track.eta)), (status, amount) =>
         status === 'early'
           ? `In the air · expected ${amount} early`
           : status === 'late'
@@ -275,8 +319,8 @@ export function flightProgress(
             : 'In the air · expected on time',
       );
     }
-    if (dep !== null) {
-      return judged('airborne', minutes(dep + TAXI_OUT_MINUTES * 60_000, track.takeoffAt), (status, amount) =>
+    if (takeoffDelta !== null) {
+      return judged('airborne', takeoffDelta, (status, amount) =>
         status === 'early'
           ? `Took off ${amount} early`
           : status === 'late'

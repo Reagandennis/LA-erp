@@ -94,6 +94,33 @@ function iataFor(icao: string | null): string | null {
   return icao ? (findAirport(icao, null)?.iata ?? null) : null;
 }
 
+/** Room for a delay when only the arrival is known: a run may take off this long after it. */
+const ARRIVAL_ONLY_SLACK_MS = 6 * 60 * 60_000;
+
+/**
+ * The run that is this flight. The same number flies daily, so: with a
+ * departure, the run that took off nearest it; with only an arrival, the
+ * latest run that took off before it (plus room for a delay). Matching an
+ * arrival by take-off nearest to it picked the next day's run of a long
+ * flight once that one was in the air.
+ */
+export function nearestRun<T extends { datetime_takeoff?: string | null; first_seen?: string | null }>(
+  rows: T[],
+  departure: Date | null,
+  arrival: Date | null,
+): T | undefined {
+  const timed = rows
+    .map((row) => ({ row, at: new Date(str(row.datetime_takeoff) ?? str(row.first_seen) ?? '').getTime() }))
+    .filter((candidate) => !Number.isNaN(candidate.at));
+  if (departure) {
+    const target = departure.getTime();
+    return timed.sort((a, b) => Math.abs(a.at - target) - Math.abs(b.at - target))[0]?.row;
+  }
+  if (!arrival) return undefined;
+  const latestStart = arrival.getTime() + ARRIVAL_ONLY_SLACK_MS;
+  return timed.filter((candidate) => candidate.at <= latestStart).sort((a, b) => b.at - a.at)[0]?.row;
+}
+
 /**
  * What FR24 has seen of `flightNumber` around its scheduled times. Before the
  * window opens nothing is spent: it reports an empty, un-found track.
@@ -134,12 +161,7 @@ export async function lookupFlightTrack(input: {
       `&flight_datetime_from=${fr24Time(from)}&flight_datetime_to=${fr24Time(to)}&limit=10`,
   );
 
-  // The same number flies daily: take the one nearest the schedule.
-  const target = anchor.getTime();
-  const nearest = summaries
-    .map((row) => ({ row, at: new Date(str(row.datetime_takeoff) ?? str(row.first_seen) ?? '').getTime() }))
-    .filter((candidate) => !Number.isNaN(candidate.at))
-    .sort((a, b) => Math.abs(a.at - target) - Math.abs(b.at - target))[0]?.row;
+  const nearest = nearestRun(summaries, input.departure, input.arrival);
 
   let track: FlightTrack = empty;
   if (nearest) {

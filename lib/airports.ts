@@ -71,3 +71,11 @@ export function searchAirports(query: string, limit = 8): AirportInfo[] {
   }
   return [...exact, ...prefix, ...contains].slice(0, limit);
 }
+
+/** The IANA zone of an airport by its IATA (or ICAO) code; null when unknown. */
+export function airportTimeZone(code: string | null | undefined): string | null {
+  const value = code?.trim().toUpperCase();
+  if (!value) return null;
+  const airport = /^[A-Z0-9]{3}$/.test(value) ? findAirport(null, value) : /^[A-Z0-9]{4}$/.test(value) ? findAirport(value, null) : null;
+  return airport?.tz ?? null;
+}

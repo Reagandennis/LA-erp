@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { airportTimeZone } from './airports';
+
 import type { Prisma } from '@prisma/client';
 
 import {
@@ -161,6 +163,8 @@ export interface OpsFlight {
   from: string | null;
   to: string | null;
   timezone: string | null;
+  /** Each airport's zone, from its code. */
+  airportZones?: { depart: string | null; arrive: string | null };
   completed: boolean;
   /** May tick it off as handled (met, seen off), as on the trip. */
   canEdit: boolean;
@@ -600,6 +604,7 @@ async function loadFlights(user: AccessUser, isAdmin: boolean): Promise<OpsFligh
     from: text(r.details, 'departAirport'),
     to: text(r.details, 'arriveAirport'),
     timezone: text(r.details, 'timezone'),
+    airportZones: { depart: airportTimeZone(text(r.details, 'departAirport')), arrive: airportTimeZone(text(r.details, 'arriveAirport')) },
     completed: r.completedAt !== null,
     canEdit: canEditTrip(r.trip, user.id, isAdmin),
   }));

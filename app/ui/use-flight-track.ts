@@ -19,6 +19,19 @@ export function isTrackable(now: number | null, schedule: FlightSchedule): boole
   return now !== null && anchor !== null && now >= new Date(anchor).getTime() - lead;
 }
 
+/** Past this, a flight that hasn't been seen landing is no longer polled (it is still looked up once). */
+const POLL_AFTER_LANDING_MS = 12 * 60 * 60_000;
+const ASSUMED_FLIGHT_MS = 18 * 60 * 60_000;
+
+function pollUntil(schedule: FlightSchedule): number {
+  const landing = schedule.arrival
+    ? new Date(schedule.arrival).getTime()
+    : schedule.departure
+      ? new Date(schedule.departure).getTime() + ASSUMED_FLIGHT_MS
+      : 0;
+  return landing + POLL_AFTER_LANDING_MS;
+}
+
 /**
  * What FlightRadar24 has seen of this flight (take-off, landing, live ETA),
  * via `/api/flight-radar/status`. Polls while there's still something to
@@ -58,6 +71,8 @@ export function useFlightTrack(flightNumber: string | null, schedule: FlightSche
       if (cancelled) return;
       setResult({ key, track, failed });
       if (track?.landedAt || track?.ended) return;
+      // Long past and still unseen: asking again won't change the answer, and every ask is paid.
+      if (Date.now() > pollUntil({ departure: schedule.departure, arrival: schedule.arrival })) return;
       timer = setTimeout(() => void load(), track?.takeoffAt ? POLL_AIRBORNE_MS : POLL_WAITING_MS);
     };
 

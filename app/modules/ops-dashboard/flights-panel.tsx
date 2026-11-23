@@ -14,7 +14,7 @@ import {
   scheduledFlightTimes,
 } from '@/lib/flight-status';
 import type { OpsFlight } from '@/lib/ops-dashboard';
-import { isValidTimeZone } from '@/lib/zoned-time';
+import { OFFICE_ZONE, OFFICE_ZONE_LABEL, flightEndZones, zoneAbbreviation } from '@/lib/flight-zones';
 
 import { reportFlightDelay } from './board-stores';
 import { Check, Empty, Panel, type PanelFrame, Pill, type Tone, clock, mono, rowClass, send, shortDate, subClass } from './ops-ui';
@@ -46,8 +46,18 @@ function FlightRow({
   const progress = now !== null ? flightProgress(now, schedule, track) : null;
   const countdown = now !== null ? scheduleCountdown(now, schedule) : null;
 
-  const timeZone = flight.timezone && isValidTimeZone(flight.timezone) ? flight.timezone : undefined;
+  // The event's time at its own airport; ETAs and landings at the arrival airport.
+  const zones = flightEndZones({ arrival, enteredZone: flight.timezone, airports: flight.airportZones });
+  const timeZone = (arrival ? zones.arrive : zones.depart) ?? undefined;
+  const arriveZone = zones.arrive ?? undefined;
   const at = arrival ? schedule.arrival : schedule.departure;
+  /** "05:50 GMT (08:50 Kenya)", or just Kenya time when the zone is Kenya's or unknown. */
+  const both = (iso: string, zone: string | undefined) => {
+    const kenya = clock(iso, OFFICE_ZONE);
+    if (!zone) return `${kenya} ${OFFICE_ZONE_LABEL}`;
+    const local = clock(iso, zone);
+    return local === kenya ? `${local} ${OFFICE_ZONE_LABEL}` : `${local} ${zoneAbbreviation(iso, zone)} (${kenya} ${OFFICE_ZONE_LABEL})`;
+  };
   const chip =
     state === 'loading' && !track ? 'Checking…' : !flightNumber || !trackable ? 'Scheduled' : (progress?.label ?? 'Scheduled');
   const status = trackable && flightNumber ? (progress?.status ?? 'unknown') : 'unknown';
@@ -60,8 +70,8 @@ function FlightRow({
   const detail = [
     at ? `${arrival ? 'Lands' : 'Departs'} ${shortDate(at, timeZone)}` : null,
     progress?.detail ?? countdown?.label ?? null,
-    track?.eta && !track.landedAt ? `ETA ${clock(track.eta, timeZone)}` : null,
-    track?.landedAt ? `Landed ${clock(track.landedAt, timeZone)}` : null,
+    track?.eta && !track.landedAt ? `ETA ${both(track.eta, arriveZone)}` : null,
+    track?.landedAt ? `Landed ${both(track.landedAt, arriveZone)}` : null,
     state === 'failed' ? 'FlightRadar24 unreachable, retrying' : null,
   ].filter(Boolean);
 
@@ -90,9 +100,14 @@ function FlightRow({
         {detail.length > 0 && <p suppressHydrationWarning className="truncate text-[11px] text-gray-400">{detail.join(' · ')}</p>}
       </div>
       {at && (
-        // The flight's own zone when it has one, else the viewer's (which the server can't know).
-        <span suppressHydrationWarning className={`${mono} shrink-0 text-sm tabular-nums text-gray-700`} title={arrival ? 'Lands' : 'Departs'}>
-          {clock(at, timeZone)}
+        // Local at the event's airport, with Kenya time beneath when it differs.
+        <span suppressHydrationWarning className={`${mono} shrink-0 text-right text-sm tabular-nums text-gray-700`} title={arrival ? 'Lands (local)' : 'Departs (local)'}>
+          {clock(at, timeZone ?? OFFICE_ZONE)}
+          {(!timeZone || clock(at, timeZone) !== clock(at, OFFICE_ZONE)) && (
+            <span className="block text-[10px] text-gray-400">
+              {timeZone ? `${clock(at, OFFICE_ZONE)} ${OFFICE_ZONE_LABEL}` : OFFICE_ZONE_LABEL}
+            </span>
+          )}
         </span>
       )}
       <Pill tone={PUNCTUALITY[status]}>{chip}</Pill>

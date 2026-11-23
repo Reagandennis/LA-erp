@@ -173,26 +173,48 @@ describe('flightDirection / scheduledFlightTimes', () => {
 describe('flightProgress', () => {
   const schedule = { departure: iso(10), arrival: iso(12) };
 
-  it('judges a landed flight on its actual landing', () => {
-    expect(flightProgress(at(13), schedule, track({ takeoffAt: iso(10, 20), landedAt: iso(11, 40) }))).toMatchObject({
+  // Touchdown plus the 10-minute taxi to the gate is what the schedule's arrival quotes.
+  it('judges a landed flight on its actual landing, taxi to the gate included', () => {
+    expect(flightProgress(at(13), schedule, track({ takeoffAt: iso(10, 20), landedAt: iso(11, 30) }))).toMatchObject({
       phase: 'landed',
       status: 'early',
       label: '20m early',
       detail: 'Landed 20m ahead of schedule',
     });
-    expect(flightProgress(at(13), schedule, track({ takeoffAt: iso(10, 50), landedAt: iso(12, 45) }))).toMatchObject({
+    expect(flightProgress(at(13), schedule, track({ takeoffAt: iso(10, 50), landedAt: iso(12, 35) }))).toMatchObject({
       status: 'late',
       label: 'Delayed 45m',
     });
-    expect(flightProgress(at(13), schedule, track({ landedAt: iso(12, 10) })).status).toBe('ontime');
+    expect(flightProgress(at(13), schedule, track({ landedAt: iso(12) })).status).toBe('ontime');
   });
 
   it('uses the live ETA while airborne', () => {
-    expect(flightProgress(at(11), schedule, track({ takeoffAt: iso(10, 15), eta: iso(12, 40) }))).toMatchObject({
+    expect(flightProgress(at(11), schedule, track({ takeoffAt: iso(10, 15), eta: iso(12, 30) }))).toMatchObject({
       phase: 'airborne',
       status: 'late',
       detail: 'In the air · expected 40m late',
     });
+  });
+
+  it('says a flight FR24 stopped tracking has ended, not that it is still in the air', () => {
+    expect(flightProgress(at(20), schedule, track({ takeoffAt: iso(9, 55), ended: true }))).toMatchObject({
+      phase: 'landed',
+      status: 'early',
+      label: '20m early',
+      detail: 'Flight ended · took off 20m early, landing time not recorded',
+    });
+  });
+
+  it('flags a run hours away from the itinerary time for checking instead of calling it delayed', () => {
+    // An a.m./p.m. slip: entered 10:00, it actually took off at 22:07.
+    const result = flightProgress(at(23), schedule, track({ takeoffAt: iso(22, 7) }));
+    expect(result).toMatchObject({ status: 'unknown', label: 'Check time', deltaMinutes: null });
+    expect(result.detail).toContain('11h 52m after the time on the itinerary');
+    // Arrival-only events are checked against the landing.
+    const arrivalOnly = { departure: null, arrival: iso(12) };
+    expect(flightProgress(at(23), arrivalOnly, track({ takeoffAt: iso(20), landedAt: iso(22) })).label).toBe('Check time');
+    // A long but believable delay is still a delay.
+    expect(flightProgress(at(16), schedule, track({ takeoffAt: iso(14, 15) })).label).toBe('Delayed 4h');
   });
 
   it('allows for the taxi when only the take-off is known', () => {

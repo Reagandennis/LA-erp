@@ -13,7 +13,7 @@ import {
   scheduledFlightTimes,
   type Punctuality,
 } from '@/lib/flight-status';
-import { isValidTimeZone } from '@/lib/zoned-time';
+import { OFFICE_ZONE, OFFICE_ZONE_LABEL, dayShift, flightEndZones, zoneAbbreviation } from '@/lib/flight-zones';
 
 import type { TripItineraryItemSummary } from '../../types';
 import { AttachmentStrip } from './attachment-strip';
@@ -78,44 +78,57 @@ const LANDING_ICON =
 const PLANE_ICON =
   'M21 16v-2l-8-5V3.5a1.5 1.5 0 00-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1L15 22v-1.5L13 19v-5.5L21 16z';
 
-/** "14:30" and "GMT+3" in the flight's zone; the viewer's own when it has none. */
-function zonedClock(iso: string | null, timeZone: string | undefined): { time: string; zone: string } {
+/** "14:30" and "GMT+3" in `timeZone`; the viewer's own zone when there is none. */
+function zonedClock(iso: string | null, timeZone: string | null): { time: string; zone: string } {
   if (!iso) return { time: '--:--', zone: '' };
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return { time: '--:--', zone: '' };
-  const time = date.toLocaleTimeString(APP_LOCALE, { timeZone, hour: '2-digit', minute: '2-digit', hour12: false });
-  const zone =
-    new Intl.DateTimeFormat(APP_LOCALE, { timeZone, timeZoneName: 'short' })
-      .formatToParts(date)
-      .find((part) => part.type === 'timeZoneName')?.value ?? '';
-  return { time, zone };
+  const zone = timeZone ?? undefined;
+  const time = date.toLocaleTimeString(APP_LOCALE, { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false });
+  return { time, zone: timeZone ? zoneAbbreviation(iso, timeZone, APP_LOCALE) : '' };
 }
 
-/** The office's zone: every airport time on the card is also given in Nairobi. */
-const OFFICE_ZONE = 'Africa/Nairobi';
-
 /**
- * The same moment in Nairobi, as a second line under a time shown in the
- * flight's own zone; nothing when the two read the same (the flight is at
- * Nairobi, or the zones agree at that moment).
+ * One time on the card: local to its airport, then the same moment in Kenya
+ * time. When the airport is on Kenya's clock (NBO, ADD, DAR…) it says so
+ * instead of repeating itself; when the airport's zone isn't known, only
+ * Kenya time is given, labelled as such.
  */
-function NairobiLine({ iso, shown }: { iso: string | null; shown: { time: string; zone: string } }) {
-  if (!iso) return null;
-  const nairobi = zonedClock(iso, OFFICE_ZONE);
-  if (nairobi.time === '--:--' || (nairobi.time === shown.time && nairobi.zone === shown.zone)) return null;
+function FlightTime({ iso, zone, className = '' }: { iso: string | null; zone: string | null; className?: string }) {
+  if (!iso || Number.isNaN(new Date(iso).getTime())) return <span className={className}>--:--</span>;
+  const kenya = zonedClock(iso, OFFICE_ZONE);
+  if (!zone) {
+    return (
+      <span className={className}>
+        {kenya.time}
+        <span className="ml-1 font-sans text-[10px] font-medium text-slate-400">{OFFICE_ZONE_LABEL}</span>
+      </span>
+    );
+  }
+  const local = zonedClock(iso, zone);
+  const sameClock = local.time === kenya.time && dayShift(iso, zone, OFFICE_ZONE) === 0;
+  const shift = dayShift(iso, OFFICE_ZONE, zone);
   return (
-    <span className="mt-0.5 block font-mono text-[10px] font-medium text-slate-400">
-      {nairobi.time} <span className="font-sans">Nairobi</span>
+    <span className={className}>
+      {local.time}
+      <span className="ml-1 font-sans text-[10px] font-medium text-slate-400">{sameClock ? `${local.zone} · ${OFFICE_ZONE_LABEL}` : `${local.zone} local`}</span>
+      {!sameClock && (
+        <span className="mt-0.5 block font-mono text-[10px] font-medium text-slate-500">
+          {kenya.time}
+          {shift !== 0 && <sup className="ml-0.5">{shift > 0 ? `+${shift}` : shift}</sup>}{' '}
+          <span className="font-sans">{OFFICE_ZONE_LABEL}</span>
+        </span>
+      )}
     </span>
   );
 }
 
-function zonedDate(iso: string | null, timeZone: string | undefined): string {
+function zonedDate(iso: string | null, timeZone: string | null): string {
   if (!iso) return '';
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
     ? ''
-    : date.toLocaleDateString(APP_LOCALE, { timeZone, weekday: 'short', month: 'short', day: 'numeric' });
+    : date.toLocaleDateString(APP_LOCALE, { timeZone: timeZone ?? undefined, weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 export default function FlightCard({
@@ -137,7 +150,9 @@ export default function FlightCard({
   const flightNumber = normalizeFlightNumber(details.flightNumber);
   const direction = flightDirection(item.timeLabel);
   const arrival = direction === 'arrival';
-  const timeZone = details.timezone && isValidTimeZone(details.timezone) ? details.timezone : undefined;
+  // Each end in its own airport's clock (lib/flight-zones).
+  const zones = flightEndZones({ arrival, enteredZone: details.timezone, airports: item.airportZones });
+  const eventZone = arrival ? zones.arrive : zones.depart;
   const schedule = scheduledFlightTimes({
     direction,
     scheduledAt: item.scheduledAt,
@@ -158,9 +173,7 @@ export default function FlightCard({
 
   const from = details.departAirport || track?.origin || '';
   const to = details.arriveAirport || track?.destination || '';
-  const departs = zonedClock(schedule.departure, timeZone);
-  const lands = zonedClock(schedule.arrival, timeZone);
-  const eventDate = zonedDate(item.scheduledAt, timeZone);
+  const eventDate = zonedDate(item.scheduledAt, eventZone);
 
   const chipText =
     state === 'loading' && !track
@@ -169,17 +182,14 @@ export default function FlightCard({
         ? 'Scheduled'
         : (progress?.label ?? 'Scheduled');
 
-  // The actual take-off once FR24 has seen it, else the scheduled departure.
-  const takeoff = track?.takeoffAt
-    ? { label: 'Took off', clock: zonedClock(track.takeoffAt, timeZone), at: track.takeoffAt }
-    : { label: 'Departs', clock: departs, at: schedule.departure };
-  // Where it lands: the touchdown, the live ETA, then the schedule. The day
-  // is named when it isn't the event's own.
+  // The actual take-off once FR24 has seen it (at the departure airport), else the scheduled departure.
+  const takeoff = { label: track?.takeoffAt ? 'Took off' : 'Departs', at: track?.takeoffAt ?? schedule.departure };
+  // Where it lands: the touchdown, the live ETA, then the schedule, at the
+  // arrival airport. The day is named when it isn't the event's own.
   const landingAt = track?.landedAt ?? track?.eta ?? schedule.arrival;
-  const landingDay = zonedDate(landingAt, timeZone);
+  const landingDay = zonedDate(landingAt, zones.arrive);
   const landing = {
     label: track?.landedAt ? 'Landed' : track?.eta ? 'Lands (ETA)' : 'Lands',
-    clock: track?.landedAt || track?.eta ? zonedClock(landingAt, timeZone) : lands,
     day: landingDay && landingDay !== eventDate ? landingDay : null,
     at: landingAt,
   };
@@ -234,12 +244,11 @@ export default function FlightCard({
           <div className="text-left">
             <p className={`font-mono text-2xl font-bold leading-none tracking-tight ${side(!arrival)}`}>{from || '—'}</p>
             <p className={`mt-1 text-sm font-semibold ${side(!arrival)}`}>
-              {departs.time}
-              {schedule.departure && departs.zone && (
-                <span className="ml-1 text-[10px] font-medium text-slate-400">{departs.zone}</span>
-              )}
-              <NairobiLine iso={schedule.departure} shown={departs} />
+              <FlightTime iso={schedule.departure} zone={zones.depart} />
             </p>
+            {schedule.departure && (
+              <p className="text-[10px] font-medium text-slate-400">{zonedDate(schedule.departure, zones.depart)}</p>
+            )}
           </div>
 
           <div className="relative mb-6 flex-1">
@@ -261,12 +270,11 @@ export default function FlightCard({
           <div className="text-right">
             <p className={`font-mono text-2xl font-bold leading-none tracking-tight ${side(arrival)}`}>{to || '—'}</p>
             <p className={`mt-1 text-sm font-semibold ${side(arrival)}`}>
-              {lands.time}
-              {schedule.arrival && lands.zone && (
-                <span className="ml-1 text-[10px] font-medium text-slate-400">{lands.zone}</span>
-              )}
-              <NairobiLine iso={schedule.arrival} shown={lands} />
+              <FlightTime iso={schedule.arrival} zone={zones.arrive} />
             </p>
+            {schedule.arrival && (
+              <p className="text-[10px] font-medium text-slate-400">{zonedDate(schedule.arrival, zones.arrive)}</p>
+            )}
           </div>
         </div>
 
@@ -275,18 +283,14 @@ export default function FlightCard({
           <div>
             <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">{takeoff.label}</p>
             <p className="font-mono text-sm font-semibold text-slate-800">
-              {takeoff.clock.time}
-              {takeoff.clock.zone && <span className="ml-1 text-[10px] font-medium text-slate-400">{takeoff.clock.zone}</span>}
-              <NairobiLine iso={takeoff.at} shown={takeoff.clock} />
+              <FlightTime iso={takeoff.at} zone={zones.depart} />
             </p>
           </div>
           <div>
             <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">{landing.label}</p>
             <p className="font-mono text-sm font-semibold text-slate-800">
-              {landing.clock.time}
-              {landing.clock.zone && <span className="ml-1 text-[10px] font-medium text-slate-400">{landing.clock.zone}</span>}
-              {landing.day && <span className="ml-1 text-[10px] font-medium text-slate-400">· {landing.day}</span>}
-              <NairobiLine iso={landing.at} shown={landing.clock} />
+              <FlightTime iso={landing.at} zone={zones.arrive} />
+              {landing.day && <span className="block text-[10px] font-medium text-slate-400">{landing.day}</span>}
             </p>
           </div>
           <div>

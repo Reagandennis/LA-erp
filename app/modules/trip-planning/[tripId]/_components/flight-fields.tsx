@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MAX_ATTACHMENTS_PER_ITEM } from '@/lib/attachment-types';
 import { parseDateKey } from '@/lib/date-grid';
 import type { FlightCandidate, LookupAirport } from '@/lib/flight-status';
+import { OFFICE_ZONE, OFFICE_ZONE_LABEL, dayShift } from '@/lib/flight-zones';
 import { APP_LOCALE } from '@/lib/locale';
 import type { TicketReading, TicketSegment } from '@/lib/ticket-reader';
 import { allTimeZones, localTimeZone, offsetLabel, weekdayOf, zonedToUtcIso } from '@/lib/zoned-time';
@@ -230,6 +231,21 @@ export default function FlightFields({
 
   const weekday = weekdayOf(editor.date, APP_LOCALE);
 
+  // The time as entered, spelled out with a.m./p.m. and in Kenya time, so a
+  // slip (11:55 for 23:55, the wrong zone) shows before it is saved.
+  const kenyaPreview = useMemo(() => {
+    const iso = editor.date && editor.time ? zonedToUtcIso(editor.date, editor.time, editor.timezone) : null;
+    if (!iso) return null;
+    const fmt = (timeZone: string) =>
+      new Date(iso).toLocaleTimeString(APP_LOCALE, { timeZone, hour: 'numeric', minute: '2-digit', hour12: true });
+    const local = `${fmt(editor.timezone)} local`;
+    if (editor.timezone === OFFICE_ZONE || offsetLabel(editor.timezone, Date.parse(iso)) === offsetLabel(OFFICE_ZONE, Date.parse(iso))) {
+      return `${local} · same as ${OFFICE_ZONE_LABEL} time`;
+    }
+    const shift = dayShift(iso, OFFICE_ZONE, editor.timezone);
+    return `${local} · ${fmt(OFFICE_ZONE)}${shift > 0 ? ' next day' : shift < 0 ? ' day before' : ''} ${OFFICE_ZONE_LABEL} time`;
+  }, [editor.date, editor.time, editor.timezone]);
+
   return (
     <div className="space-y-4">
       {/* Departure or arrival — everything below reads from this. */}
@@ -390,7 +406,9 @@ export default function FlightFields({
             disabled={!editor.date}
             className={`${fieldClass} disabled:opacity-50`}
           />
-          <span className="mt-1 block text-[11px] text-gray-400">Local at the {arrival ? 'arrival' : 'departure'} airport</span>
+          <span className="mt-1 block text-[11px] text-gray-400">
+            {kenyaPreview ?? `Local at the ${arrival ? 'arrival' : 'departure'} airport`}
+          </span>
         </label>
         <label className="block">
           <span className={labelClass}>Timezone</span>
