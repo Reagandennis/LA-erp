@@ -11,7 +11,18 @@ import { subscribeServerEvents } from './messaging-alerts-store';
 import { dismissPushedToast, Toast, ToastStack, usePushedToasts } from './toast';
 import { useIsClient } from './use-client';
 
-type NotificationSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance' | 'escalation' | 'handover';
+type NotificationSource =
+  | 'todo'
+  | 'quote'
+  | 'invoice'
+  | 'trip'
+  | 'message'
+  | 'file'
+  | 'calendar'
+  | 'maintenance'
+  | 'escalation'
+  | 'handover'
+  | 'fuelCard';
 
 type RawTodoNotification = {
   id: number;
@@ -95,6 +106,15 @@ type RawEscalationNotification = {
   readAt: string | null;
 };
 
+type RawFuelCardNotification = {
+  id: number;
+  cardId: number;
+  type: string;
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
 type RawHandoverNotification = {
   id: number;
   handoverId: number;
@@ -132,6 +152,7 @@ type NotificationFeed = {
   maintenance?: RawMaintenanceNotification[];
   escalation?: RawEscalationNotification[];
   handover?: RawHandoverNotification[];
+  fuelCard?: RawFuelCardNotification[];
 };
 
 const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
@@ -145,6 +166,7 @@ const SOURCE_ENDPOINTS: Record<NotificationSource, string> = {
   maintenance: '/api/fleet/maintenance/notifications',
   escalation: '/api/planning/trip-escalations',
   handover: '/api/handover/notifications',
+  fuelCard: '/api/fleet/fuel-cards/notifications',
 };
 
 function compositeKey(item: { source: NotificationSource; id: number }): string {
@@ -172,6 +194,9 @@ function buildToastTitle(source: NotificationSource, type: string): string {
   }
   if (source === 'handover') {
     return 'Shift handover for you';
+  }
+  if (source === 'fuelCard') {
+    return 'Fuel card balance low';
   }
   if (source === 'message') {
     return 'New message';
@@ -210,6 +235,9 @@ function buildHref(item: { source: NotificationSource; entityId: number }): stri
   }
   if (item.source === 'maintenance') {
     return '/modules/car-maintenance';
+  }
+  if (item.source === 'fuelCard') {
+    return `/modules/fuel-cards?card=${item.entityId}`;
   }
   if (item.source === 'handover') {
     // Opens the Handover screen on that entry, ready to acknowledge.
@@ -382,6 +410,20 @@ export default function NotificationsBell() {
             readAt: item.readAt,
             href: buildHref({ source: 'handover', entityId: item.handoverId }),
             toastTitle: buildToastTitle('handover', item.type),
+          });
+        }
+
+        for (const item of feed?.fuelCard ?? []) {
+          merged.push({
+            source: 'fuelCard',
+            id: item.id,
+            entityId: item.cardId,
+            type: item.type,
+            message: item.message,
+            createdAt: item.createdAt,
+            readAt: item.readAt,
+            href: buildHref({ source: 'fuelCard', entityId: item.cardId }),
+            toastTitle: buildToastTitle('fuelCard', item.type),
           });
         }
 
@@ -592,7 +634,7 @@ export default function NotificationsBell() {
                         ? 'border-gray-200 bg-gray-50'
                         : notification.source === 'quote'
                           ? 'border-blue-200 bg-blue-50'
-                          : notification.source === 'trip' || notification.source === 'maintenance'
+                          : notification.source === 'trip' || notification.source === 'maintenance' || notification.source === 'fuelCard'
                             ? 'border-amber-200 bg-amber-50'
                             : 'border-emerald-200 bg-emerald-50'
                     }`}

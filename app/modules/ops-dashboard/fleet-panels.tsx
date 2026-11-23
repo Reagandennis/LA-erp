@@ -14,6 +14,7 @@ import {
   localDateKey,
   vehicleLabel,
 } from '@/lib/fleet';
+import { FUEL_CURRENCY, cardsForVehicle, formatKes } from '@/lib/fuel-cards';
 import type { OpsFuel, OpsJob, OpsMaintenance, OpsReference } from '@/lib/ops-dashboard';
 
 import {
@@ -55,7 +56,7 @@ function VehiclePicker({ vehicles, value, onChange }: Readonly<{ vehicles: Fleet
 
 // ---------------------------------------------------------------- fuel
 
-type FuelForm = { vehicleId: string; litres: string; cost: string; currency: string; odometerKm: string; fuelType: string };
+type FuelForm = { vehicleId: string; litres: string; cost: string; odometerKm: string; fuelType: string; fuelCardId: string };
 
 /** This month's fuel, the latest fill-ups, and a quick way to log one. */
 export function FuelPanel({
@@ -70,11 +71,13 @@ export function FuelPanel({
     vehicleId: vehicles.length === 1 ? String(vehicles[0]!.id) : '',
     litres: '',
     cost: '',
-    currency: data.recent[0]?.currency ?? reference.defaultCurrency,
     odometerKm: '',
     fuelType: 'Petrol',
+    fuelCardId: '',
   });
   const [form, setForm] = useState<FuelForm | null>(null);
+  // Only our own vehicles fill up on a fuel card.
+  const canUseCard = form ? reference.internalVehicleIds.includes(Number(form.vehicleId)) : false;
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -85,16 +88,20 @@ export function FuelPanel({
       if (!form.vehicleId) throw new Error('Pick a vehicle.');
       const litres = readNumber(form.litres, 'Litres');
       if (litres === null) throw new Error('Enter how many litres went in.');
+      const cost = readNumber(form.cost, 'Cost');
+      const fuelCardId = form.fuelCardId && canUseCard ? Number(form.fuelCardId) : null;
+      if (fuelCardId !== null && (cost === null || cost <= 0)) throw new Error('Enter the cost: it comes off the fuel card.');
       body = {
         vehicleId: Number(form.vehicleId),
         // Logged as it happens; the Car Fuel page can back-date one.
         filledAt: new Date().toISOString(),
         litres,
-        cost: readNumber(form.cost, 'Cost'),
-        currency: form.currency,
+        cost,
+        currency: FUEL_CURRENCY,
         odometerKm: readNumber(form.odometerKm, 'Odometer'),
         fuelType: form.fuelType,
         fullTank: true,
+        fuelCardId,
       };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Check the form.');
@@ -142,23 +149,39 @@ export function FuelPanel({
             void save();
           }}
         >
-          <VehiclePicker vehicles={vehicles} value={form.vehicleId} onChange={(vehicleId) => setForm({ ...form, vehicleId })} />
+          <VehiclePicker
+            vehicles={vehicles}
+            value={form.vehicleId}
+            onChange={(vehicleId) => {
+              const stillOk = cardsForVehicle(reference.fuelCards, Number(vehicleId)).some((c) => String(c.id) === form.fuelCardId);
+              setForm({ ...form, vehicleId, fuelCardId: stillOk ? form.fuelCardId : '' });
+            }}
+          />
           <input inputMode="decimal" placeholder="Litres" aria-label="Litres" value={form.litres} onChange={(e) => setForm({ ...form, litres: e.target.value })} className={fieldClass} />
           <select value={form.fuelType} onChange={(e) => setForm({ ...form, fuelType: e.target.value })} aria-label="Fuel type" className={fieldClass}>
             {FUEL_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
           </select>
-          <div className="flex gap-2">
-            <input inputMode="decimal" placeholder="Cost" aria-label="Cost" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} className={fieldClass} />
-            <input
-              value={form.currency}
-              onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase().slice(0, 3) })}
-              aria-label="Currency"
-              className={`${fieldClass} w-16 shrink-0 text-center uppercase`}
-            />
-          </div>
+          <input inputMode="decimal" placeholder="Cost (KES)" aria-label="Cost in KES" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} className={fieldClass} />
           <input inputMode="numeric" placeholder="Odometer km" aria-label="Odometer km" value={form.odometerKm} onChange={(e) => setForm({ ...form, odometerKm: e.target.value })} className={fieldClass} />
+          {reference.fuelCards.length > 0 && (
+            <select
+              value={canUseCard ? form.fuelCardId : ''}
+              disabled={!canUseCard}
+              onChange={(e) => setForm({ ...form, fuelCardId: e.target.value })}
+              aria-label="Paid with"
+              title={canUseCard ? undefined : 'Fuel cards are for internal vehicles only'}
+              className={`${fieldClass} col-span-2`}
+            >
+              <option value="">Paid with: cash / other</option>
+              {cardsForVehicle(reference.fuelCards, Number(form.vehicleId)).map((card) => (
+                <option key={card.id} value={String(card.id)}>
+                  {`${card.name}${card.vehicle ? '' : ' · spare'} · ${formatKes(card.balance)}`}
+                </option>
+              ))}
+            </select>
+          )}
           {error && <p className="col-span-2 text-xs text-rose-600">{error}</p>}
           <button type="submit" disabled={saving} className={`${primaryButton} col-span-2`}>
             {saving ? 'Saving…' : 'Log fill-up now'}

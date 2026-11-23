@@ -12,6 +12,7 @@ import {
   dateToDateKey,
   localDateKey,
 } from './fleet';
+import { type AlertContext, checkFuelCardBalances, fuelCardPaymentProblem } from './fuel-cards-server';
 import { prisma } from './prisma';
 import type {
   fuelLogCreateSchema,
@@ -56,6 +57,12 @@ export async function listFleetVehicles(scope: FleetScope = {}): Promise<FleetVe
     orderBy: [{ registration: 'asc' }],
     select: VEHICLE_REF_SELECT,
   });
+}
+
+/** Our own vehicles' ids: only they can fill up on a fuel card. */
+export async function listInternalVehicleIds(): Promise<number[]> {
+  const rows = await prisma.vehicle.findMany({ where: INTERNAL_VEHICLE, select: { id: true } });
+  return rows.map((row) => row.id);
 }
 
 /** Vehicles in the register that are not ours: a supplier's, or not classified yet. */
@@ -131,6 +138,7 @@ const FUEL_SELECT = {
   notes: true,
   createdAt: true,
   vehicle: { select: VEHICLE_REF_SELECT },
+  fuelCard: { select: { id: true, name: true } },
   createdBy: CREATED_BY_SELECT,
 } as const;
 
@@ -150,6 +158,7 @@ function serializeFuel(row: FuelRow): FuelLogDto {
     station: row.station,
     filledBy: row.filledBy,
     notes: row.notes,
+    fuelCard: row.fuelCard,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
   };
@@ -164,8 +173,25 @@ export async function listFuelLogs(): Promise<FuelLogDto[]> {
   return rows.map(serializeFuel);
 }
 
-export async function createFuelLog(userId: number, input: FuelLogCreateInput): Promise<FleetWriteResult<FuelLogDto>> {
+/**
+ * A fill-up paid with a fuel card draws its cost from the card; after any
+ * change the cards involved are re-checked against their alert levels.
+ */
+export async function createFuelLog(
+  userId: number,
+  input: FuelLogCreateInput,
+  context: AlertContext = {},
+): Promise<FleetWriteResult<FuelLogDto>> {
   if (!(await vehicleExists(input.vehicleId))) return { error: 'Vehicle not found', status: 400 };
+  const fuelCardId = input.fuelCardId ?? null;
+  const problem = await fuelCardPaymentProblem({
+    fuelCardId,
+    vehicleId: input.vehicleId,
+    cost: input.cost ?? null,
+    currency: input.currency,
+  });
+  if (problem) return { error: problem, status: 400 };
+
   const row = await prisma.vehicleFuelLog.create({
     data: {
       vehicleId: input.vehicleId,
@@ -179,19 +205,39 @@ export async function createFuelLog(userId: number, input: FuelLogCreateInput): 
       station: textOrNull(input.station),
       filledBy: textOrNull(input.filledBy),
       notes: textOrNull(input.notes),
+      fuelCardId,
       createdById: userId,
     },
     select: FUEL_SELECT,
   });
+  await checkFuelCardBalances([fuelCardId], context);
   return { item: serializeFuel(row) };
 }
 
-export async function updateFuelLog(id: number, input: FuelLogUpdateInput): Promise<FleetWriteResult<FuelLogDto>> {
-  const existing = await prisma.vehicleFuelLog.findUnique({ where: { id }, select: { id: true } });
+export async function updateFuelLog(
+  id: number,
+  input: FuelLogUpdateInput,
+  context: AlertContext = {},
+): Promise<FleetWriteResult<FuelLogDto>> {
+  const existing = await prisma.vehicleFuelLog.findUnique({
+    where: { id },
+    select: { id: true, vehicleId: true, cost: true, currency: true, fuelCardId: true },
+  });
   if (!existing) return { error: 'Fill-up not found', status: 404 };
   if (input.vehicleId !== undefined && !(await vehicleExists(input.vehicleId))) {
     return { error: 'Vehicle not found', status: 400 };
   }
+
+  // The card rules apply to the fill-up as it will be once saved.
+  const fuelCardId = input.fuelCardId !== undefined ? input.fuelCardId : existing.fuelCardId;
+  const problem = await fuelCardPaymentProblem({
+    fuelCardId,
+    vehicleId: input.vehicleId ?? existing.vehicleId,
+    cost: input.cost !== undefined ? input.cost : existing.cost?.toNumber() ?? null,
+    currency: input.currency ?? existing.currency,
+    currentCardId: existing.fuelCardId,
+  });
+  if (problem) return { error: problem, status: 400 };
 
   const data: Prisma.VehicleFuelLogUncheckedUpdateInput = {};
   if (input.vehicleId !== undefined) data.vehicleId = input.vehicleId;
@@ -205,13 +251,18 @@ export async function updateFuelLog(id: number, input: FuelLogUpdateInput): Prom
   if (input.station !== undefined) data.station = textOrNull(input.station);
   if (input.filledBy !== undefined) data.filledBy = textOrNull(input.filledBy);
   if (input.notes !== undefined) data.notes = textOrNull(input.notes);
+  if (input.fuelCardId !== undefined) data.fuelCardId = input.fuelCardId;
 
   const row = await prisma.vehicleFuelLog.update({ where: { id }, data, select: FUEL_SELECT });
+  // Moving a fill-up off a card gives that card its money back; moving it onto one takes it.
+  await checkFuelCardBalances([existing.fuelCardId, fuelCardId], context);
   return { item: serializeFuel(row) };
 }
 
-export async function deleteFuelLog(id: number): Promise<boolean> {
+export async function deleteFuelLog(id: number, context: AlertContext = {}): Promise<boolean> {
+  const existing = await prisma.vehicleFuelLog.findUnique({ where: { id }, select: { fuelCardId: true } });
   const { count } = await prisma.vehicleFuelLog.deleteMany({ where: { id } });
+  if (count > 0) await checkFuelCardBalances([existing?.fuelCardId], context);
   return count > 0;
 }
 

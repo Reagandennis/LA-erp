@@ -58,7 +58,7 @@ const RECENT_FROM_MODULES = 8;
 const PINNED_SLUG = 'ops-dashboard';
 
 /** Sub-modules, drawn indented under their parent when the parent is listed too. */
-const CHILD_OF: Record<string, string> = { 'shift-planning-admin': 'shift-planning' };
+const CHILD_OF: Record<string, string> = { 'shift-planning-admin': 'shift-planning', 'fuel-cards': 'car-fuel', 'parking-cards': 'vehicles' };
 
 /** Below this width the sidebar starts collapsed and overlays the page when opened. */
 const SMALL_SCREEN = '(max-width: 1023px)';

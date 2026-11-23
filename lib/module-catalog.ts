@@ -192,11 +192,28 @@ export const DEFAULT_MODULES: SeedModuleDefinition[] = [
     category: 'Fleet',
     sortOrder: 18,
   },
+  // Nested under Vehicles in the sidebar, so it sorts straight after it.
+  {
+    slug: 'parking-cards',
+    name: 'Parking Cards',
+    description: 'Parking and toll cards (KAPS, PAYTECH, PARK n GO, Express Way): log parking, top up, and keep balances right.',
+    category: 'Fleet',
+    sortOrder: 19,
+  },
   // Fleet submodules, listed after Vehicles (sortOrder is compared within a category).
   {
     slug: 'car-fuel',
     name: 'Car Fuel',
     description: 'Log fill-ups per vehicle and track fuel spend and consumption.',
+    category: 'Fleet',
+    sortOrder: 52,
+  },
+  // Nested under Car Fuel in the sidebar; the same sortOrder keeps it right below
+  // ("Car Fuel" sorts before "Fuel Cards").
+  {
+    slug: 'fuel-cards',
+    name: 'Fuel Cards',
+    description: 'Prepaid fuel cards for the internal fleet: balances, top-ups, statements, and low-balance alerts.',
     category: 'Fleet',
     sortOrder: 52,
   },

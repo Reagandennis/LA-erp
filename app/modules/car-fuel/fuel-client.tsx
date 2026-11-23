@@ -1,11 +1,12 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import React, { useMemo, useState } from 'react';
 
 import {
   BRAND,
   ChipFilter,
-  CurrencySelect,
   ErrorBanner,
   FleetModal,
   Label,
@@ -34,6 +35,7 @@ import {
   totalsByCurrency,
   vehicleLabel,
 } from '@/lib/fleet';
+import { FUEL_CURRENCY, type FuelCardOption, cardsForVehicle, entityLabel, formatKes, isLowBalance } from '@/lib/fuel-cards';
 import { APP_LOCALE } from '@/lib/locale';
 import { useSyncedState } from '@/app/ui/use-synced-state';
 
@@ -59,9 +61,10 @@ type FuelForm = {
   filledAt: string;
   litres: string;
   cost: string;
-  currency: string;
   odometerKm: string;
   fuelType: string;
+  /** The paying card's id; '' for cash or anything else. */
+  fuelCardId: string;
   fullTank: boolean;
   station: string;
   filledBy: string;
@@ -80,18 +83,32 @@ function formatFilledAt(iso: string) {
 
 const byNewest = (a: FuelLogDto, b: FuelLogDto) => b.filledAt.localeCompare(a.filledAt) || b.id - a.id;
 
+/** Fuel types the form offers, plus the one an older fill-up was logged with (Electric, LPG). */
+function fuelTypeOptions(current: string): string[] {
+  return (FUEL_TYPES as readonly string[]).includes(current) ? [...FUEL_TYPES] : [...FUEL_TYPES, current];
+}
+
 export default function FuelClient({
   initialLogs,
   vehicles,
-  defaultCurrency,
+  internalVehicleIds,
+  initialCards,
+  canManageCards,
   today,
 }: {
   initialLogs: FuelLogDto[];
   vehicles: FleetVehicleRef[];
-  defaultCurrency: string;
+  /** Only these can fill up on a fuel card. */
+  internalVehicleIds: number[];
+  /** The active cards, with their balances. */
+  initialCards: FuelCardOption[];
+  canManageCards: boolean;
   today: string;
 }) {
+  const router = useRouter();
   const [logs, setLogs] = useSyncedState<FuelLogDto[]>(initialLogs);
+  const [cards] = useSyncedState<FuelCardOption[]>(initialCards);
+  const internal = useMemo(() => new Set(internalVehicleIds), [internalVehicleIds]);
   const [search, setSearch] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState<number | null>(null);
   const [period, setPeriod] = useState<Period>('month');
@@ -151,9 +168,9 @@ export default function FuelClient({
       filledAt: toLocalInput(new Date()),
       litres: '',
       cost: '',
-      currency: logs[0]?.currency ?? defaultCurrency,
       odometerKm: '',
       fuelType: 'Petrol',
+      fuelCardId: '',
       fullTank: true,
       station: '',
       filledBy: '',
@@ -169,9 +186,9 @@ export default function FuelClient({
       filledAt: toLocalInput(new Date(log.filledAt)),
       litres: String(log.litres),
       cost: log.cost != null ? String(log.cost) : '',
-      currency: log.currency,
       odometerKm: log.odometerKm != null ? String(log.odometerKm) : '',
       fuelType: log.fuelType,
+      fuelCardId: log.fuelCard ? String(log.fuelCard.id) : '',
       fullTank: log.fullTank,
       station: log.station ?? '',
       filledBy: log.filledBy ?? '',
@@ -189,25 +206,35 @@ export default function FuelClient({
     e.preventDefault();
     if (!form) return;
     let body: Record<string, unknown>;
+    let fuelCardId: number | null = null;
     try {
       if (!form.vehicleId) throw new Error('Pick a vehicle.');
       const filledAt = new Date(form.filledAt);
       if (!form.filledAt || Number.isNaN(filledAt.getTime())) throw new Error('Enter the date and time of the fill-up.');
       const litres = readNumber(form.litres, 'Litres');
       if (litres === null) throw new Error('Enter how many litres went in.');
+      const cost = readNumber(form.cost, 'Cost');
+      fuelCardId = form.fuelCardId ? Number(form.fuelCardId) : null;
+      if (fuelCardId !== null) {
+        if (!internal.has(Number(form.vehicleId))) throw new Error('Fuel cards are for internal vehicles only.');
+        if (cost === null || cost <= 0) throw new Error('Enter the cost: it comes off the fuel card.');
+      }
       body = {
         vehicleId: Number(form.vehicleId),
         filledAt: filledAt.toISOString(),
         litres,
-        cost: readNumber(form.cost, 'Cost'),
-        currency: form.currency,
+        cost,
         odometerKm: readNumber(form.odometerKm, 'Odometer'),
-        fuelType: form.fuelType,
         fullTank: form.fullTank,
         station: form.station.trim() || null,
         filledBy: form.filledBy.trim() || null,
         notes: form.notes.trim() || null,
+        fuelCardId,
       };
+      // An older fill-up keeps the fuel type it was logged with (Electric, LPG) unless it is changed.
+      if (!editing || form.fuelType !== editing.fuelType) body.fuelType = form.fuelType;
+      // New fill-ups are in KES; an older one keeps the currency it was recorded in.
+      if (!editing) body.currency = FUEL_CURRENCY;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Check the form.');
       return;
@@ -230,6 +257,8 @@ export default function FuelClient({
       const item = payload.item as FuelLogDto;
       setLogs((prev) => [item, ...prev.filter((log) => log.id !== item.id)].sort(byNewest));
       closeForm();
+      // Card balances are worked out on the server.
+      if (fuelCardId !== null || editing?.fuelCard) router.refresh();
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
@@ -249,6 +278,7 @@ export default function FuelClient({
         return;
       }
       setLogs((prev) => prev.filter((log) => log.id !== editingId));
+      if (editing?.fuelCard) router.refresh();
       closeForm();
     } catch {
       setError('Something went wrong. Please try again.');
@@ -258,6 +288,41 @@ export default function FuelClient({
   };
 
   const reading = form?.vehicleId ? lastReading(Number(form.vehicleId), editingId) : null;
+  // With a vehicle picked: its cards and the spares. Otherwise only the cards that need a top-up.
+  const stripCards =
+    vehicleFilter !== null
+      ? cardsForVehicle(cards, vehicleFilter)
+      : cards.filter((card) => isLowBalance(card.balance, card.lowBalanceThreshold));
+  const editing = editingId ? logs.find((log) => log.id === editingId) ?? null : null;
+
+  // --- Paying with a card ------------------------------------------------------
+
+  const vehicleIsInternal = form?.vehicleId ? internal.has(Number(form.vehicleId)) : false;
+  // A retired card still shows on the fill-ups it paid for.
+  // Only the vehicle's own cards and the spares, its own first.
+  const eligible = cardsForVehicle(cards, form?.vehicleId ? Number(form.vehicleId) : null);
+  const cardChoices: {
+    id: number;
+    name: string;
+    entity: string;
+    vehicle: FuelCardOption['vehicle'];
+    balance: number | null;
+    lowBalanceThreshold: number;
+  }[] = [
+    ...eligible,
+    ...(editing?.fuelCard && !eligible.some((c) => c.id === editing.fuelCard!.id)
+      ? [{ id: editing.fuelCard.id, name: editing.fuelCard.name, entity: '', vehicle: null, balance: null, lowBalanceThreshold: 0 }]
+      : []),
+  ];
+  const chosenCard = form?.fuelCardId ? cardChoices.find((c) => String(c.id) === form.fuelCardId) ?? null : null;
+  const balanceAfter = (() => {
+    if (!form || !chosenCard || chosenCard.balance == null) return null;
+    const cost = Number(form.cost);
+    if (!form.cost.trim() || !Number.isFinite(cost)) return null;
+    // Editing a fill-up already on this card: its old cost is in the balance already.
+    const alreadyCounted = editing?.fuelCard?.id === chosenCard.id ? editing.cost ?? 0 : 0;
+    return Math.round((chosenCard.balance + alreadyCounted - cost) * 100) / 100;
+  })();
   const periodLabel = PERIODS.find((p) => p.value === period)!.label.toLowerCase();
 
   // --- Render ---------------------------------------------------------------
@@ -274,6 +339,36 @@ export default function FuelClient({
         />
 
         {vehicles.length === 0 && <NoVehiclesNotice />}
+
+        {stripCards.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-6">
+            <span className="text-xs font-medium text-gray-400">
+              {vehicleFilter !== null ? 'Fuel cards for this vehicle' : 'Fuel cards running low'}
+            </span>
+            {stripCards.map((card) => {
+              const low = isLowBalance(card.balance, card.lowBalanceThreshold);
+              const chip = (
+                <>
+                  <span className="font-semibold">{card.name}</span>
+                  <span className="text-gray-400">{entityLabel(card.entity)}</span>
+                  <span className={`tabular-nums font-semibold ${low ? 'text-rose-600' : 'text-gray-900'}`}>{formatKes(card.balance)}</span>
+                </>
+              );
+              const cls = `inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs ${
+                low ? 'border-rose-200 bg-rose-50' : 'border-gray-200 bg-white'
+              }`;
+              return canManageCards ? (
+                <Link key={card.id} href={`/modules/fuel-cards?card=${card.id}`} className={`${cls} hover:border-[#03458f]/40`}>
+                  {chip}
+                </Link>
+              ) : (
+                <span key={card.id} className={cls}>
+                  {chip}
+                </span>
+              );
+            })}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <StatCard label="Fill-ups" value={formatNumber(stats.fills)} hint={periodLabel} />
@@ -351,7 +446,10 @@ export default function FuelClient({
                         >
                           {e ? formatNumber(e.kmPerLitre, 1) : '—'}
                         </td>
-                        <td className="px-4 py-3 text-gray-500 max-w-[12rem] truncate">{log.station ?? '—'}</td>
+                        <td className="px-4 py-3 text-gray-500 max-w-[14rem]">
+                          <span className="block truncate">{log.station ?? '—'}</span>
+                          {log.fuelCard && <span className="block truncate text-xs text-[#03458f]">Paid with {log.fuelCard.name}</span>}
+                        </td>
                         <td className="px-4 py-3 text-right">
                           <button
                             onClick={(ev) => {
@@ -445,7 +543,15 @@ export default function FuelClient({
         >
           <div>
             <Label>Vehicle *</Label>
-            <VehicleSelect vehicles={vehicles} value={form.vehicleId} onChange={(vehicleId) => setForm({ ...form, vehicleId })} />
+            <VehicleSelect
+              vehicles={vehicles}
+              value={form.vehicleId}
+              onChange={(vehicleId) => {
+                // A card issued to another vehicle can't pay for this one.
+                const stillOk = cardsForVehicle(cards, Number(vehicleId)).some((c) => String(c.id) === form.fuelCardId);
+                setForm({ ...form, vehicleId, fuelCardId: stillOk ? form.fuelCardId : '' });
+              }}
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -461,7 +567,7 @@ export default function FuelClient({
             <div>
               <Label>Fuel type</Label>
               <select className={inputClass} value={form.fuelType} onChange={(e) => setForm({ ...form, fuelType: e.target.value })}>
-                {FUEL_TYPES.map((t) => (
+                {fuelTypeOptions(form.fuelType).map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
@@ -504,9 +610,9 @@ export default function FuelClient({
             </p>
           )}
 
-          <div className="grid grid-cols-[1fr_7rem] gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <Label>Total cost</Label>
+              <Label>{`Total cost (${editing && editing.currency !== FUEL_CURRENCY ? editing.currency : FUEL_CURRENCY})${form.fuelCardId ? ' *' : ''}`}</Label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -515,14 +621,53 @@ export default function FuelClient({
                 className={inputClass}
                 value={form.cost}
                 onChange={(e) => setForm({ ...form, cost: e.target.value })}
-                placeholder="Optional"
+                placeholder={form.fuelCardId ? 'Comes off the card' : 'Optional'}
               />
             </div>
             <div>
-              <Label>Currency</Label>
-              <CurrencySelect value={form.currency} onChange={(currency) => setForm({ ...form, currency })} />
+              <Label>Paid with</Label>
+              <select
+                className={inputClass}
+                value={form.fuelCardId}
+                disabled={!vehicleIsInternal && !form.fuelCardId}
+                onChange={(e) => setForm({ ...form, fuelCardId: e.target.value })}
+              >
+                <option value="">Cash / other</option>
+                {cardChoices.map((card) => (
+                  <option key={card.id} value={String(card.id)}>
+                    {card.balance != null
+                      ? `${card.name} · ${entityLabel(card.entity)}${card.vehicle ? '' : ' · spare'} · ${formatKes(card.balance)}`
+                      : card.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
+          {form.vehicleId && !vehicleIsInternal && (
+            <p className="-mt-2 text-xs text-gray-400">
+              {form.fuelCardId
+                ? 'Fuel cards are for internal vehicles only: switch to Cash / other, or pick an internal vehicle.'
+                : 'Fuel cards are for internal vehicles only.'}
+            </p>
+          )}
+          {chosenCard && balanceAfter !== null && (
+            <p
+              className={`-mt-2 text-xs ${
+                balanceAfter < 0
+                  ? 'text-rose-600'
+                  : isLowBalance(balanceAfter, chosenCard.lowBalanceThreshold)
+                    ? 'text-amber-600'
+                    : 'text-gray-400'
+              }`}
+            >
+              {chosenCard.name} after this fill-up: {formatKes(balanceAfter)}
+              {balanceAfter < 0
+                ? ', overdrawn. Admins will be alerted.'
+                : isLowBalance(balanceAfter, chosenCard.lowBalanceThreshold)
+                  ? `, below the ${formatKes(chosenCard.lowBalanceThreshold)} alert level. Admins will be alerted.`
+                  : ''}
+            </p>
+          )}
 
           <label className="flex items-start gap-2.5 text-sm text-gray-700">
             <input

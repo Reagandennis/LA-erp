@@ -34,7 +34,7 @@ export const MODULE_SOURCES: Record<string, readonly string[]> = {
   'ai-chatbot': [],
 
   // Operations
-  'ops-dashboard': ['Trip', 'Vehicle', 'Driver', 'Officer', 'HandoverEntry', 'PersonalTodo', 'MessagingAccount', 'Map', 'Traveler'],
+  'ops-dashboard': ['Trip', 'Vehicle', 'FuelCard', 'Driver', 'Officer', 'HandoverEntry', 'PersonalTodo', 'MessagingAccount', 'Map', 'Traveler'],
   handover: ['HandoverEntry'],
   map: ['Map'],
   'trip-planning': ['Trip', 'Traveler', 'Vehicle', 'Driver', 'Officer', 'Personnel', 'Customer', 'Quote', 'Vendor'],
@@ -48,7 +48,10 @@ export const MODULE_SOURCES: Record<string, readonly string[]> = {
 
   // Fleet
   vehicles: ['Vehicle', 'TripAssignment', 'Driver'],
-  'car-fuel': ['Vehicle'],
+  // "Vehicle" covers VehicleFuelLog: a fill-up moves a card's balance.
+  'car-fuel': ['Vehicle', 'FuelCard'],
+  'fuel-cards': ['FuelCard', 'Vehicle'],
+  'parking-cards': ['ParkingCard', 'Vehicle'],
   'car-maintenance': ['Vehicle', 'Trip'],
 
   // Workforce and time

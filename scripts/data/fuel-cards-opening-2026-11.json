@@ -1,0 +1,34 @@
+{
+  "source": "LIONESS-FUEL CARDS BALANCES.xlsx and LADY ASKARI FUEL CARDS BALANCES.xlsx, as of 23 Nov 2026",
+  "note": "Current (new) cards only. Card numbers are the last digits or the issuer's code; PINs are deliberately left out. A null balance means the spreadsheet has none for that card.",
+  "cards": [
+    { "entity": "LIONESS", "vehicle": "KDK 241R", "provider": "TotalEnergies", "cardNumber": "…0208", "balance": 8249, "asOf": "2026-11-17" },
+    { "entity": "LIONESS", "vehicle": "KDK 241R", "provider": "Shell", "cardNumber": "…5496", "balance": 14861, "asOf": "2026-11-11" },
+    { "entity": "LIONESS", "vehicle": "KDQ 430Z", "provider": "TotalEnergies", "cardNumber": "…0307", "balance": 19239.1, "asOf": "2026-10-23" },
+    { "entity": "LIONESS", "vehicle": "KDQ 430Z", "provider": "Shell", "cardNumber": "…5493", "balance": 9819, "asOf": "2026-11-18" },
+    { "entity": "LIONESS", "vehicle": "KDS 683B", "provider": "TotalEnergies", "cardNumber": "…0604", "balance": 18301.3, "asOf": "2026-11-09", "notes": "Spreadsheet: confirm the 9 Nov 2026 top-up of KES 10,000 reflected." },
+    { "entity": "LIONESS", "vehicle": "KDS 683B", "provider": "Shell", "cardNumber": "…5494", "balance": 23580, "asOf": "2026-11-16" },
+    { "entity": "LIONESS", "vehicle": "KEA 524H", "provider": "TotalEnergies", "cardNumber": "…0703", "balance": 20000, "asOf": "2026-11-12", "notes": "Spreadsheet: confirm the balance before fuelling." },
+    { "entity": "LIONESS", "vehicle": "KEA 524H", "provider": "Shell", "cardNumber": "…3399", "balance": 20000, "asOf": "2026-11-12", "notes": "Spreadsheet: confirm the balance before fuelling." },
+    { "entity": "LIONESS", "vehicle": null, "provider": "TotalEnergies", "cardNumber": "…0406", "balance": 8000, "asOf": "2026-10-31" },
+    { "entity": "LIONESS", "vehicle": null, "provider": "Shell", "cardNumber": "…1557", "balance": 5000, "asOf": "2026-11-16" },
+    { "entity": "LIONESS", "vehicle": "KCV 360K", "provider": "TotalEnergies", "cardNumber": "Code 0001", "balance": 0, "active": false, "notes": "Spreadsheet: balance transferred into the main account on 9 Nov 2026." },
+    { "entity": "LIONESS", "vehicle": "KCV 360K", "provider": "Shell", "cardNumber": "…5492", "balance": 0, "active": false, "notes": "Spreadsheet: balance transferred to the main card on 7 Nov 2026." },
+    { "entity": "LIONESS", "vehicle": "KCG 424X", "provider": "TotalEnergies", "cardNumber": "Code 0005", "balance": 0, "active": false, "notes": "Spreadsheet: KCG 424X does not use Lioness cards." },
+    { "entity": "LIONESS", "vehicle": "KCG 424X", "provider": "Shell", "cardNumber": "…5495", "balance": 0, "active": false, "notes": "Spreadsheet: KCG 424X does not use Lioness cards." },
+
+    { "entity": "LADYASKARI", "vehicle": "KCG 424X", "provider": "TotalEnergies", "cardNumber": "…0105", "balance": 4670.7, "asOf": "2026-11-21" },
+    { "entity": "LADYASKARI", "vehicle": "KCG 424X", "provider": "Shell", "cardNumber": "…1551", "balance": 19704, "asOf": "2026-11-12" },
+    { "entity": "LADYASKARI", "vehicle": "KCV 360K", "provider": "TotalEnergies", "cardNumber": "…0402", "balance": 700, "asOf": "2026-10-19", "notes": "Spreadsheet: KES 10,000 sent to KCG 424X." },
+    { "entity": "LADYASKARI", "vehicle": "KCV 360K", "provider": "Shell", "cardNumber": "…1553", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": "KDK 241R", "provider": "TotalEnergies", "cardNumber": "Code 0002", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": "KDQ 430Z", "provider": "TotalEnergies", "cardNumber": "Code 0003", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": "KDQ 430Z", "provider": "Shell", "cardNumber": "…1552", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": "KDS 683B", "provider": "TotalEnergies", "cardNumber": "Code 0006", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": "KDS 683B", "provider": "Shell", "cardNumber": "…1555", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": "KEA 524H", "provider": "TotalEnergies", "cardNumber": "…0709", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": "KEA 524H", "provider": "Shell", "cardNumber": "…0940", "balance": null },
+    { "entity": "LADYASKARI", "vehicle": null, "provider": "TotalEnergies", "cardNumber": "…0501", "balance": 5000, "asOf": "2026-11-07" },
+    { "entity": "LADYASKARI", "vehicle": null, "provider": "Shell", "cardNumber": "…5366", "balance": 5000, "asOf": "2026-11-07" }
+  ]
+}

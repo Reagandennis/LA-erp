@@ -2,8 +2,8 @@ import { redirect } from 'next/navigation';
 
 import { getServerAuth } from '@/lib/auth';
 import { localDateKey } from '@/lib/fleet';
-import { listFleetVehicles, listFuelLogs } from '@/lib/fleet-server';
-import { getOrganizationSettings } from '@/lib/organization';
+import { listFleetVehicles, listFuelLogs, listInternalVehicleIds } from '@/lib/fleet-server';
+import { listFuelCardOptions } from '@/lib/fuel-cards-server';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
 
@@ -22,17 +22,20 @@ export default async function CarFuelPage() {
     redirect('/dashboard');
   }
 
-  const [logs, vehicles, organization] = await Promise.all([
+  const [logs, vehicles, internalVehicleIds, cards] = await Promise.all([
     listFuelLogs(),
     listFleetVehicles(),
-    getOrganizationSettings(),
+    listInternalVehicleIds(),
+    listFuelCardOptions(),
   ]);
 
   return (
     <FuelClient
       initialLogs={logs}
       vehicles={vehicles}
-      defaultCurrency={organization.defaultCurrency}
+      internalVehicleIds={internalVehicleIds}
+      initialCards={cards}
+      canManageCards={isAdmin || userHasModule(auth.user, 'fuel-cards')}
       // The server's TZ is the business's (see .env.example), so "today" is decided here.
       today={localDateKey()}
     />

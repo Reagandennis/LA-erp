@@ -29,6 +29,10 @@ export const API_ACCESS = {
   /** The Fleet modules beside Vehicles: each is its own grant. */
   fleetFuel: ['car-fuel'],
   fleetMaintenance: ['car-maintenance'],
+  /** Fuel cards are their own grant under Car Fuel: Car Fuel alone can pay with a card, not manage one. */
+  fuelCards: ['fuel-cards'],
+  /** Parking and toll cards, under Vehicles: logging and topping up happen in the module itself. */
+  parkingCards: ['parking-cards'],
   /** Flight lookups call a paid outside service; the tracker and trip flight cards use them. */
   flights: ['flight-tracker', 'trip-planning'],
   intel: ['intel'],

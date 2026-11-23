@@ -8,6 +8,8 @@ import {
   REMINDER_DAY_OPTIONS,
   isDateKey,
 } from './fleet';
+import { FUEL_CARD_ENTITIES, FUEL_CARD_PROVIDERS, FUEL_CURRENCY, TOP_UP_KINDS } from './fuel-cards';
+import { PARKING_ENTRY_KINDS, PARKING_PROVIDERS } from './parking-cards';
 import { SERVICE_COUNTRIES } from './service-catalog';
 import { CLOSEOUT_CHECK_KEYS } from './trip-closeout-checks';
 
@@ -1080,22 +1082,166 @@ const fuelLogFields = {
   fullTank: z.boolean(),
   station: z.string().trim().max(200).nullable(),
   filledBy: z.string().trim().max(120).nullable(),
+  /** Fuel is bought in KES only. */
+  currency: z.string().trim().toUpperCase().pipe(z.literal(FUEL_CURRENCY, { error: 'Fuel is recorded in KES' })),
+  /** The fuel card that paid; null for cash or anything else. */
+  fuelCardId: z.number().int().positive('Pick a fuel card').nullable(),
 };
 
-export const fuelLogCreateSchema = z.object({
-  ...fuelLogFields,
-  odometerKm: fuelLogFields.odometerKm.optional(),
-  cost: fuelLogFields.cost.optional(),
-  currency: fuelLogFields.currency.default('USD'),
-  notes: fuelLogFields.notes.optional(),
-  fuelType: fuelLogFields.fuelType.default('Petrol'),
-  fullTank: fuelLogFields.fullTank.default(true),
-  station: fuelLogFields.station.optional(),
-  filledBy: fuelLogFields.filledBy.optional(),
-});
+export const fuelLogCreateSchema = z
+  .object({
+    ...fuelLogFields,
+    odometerKm: fuelLogFields.odometerKm.optional(),
+    cost: fuelLogFields.cost.optional(),
+    currency: fuelLogFields.currency.default(FUEL_CURRENCY),
+    notes: fuelLogFields.notes.optional(),
+    fuelType: fuelLogFields.fuelType.default('Petrol'),
+    fullTank: fuelLogFields.fullTank.default(true),
+    station: fuelLogFields.station.optional(),
+    filledBy: fuelLogFields.filledBy.optional(),
+    fuelCardId: fuelLogFields.fuelCardId.default(null),
+  })
+  .refine((value) => value.fuelCardId == null || (value.cost != null && value.cost > 0), {
+    message: 'Enter the cost: it comes off the fuel card',
+    path: ['cost'],
+  });
 
 export const fuelLogUpdateSchema = z
   .object(fuelLogFields)
+  .partial()
+  .refine(atLeastOneField, 'At least one field must be updated');
+
+const fuelCardFields = {
+  name: z.string().trim().min(1, 'Name the card').max(120),
+  provider: z.enum(FUEL_CARD_PROVIDERS, { error: 'Pick a provider' }),
+  entity: z.enum(FUEL_CARD_ENTITIES, { error: 'Pick the company that holds the card' }),
+  cardNumber: z.string().trim().max(40).nullable(),
+  /** The vehicle the card is issued to; null for a spare. */
+  vehicleId: z.number().int().positive('Pick a vehicle').nullable(),
+  lowBalanceThreshold: z
+    .number({ error: 'The alert level must be a number' })
+    .finite()
+    .gte(0, 'The alert level cannot be negative')
+    .max(100_000_000),
+  active: z.boolean(),
+  notes: z.string().trim().max(2000).nullable(),
+};
+
+export const fuelCardCreateSchema = z.object({
+  ...fuelCardFields,
+  cardNumber: fuelCardFields.cardNumber.optional(),
+  vehicleId: fuelCardFields.vehicleId.default(null),
+  lowBalanceThreshold: fuelCardFields.lowBalanceThreshold.default(5000),
+  active: fuelCardFields.active.default(true),
+  notes: fuelCardFields.notes.optional(),
+});
+
+export const fuelCardUpdateSchema = z
+  .object(fuelCardFields)
+  .partial()
+  .refine(atLeastOneField, 'At least one field must be updated');
+
+const topUpFields = {
+  kind: z.enum(TOP_UP_KINDS, { error: 'Pick top-up or adjustment' }),
+  amount: z
+    .number({ error: 'The amount must be a number' })
+    .finite()
+    .gte(-100_000_000)
+    .max(100_000_000)
+    .refine((n) => n !== 0, 'Enter an amount'),
+  occurredAt: isoDateSchema,
+  reference: z.string().trim().max(120).nullable(),
+  notes: z.string().trim().max(2000).nullable(),
+};
+
+/** Only an adjustment can take money off; a top-up always loads some. */
+const topUpSign = (value: { kind?: string; amount?: number }) =>
+  value.kind !== 'Top-up' || value.amount === undefined || value.amount > 0;
+
+export const topUpCreateSchema = z
+  .object({
+    ...topUpFields,
+    kind: topUpFields.kind.default('Top-up'),
+    reference: topUpFields.reference.optional(),
+    notes: topUpFields.notes.optional(),
+  })
+  .refine(topUpSign, { message: 'A top-up must be more than 0; use an adjustment to take money off', path: ['amount'] });
+
+export const topUpUpdateSchema = z
+  .object(topUpFields)
+  .partial()
+  .refine(atLeastOneField, 'At least one field must be updated');
+
+const parkingCardFields = {
+  name: z.string().trim().min(1, 'Name the card').max(120),
+  provider: z.enum(PARKING_PROVIDERS, { error: 'Pick a provider' }),
+  vehicleId: z.number().int().positive('Pick a vehicle').nullable(),
+  cardNumber: z.string().trim().max(60).nullable(),
+  lowBalanceThreshold: z.number({ error: 'The low level must be a number' }).finite().gte(0).max(10_000_000),
+  active: z.boolean(),
+  notes: z.string().trim().max(2000).nullable(),
+};
+
+export const parkingCardCreateSchema = z.object({
+  ...parkingCardFields,
+  vehicleId: parkingCardFields.vehicleId.default(null),
+  cardNumber: parkingCardFields.cardNumber.optional(),
+  /** Left out, it follows the provider (lib/parking-cards.ts). */
+  lowBalanceThreshold: parkingCardFields.lowBalanceThreshold.optional(),
+  active: parkingCardFields.active.default(true),
+  notes: parkingCardFields.notes.optional(),
+});
+
+export const parkingCardUpdateSchema = z
+  .object(parkingCardFields)
+  .partial()
+  .refine(atLeastOneField, 'At least one field must be updated');
+
+const money = (label: string) => z.number({ error: `${label} must be a number` }).finite().gte(-10_000_000).max(10_000_000);
+
+const parkingEntryFields = {
+  kind: z.enum(PARKING_ENTRY_KINDS, { error: 'Pick parking, top-up or balance check' }),
+  /** Parking and top-ups: the amount, always positive (parking is taken off). */
+  amount: money('The amount').gt(0, 'Enter an amount'),
+  /** Balance checks: what the card showed. */
+  observedBalance: money('The balance'),
+  occurredAt: isoDateSchema,
+  vehicleId: z.number().int().positive().nullable(),
+  location: z.string().trim().max(200).nullable(),
+  reference: z.string().trim().max(120).nullable(),
+  notes: z.string().trim().max(2000).nullable(),
+};
+
+export const parkingEntryCreateSchema = z
+  .object({
+    kind: parkingEntryFields.kind,
+    amount: parkingEntryFields.amount.optional(),
+    observedBalance: parkingEntryFields.observedBalance.optional(),
+    occurredAt: parkingEntryFields.occurredAt,
+    vehicleId: parkingEntryFields.vehicleId.default(null),
+    location: parkingEntryFields.location.optional(),
+    reference: parkingEntryFields.reference.optional(),
+    notes: parkingEntryFields.notes.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.kind === 'Balance check' && value.observedBalance === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['observedBalance'], message: 'Enter the balance the card showed' });
+    }
+    if (value.kind !== 'Balance check' && value.amount === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['amount'], message: 'Enter an amount' });
+    }
+  });
+
+/** A parking or top-up line can be corrected; a balance check is deleted and taken again. */
+export const parkingEntryUpdateSchema = z
+  .object({
+    amount: parkingEntryFields.amount,
+    occurredAt: parkingEntryFields.occurredAt,
+    vehicleId: parkingEntryFields.vehicleId,
+    location: parkingEntryFields.location,
+    reference: parkingEntryFields.reference,
+    notes: parkingEntryFields.notes,
+  })
   .partial()
   .refine(atLeastOneField, 'At least one field must be updated');
 

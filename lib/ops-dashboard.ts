@@ -16,7 +16,9 @@ import {
   reminderMessage,
 } from './fleet';
 import { type CrewRole, crewGaps } from './crew-gaps';
-import { listFleetVehicles, listMaintenance, listVehicleOdometers } from './fleet-server';
+import { listFleetVehicles, listInternalVehicleIds, listMaintenance, listVehicleOdometers } from './fleet-server';
+import type { FuelCardOption } from './fuel-cards';
+import { listFuelCardOptions } from './fuel-cards-server';
 import { getMapWorkspace } from './map-store';
 import type { MapCategoryDto, MapDeviceTagDto, MapGeofenceDto, TrackedDevice } from './map-types';
 import { listUsableAccounts } from './messaging-accounts';
@@ -313,6 +315,9 @@ export interface OpsDashboard {
 export interface OpsReference {
   vehicles: FleetVehicleRef[];
   defaultCurrency: string;
+  /** What a fill-up can be paid with, and which vehicles may use them. */
+  fuelCards: FuelCardOption[];
+  internalVehicleIds: number[];
 }
 
 // --- Helpers -----------------------------------------------------------------
@@ -966,6 +971,11 @@ export async function loadOpsDashboard(user: AccessUser, panels?: readonly OpsPa
 export async function loadOpsReference(user: AccessUser): Promise<OpsReference | null> {
   const allowed = allowedPanels(user);
   if (!allowed.includes('fuel') && !allowed.includes('maintenance')) return null;
-  const [vehicles, organization] = await Promise.all([listFleetVehicles(), getOrganizationSettings()]);
-  return { vehicles, defaultCurrency: organization.defaultCurrency };
+  const [vehicles, organization, fuelCards, internalVehicleIds] = await Promise.all([
+    listFleetVehicles(),
+    getOrganizationSettings(),
+    allowed.includes('fuel') ? listFuelCardOptions() : Promise.resolve([]),
+    allowed.includes('fuel') ? listInternalVehicleIds() : Promise.resolve([]),
+  ]);
+  return { vehicles, defaultCurrency: organization.defaultCurrency, fuelCards, internalVehicleIds };
 }

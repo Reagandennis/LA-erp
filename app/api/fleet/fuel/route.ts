@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: validation.error.issues[0]?.message ?? 'Invalid input' }, { status: 400 });
   }
 
-  const result = await createFuelLog(auth.user.id, validation.data);
+  const result = await createFuelLog(auth.user.id, validation.data, { origin: request.nextUrl.origin });
   if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ item: result.item }, { status: 201 });
 }

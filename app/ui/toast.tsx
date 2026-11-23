@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { type ReactNode, useSyncExternalStore } from 'react';
 
 import {
+  AlertTriangleIcon,
   CalendarIcon,
   ChatHistoryIcon,
   ClipboardCheckIcon,
@@ -15,7 +16,18 @@ import {
   TruckIcon,
 } from './icons';
 
-export type ToastSource = 'todo' | 'quote' | 'invoice' | 'trip' | 'message' | 'file' | 'calendar' | 'maintenance' | 'escalation' | 'handover';
+export type ToastSource =
+  | 'todo'
+  | 'quote'
+  | 'invoice'
+  | 'trip'
+  | 'message'
+  | 'file'
+  | 'calendar'
+  | 'maintenance'
+  | 'escalation'
+  | 'handover'
+  | 'fuelCard';
 
 const SOURCE_META: Record<
   ToastSource,
@@ -35,6 +47,7 @@ const SOURCE_META: Record<
   maintenance: { Icon: CogIcon, label: 'Maintenance', accent: 'bg-orange-100 text-orange-600' },
   escalation: { Icon: TruckIcon, label: 'Escalation', accent: 'bg-rose-100 text-rose-700' },
   handover: { Icon: ClipboardCheckIcon, label: 'Handover', accent: 'bg-primary/10 text-primary' },
+  fuelCard: { Icon: AlertTriangleIcon, label: 'Fuel card', accent: 'bg-amber-100 text-amber-700' },
 };
 
 /** Short relative time — "just now", "4m", "2h", "3d". */

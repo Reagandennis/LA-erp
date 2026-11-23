@@ -214,7 +214,7 @@ describe('maintenance reminders', () => {
 describe('fleet validation', () => {
   it('fills defaults on create', () => {
     const parsed = fuelLogCreateSchema.parse({ vehicleId: 1, filledAt: '2026-10-27T08:00:00Z', litres: 40 });
-    expect(parsed).toMatchObject({ currency: 'USD', fuelType: 'Petrol', fullTank: true });
+    expect(parsed).toMatchObject({ currency: 'KES', fuelType: 'Petrol', fullTank: true, fuelCardId: null });
 
     const job = maintenanceCreateSchema.parse({ vehicleId: 1, title: 'Oil change' });
     expect(job).toMatchObject({ kind: 'Scheduled', category: 'Service', status: 'Planned', currency: 'USD' });

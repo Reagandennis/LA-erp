@@ -10,7 +10,11 @@ import { APP_LOCALE } from './locale';
  * stored as UTC midnight, so they read the same in every timezone.
  */
 
-export const FUEL_TYPES = ['Petrol', 'Diesel', 'Hybrid', 'Electric', 'LPG'] as const;
+/**
+ * What the forms offer. Fill-ups logged before Electric and LPG were dropped
+ * keep their type; it just can't be picked for a new one.
+ */
+export const FUEL_TYPES = ['Petrol', 'Diesel', 'Hybrid'] as const;
 /** Scheduled: planned upkeep on a timetable. Unscheduled: breakdowns, accidents, faults. */
 export const MAINTENANCE_KINDS = ['Scheduled', 'Unscheduled'] as const;
 export const MAINTENANCE_CATEGORIES = [
@@ -70,6 +74,8 @@ export type FuelLogDto = {
   station: string | null;
   filledBy: string | null;
   notes: string | null;
+  /** The fuel card that paid; null for cash or anything else. */
+  fuelCard: { id: number; name: string } | null;
   createdBy: { id: number; name: string } | null;
   createdAt: string;
 };

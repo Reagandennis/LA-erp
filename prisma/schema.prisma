@@ -83,6 +83,11 @@ model User {
   whatsAppMessages               WhatsAppMessage[]                @relation("WhatsAppMessageRecordedBy")
   createdVehicles                Vehicle[]                        @relation("VehicleCreatedBy")
   createdVehicleFuelLogs         VehicleFuelLog[]                 @relation("VehicleFuelLogCreatedBy")
+  createdFuelCards               FuelCard[]                       @relation("FuelCardCreatedBy")
+  createdFuelCardTopUps          FuelCardTopUp[]                  @relation("FuelCardTopUpCreatedBy")
+  fuelCardNotifications          FuelCardNotification[]           @relation("FuelCardNotificationUser")
+  createdParkingCards            ParkingCard[]                    @relation("ParkingCardCreatedBy")
+  createdParkingEntries          ParkingCardEntry[]               @relation("ParkingCardEntryCreatedBy")
   createdVehicleMaintenance      VehicleMaintenance[]             @relation("VehicleMaintenanceCreatedBy")
   maintenanceNotifications       VehicleMaintenanceNotification[]
   createdDrivers                 Driver[]                         @relation("DriverCreatedBy")
@@ -1437,6 +1442,9 @@ model Vehicle {
   assignments    TripAssignment[]
   itineraryItems TripItineraryItem[]
   fuelLogs       VehicleFuelLog[]
+  fuelCards      FuelCard[]
+  parkingCards   ParkingCard[]        @relation("ParkingCardVehicle")
+  parkingEntries ParkingCardEntry[]   @relation("ParkingCardEntryVehicle")
   maintenance    VehicleMaintenance[]
   tripDayLogs    TripDayLog[]
 
@@ -1448,29 +1456,105 @@ model Vehicle {
 /// A fill-up for a fleet vehicle (lib/fleet-server.ts). History goes with the
 /// vehicle; the author is only a label and survives as null if they are deleted.
 model VehicleFuelLog {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   vehicleId   Int
   filledAt    DateTime
-  litres      Decimal  @db.Decimal(10, 2)
+  litres      Decimal   @db.Decimal(10, 2)
   /// Total paid for the fill-up.
-  cost        Decimal? @db.Decimal(14, 2)
-  currency    String   @default("USD")
+  cost        Decimal?  @db.Decimal(14, 2)
+  currency    String    @default("USD")
   odometerKm  Int?
-  fuelType    String   @default("Petrol")
+  fuelType    String    @default("Petrol")
   /// The tank was filled to the top, so the distance since the last fill-up gives the consumption.
-  fullTank    Boolean  @default(true)
+  fullTank    Boolean   @default(true)
   station     String?
   filledBy    String?
   notes       String?
+  /// The fuel card that paid, which draws the cost from its balance. Null for
+  /// cash or anything else. Only internal vehicles fill up on a card.
+  fuelCardId  Int?
   createdById Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  createdBy   User?    @relation("VehicleFuelLogCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  vehicle     Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  fuelCard    FuelCard? @relation(fields: [fuelCardId], references: [id], onDelete: Restrict)
+  createdBy   User?     @relation("VehicleFuelLogCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([vehicleId, filledAt])
   @@index([filledAt])
   @@index([createdById])
+  @@index([fuelCardId])
+}
+
+/// A prepaid fuel card shared by the internal fleet (lib/fuel-cards-server.ts).
+/// Its balance is worked out, never stored: top-ups and adjustments less the
+/// cost of every fill-up paid with it, so editing or deleting a fill-up
+/// corrects it. Amounts are in KES.
+model FuelCard {
+  id                  Int                    @id @default(autoincrement())
+  name                String
+  /// Shell | TotalEnergies | Other (lib/fuel-cards.ts).
+  provider            String
+  /// The company that holds the card: LADYASKARI | LIONESS | STARLLWART.
+  entity              String                 @default("LADYASKARI")
+  cardNumber          String?
+  /// The vehicle the card is issued to, which alone can fill up on it.
+  /// Null for a spare, which any internal vehicle can use.
+  vehicleId           Int?
+  /// Admins are alerted when the balance falls below this.
+  lowBalanceThreshold Decimal                @default(5000) @db.Decimal(14, 2)
+  /// A retired card keeps its history but can't pay for new fill-ups.
+  active              Boolean                @default(true)
+  /// When the alert for the balance's current dip below the threshold went out.
+  /// Cleared once the balance is back at or above it, so the next dip alerts again.
+  lowAlertedAt        DateTime?
+  notes               String?
+  createdById         Int?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  createdBy           User?                  @relation("FuelCardCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  vehicle             Vehicle?               @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  topUps              FuelCardTopUp[]
+  fuelLogs            VehicleFuelLog[]
+  notifications       FuelCardNotification[]
+
+  @@index([active])
+  @@index([vehicleId])
+}
+
+/// Money loaded onto a fuel card, or a correction to match the provider's statement.
+model FuelCardTopUp {
+  id          Int      @id @default(autoincrement())
+  cardId      Int
+  /// "Top-up" (always positive) or "Adjustment" (either way).
+  kind        String   @default("Top-up")
+  amount      Decimal  @db.Decimal(14, 2)
+  occurredAt  DateTime
+  reference   String?
+  notes       String?
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  card        FuelCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation("FuelCardTopUpCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([cardId, occurredAt])
+}
+
+/// A low-balance alert in an admin's notifications bell.
+model FuelCardNotification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  cardId    Int
+  type      String    @default("fuel-card.low")
+  message   String
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+  card      FuelCard  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user      User      @relation("FuelCardNotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([cardId])
 }
 
 /// A service, repair, or inspection for a fleet vehicle (lib/fleet-server.ts).
@@ -2749,4 +2833,61 @@ model MapDeviceTag {
   category MapCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   @@index([categoryId])
+}
+
+/// A parking or toll card (lib/parking-cards-server.ts): KAPS, PAYTECH, PARK n GO,
+/// Express Way. People log parking and top-ups against it in Parking Cards; its
+/// balance is the sum of its entries, never stored. Amounts are in KES.
+model ParkingCard {
+  id                  Int                @id @default(autoincrement())
+  name                String
+  /// KAPS | PAYTECH | PARK n GO | Express Way | Other (lib/parking-cards.ts).
+  provider            String
+  /// The vehicle the card sits in; null for a spare or a shared account such as KAPS.
+  vehicleId           Int?
+  cardNumber          String?
+  /// The card is flagged low below this.
+  lowBalanceThreshold Decimal            @default(500) @db.Decimal(14, 2)
+  /// A retired card keeps its history but takes no new entries.
+  active              Boolean            @default(true)
+  notes               String?
+  createdById         Int?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  vehicle             Vehicle?           @relation("ParkingCardVehicle", fields: [vehicleId], references: [id], onDelete: SetNull)
+  createdBy           User?              @relation("ParkingCardCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  entries             ParkingCardEntry[]
+
+  @@index([active])
+  @@index([vehicleId])
+}
+
+/// One line on a parking card: parking paid (negative), a top-up (positive), or a
+/// balance check that records the difference between what the card showed and
+/// what the platform expected.
+model ParkingCardEntry {
+  id              Int         @id @default(autoincrement())
+  cardId          Int
+  /// "Parking" | "Top-up" | "Balance check".
+  kind            String
+  /// Signed: money in is positive, parking negative.
+  amount          Decimal     @db.Decimal(14, 2)
+  /// What the card showed, for a balance check.
+  observedBalance Decimal?    @db.Decimal(14, 2)
+  occurredAt      DateTime
+  /// Which vehicle parked, for a shared card.
+  vehicleId       Int?
+  location        String?
+  /// The trip or task it was for, e.g. MCF-KEN-NOV-2833.
+  reference       String?
+  notes           String?
+  createdById     Int?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  card            ParkingCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  vehicle         Vehicle?    @relation("ParkingCardEntryVehicle", fields: [vehicleId], references: [id], onDelete: SetNull)
+  createdBy       User?       @relation("ParkingCardEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([cardId, occurredAt])
+  @@index([vehicleId])
 }

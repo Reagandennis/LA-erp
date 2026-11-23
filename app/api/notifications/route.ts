@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     await loadNotificationFeed(auth.user.id, {
       maintenance: canUseFleetMaintenance(auth.user),
       handover: userHasRole(auth.user, ADMIN_ROLE_NAME) || userHasModule(auth.user, 'handover'),
+      fuelCard: userHasRole(auth.user, ADMIN_ROLE_NAME),
     }),
   );
 }

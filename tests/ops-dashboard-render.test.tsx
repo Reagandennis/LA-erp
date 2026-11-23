@@ -55,7 +55,7 @@ const board: OpsDashboard = {
 describe('the Ops Dashboard page', () => {
   it('renders every panel on the server', () => {
     const html = renderToString(
-      createElement(OpsDashboardClient, { initial: board, reference: { vehicles: [{ id: 1, registration: 'KDA 123A', make: null, model: null }], defaultCurrency: 'KES' } }),
+      createElement(OpsDashboardClient, { initial: board, reference: { vehicles: [{ id: 1, registration: 'KDA 123A', make: null, model: null }], defaultCurrency: 'KES', fuelCards: [], internalVehicleIds: [1] } }),
     );
     for (const text of ['Live map', 'Active trips', 'Flights', 'Handovers', 'Tasks', 'Trackers', 'Vehicles', 'Movements', 'WhatsApp', 'Car maintenance', 'Car fuel', 'Airport pickup', 'Busy night', 'Call the hotel', 'Driver Peter', 'ETH 02', 'Maintenance']) {
       expect(html).toContain(text);

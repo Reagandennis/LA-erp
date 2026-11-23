@@ -25,6 +25,8 @@ const { db, $queryRaw, requireModuleRequest } = vi.hoisted(() => ({
 vi.mock('../lib/prisma', () => ({ prisma: { ...db, $queryRaw } }));
 vi.mock('../lib/request-auth', () => ({ requireModuleRequest }));
 vi.mock('../lib/organization', () => ({ getOrganizationSettings: vi.fn(async () => ({ defaultCurrency: 'KES' })) }));
+const FUEL_CARD = { id: 1, name: 'Shell Fuel Card', provider: 'Shell', entity: 'LADYASKARI', balance: 12000, lowBalanceThreshold: 5000 };
+vi.mock('../lib/fuel-cards-server', () => ({ listFuelCardOptions: vi.fn(async () => [FUEL_CARD]) }));
 
 import { GET } from '../app/api/dashboard/ops/route';
 import { DEFAULT_LAYOUT, parseLayout } from '../app/modules/ops-dashboard/board-stores';
@@ -377,7 +379,14 @@ describe('loadOpsDashboard', () => {
     db.vehicle.findMany.mockResolvedValue([CAR]);
 
     expect(await loadOpsReference(person(['ops-dashboard', 'todo-personal']))).toBeNull();
-    expect(await loadOpsReference(person(['ops-dashboard', 'car-fuel']))).toEqual({ vehicles: [CAR], defaultCurrency: 'KES' });
+    expect(await loadOpsReference(person(['ops-dashboard', 'car-fuel']))).toEqual({
+      vehicles: [CAR],
+      defaultCurrency: 'KES',
+      fuelCards: [FUEL_CARD],
+      internalVehicleIds: [CAR.id],
+    });
+    // Maintenance alone has no fill-up form, so no fuel cards.
+    expect(await loadOpsReference(person(['ops-dashboard', 'car-maintenance']))).toMatchObject({ fuelCards: [], internalVehicleIds: [] });
   });
 });
 

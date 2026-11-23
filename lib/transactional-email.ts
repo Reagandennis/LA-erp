@@ -5,6 +5,7 @@ import type { ClientItinerary } from '@/app/modules/trip-planning/[tripId]/clien
 
 import { buildInvoicePdf, buildQuotePdf, renderItineraryPdf, resolveDocumentBrand } from './document-pdf';
 import { EmailError, escapeEmailHtml, renderEmailLayout, sendEmail } from './email';
+import { entityLabel, formatKes } from './fuel-cards';
 import type { InvoiceDetail } from './invoices';
 import { getOrganizationSettings } from './organization';
 import type { QuoteDetail } from './quotes';
@@ -317,5 +318,39 @@ export async function emailTripEscalation(params: {
   });
 
   await sendEmail({ to, subject: `Escalation on ${trip.reference} · ${trip.customer}`, html });
+  return { to };
+}
+
+/**
+ * Tells admins a fuel card has fallen below its alert level (lib/fuel-cards-server.ts).
+ * Throws {@link EmailError} when nobody has an address or delivery fails.
+ */
+export async function emailFuelCardLow(params: {
+  recipients: { name: string; email: string }[];
+  card: { name: string; entity: string };
+  balance: number;
+  threshold: number;
+  cardUrl: string | null;
+}): Promise<{ to: string[] }> {
+  const to = params.recipients.map((r) => r.email.trim()).filter(Boolean);
+  if (to.length === 0) throw new EmailError('No admin has an email address.');
+
+  const organization = await getOrganizationSettings();
+  const orgName = organization.companyName || 'Our company';
+  const entity = entityLabel(params.card.entity);
+  const bodyHtml = `
+    <p>The fuel card <strong>${escapeEmailHtml(params.card.name)}</strong> (${escapeEmailHtml(entity)}) is down to
+    <strong>${escapeEmailHtml(formatKes(params.balance))}</strong>, below its alert level of ${escapeEmailHtml(formatKes(params.threshold))}.</p>
+    <p>Top it up before the next fill-up, then record the top-up in Fuel Cards so the balance stays right.</p>`;
+
+  const html = renderEmailLayout({
+    title: `Fuel card low: ${params.card.name}`,
+    bodyHtml,
+    organizationName: orgName,
+    accentColor: '#d97706',
+    cta: params.cardUrl ? { label: 'Open Fuel Cards', url: params.cardUrl } : undefined,
+  });
+
+  await sendEmail({ to, subject: `Fuel card low: ${params.card.name} at ${formatKes(params.balance)}`, html });
   return { to };
 }

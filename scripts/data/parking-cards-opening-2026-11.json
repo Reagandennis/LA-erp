@@ -1,0 +1,20 @@
+{
+  "source": "PAYTECH.xlsx, KAPS.xlsx and PARK n GO.xlsx, as of 23 Nov 2026",
+  "note": "Current cards only, each with the last balance the spreadsheet recorded. Card numbers are trimmed to their last digits. KAPS has run as one shared balance across the fleet since 22 Nov 2025 (the KAPS 'NEW SPREADSHEET' tab), so it comes in as one shared card.",
+  "cards": [
+    { "provider": "KAPS", "vehicle": null, "name": "KAPS · shared account", "cardNumber": null, "balance": 1848, "asOf": "2026-11-22",
+      "notes": "One balance shared by the fleet's KAPS cards (KCG 424X …5430, KCV 360K …9213, KDK 241R …6724, KDQ 430Z …3668, KDS 683B …4924). Top up via M-Pesa *486#." },
+    { "provider": "PAYTECH", "vehicle": "KCG 424X", "cardNumber": "…5352", "balance": 800, "asOf": "2026-11-15" },
+    { "provider": "PAYTECH", "vehicle": "KCV 360K", "cardNumber": "…2082", "balance": 1250, "asOf": "2026-11-15" },
+    { "provider": "PAYTECH", "vehicle": "KDK 241R", "cardNumber": "…3293", "balance": 450, "asOf": "2026-11-15" },
+    { "provider": "PAYTECH", "vehicle": "KDQ 430Z", "cardNumber": "…1573", "balance": 850, "asOf": "2026-11-15" },
+    { "provider": "PAYTECH", "vehicle": "KDS 683B", "cardNumber": "…0310", "balance": 600, "asOf": "2026-11-15" },
+    { "provider": "PAYTECH", "vehicle": null, "cardNumber": "…0311", "balance": 850, "asOf": "2026-11-15" },
+    { "provider": "PARK n GO", "vehicle": "KCG 424X", "cardNumber": "…0299-0", "balance": 1000, "asOf": "2026-09-20" },
+    { "provider": "PARK n GO", "vehicle": "KCV 360K", "cardNumber": "…2743-9", "balance": 1000, "asOf": "2026-08-10" },
+    { "provider": "PARK n GO", "vehicle": "KDK 241R", "cardNumber": "…8352-3", "balance": 1250, "asOf": "2026-06-17" },
+    { "provider": "PARK n GO", "vehicle": "KDQ 430Z", "cardNumber": "…3176-1", "balance": 800, "asOf": "2026-09-12" },
+    { "provider": "PARK n GO", "vehicle": "KDS 683B", "cardNumber": "…0591", "balance": 1150, "asOf": "2026-06-17" },
+    { "provider": "PARK n GO", "vehicle": "KDJ 267H", "cardNumber": null, "balance": 1000, "asOf": "2026-08-10", "notes": "Mobius." }
+  ]
+}

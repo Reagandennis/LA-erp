@@ -113,6 +113,7 @@ describe('notification feed', () => {
       maintenance: [],
       escalation: [],
       handover: [],
+      fuelCard: [],
     });
     for (const fn of [
       mocks.listQuoteNotifications,
