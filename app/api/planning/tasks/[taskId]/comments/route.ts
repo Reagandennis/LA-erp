@@ -6,6 +6,7 @@ import { notifyNotificationsChanged } from '@/lib/notification-events';
 import { prisma } from '@/lib/prisma';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
+import { isTodoSharedWith } from '@/lib/user-groups';
 
 type TaskLookupClient = {
   findFirst: (args: { where: { id: number; userId: number } }) => Promise<{ id: number } | null>;
@@ -33,11 +34,8 @@ async function hasAccess(taskId: number, userId: number) {
     return true;
   }
 
-  const shared = await prisma.$queryRaw<Array<{ todoId: number }>>`
-    SELECT "todoId" FROM "PersonalTodoShare" WHERE "todoId" = ${taskId} AND "userId" = ${userId}
-  `;
-
-  return shared.length > 0;
+  // Shared with them directly, or with one of their groups.
+  return isTodoSharedWith(taskId, userId);
 }
 
 function serializeComment(comment: CommentRecord) {

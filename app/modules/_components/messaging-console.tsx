@@ -5,11 +5,13 @@ import { startVisibleInterval } from '@/lib/visible-interval';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { setViewingChat } from '@/app/ui/messaging-alerts-store';
+import { REACTION_EMOJI, type ReactionEmoji } from '@/lib/messaging-reactions';
 import type { ChatStateAction, MuteDuration } from '@/lib/wacli';
 
 import AlertsMenu from './alerts-menu';
 import MessageMediaView, { type MessageMedia } from './message-media';
 import MessagingLinkPanel from './messaging-link-panel';
+import AccountGroupShare from './account-group-share';
 
 /**
  * Generic two-pane messaging console shared by the polling-based integrations
@@ -40,6 +42,11 @@ export interface MessagingConsoleConfig {
    * itself, so the phone shows it too.
    */
   chatActions?: boolean;
+  /**
+   * Messages can be reacted to, forwarded, and (one's own) edited or deleted
+   * for everyone, through /api/<service>/message-action (WhatsApp).
+   */
+  messageActions?: boolean;
 }
 
 export interface MessagingConsoleProps {
@@ -61,6 +68,9 @@ interface AccountSummary {
   label: string | null;
   /** Chats with unread messages. */
   unread: number;
+  /** Someone else's number, shared with one of the user's groups. */
+  shared?: boolean;
+  ownerName?: string | null;
 }
 
 interface Status {
@@ -89,6 +99,14 @@ interface Chat {
   mutedUntil: string | null;
 }
 
+interface Reaction {
+  senderJid: string | null;
+  senderName: string;
+  emoji: string;
+  fromMe: boolean;
+  at: string;
+}
+
 interface Message {
   id: string;
   chatId: string;
@@ -97,6 +115,12 @@ interface Message {
   text: string;
   timestamp: string;
   media?: MessageMedia | null;
+  senderJid?: string | null;
+  reactions?: Reaction[];
+  edited?: boolean;
+  /** Deleted for everyone by its sender; `text` is a placeholder. */
+  revoked?: boolean;
+  forwarded?: boolean;
 }
 
 const inputClass =
@@ -164,6 +188,280 @@ function ArchiveIcon({ className = 'h-4 w-4' }: { className?: string }) {
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
     </svg>
+  );
+}
+
+function ForwardIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7l5 5-5 5M20 12H9a5 5 0 00-5 5v1" />
+    </svg>
+  );
+}
+
+function SmileIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" strokeWidth={2} />
+      <path strokeLinecap="round" strokeWidth={2} d="M8.5 14.5a4.5 4.5 0 007 0M9 10h.01M15 10h.01" />
+    </svg>
+  );
+}
+
+function PencilIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0115.916 21.75H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+    </svg>
+  );
+}
+
+/**
+ * The small toolbar beside a message, shown on hover: react, forward, and for
+ * one's own messages edit (text only) and delete for everyone.
+ */
+function MessageActionsBar({
+  out,
+  busy,
+  canEdit,
+  canDelete,
+  onReact,
+  onForward,
+  onEdit,
+  onDelete,
+}: {
+  out: boolean;
+  busy: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  onReact: () => void;
+  onForward: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const buttonClass =
+    'rounded-lg p-1.5 text-gray-400 transition hover:bg-white hover:text-gray-700 hover:shadow-sm disabled:opacity-40';
+  return (
+    <div
+      className={`flex shrink-0 items-center self-center ${out ? 'flex-row-reverse' : ''} opacity-100 md:opacity-0 md:transition-opacity md:focus-within:opacity-100 md:group-hover/msg:opacity-100`}
+    >
+      <button type="button" onClick={onReact} disabled={busy} title="React" aria-label="React" className={buttonClass}>
+        <SmileIcon />
+      </button>
+      <button type="button" onClick={onForward} disabled={busy} title="Forward" aria-label="Forward" className={buttonClass}>
+        <ForwardIcon />
+      </button>
+      {canEdit && (
+        <button type="button" onClick={onEdit} disabled={busy} title="Edit" aria-label="Edit" className={buttonClass}>
+          <PencilIcon />
+        </button>
+      )}
+      {canDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          title="Delete for everyone"
+          aria-label="Delete for everyone"
+          className={`${buttonClass} hover:text-rose-600`}
+        >
+          <TrashIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The quick reaction picker. Picking the reaction already given takes it off. */
+function ReactionPicker({
+  current,
+  alignRight,
+  onPick,
+  onClose,
+}: {
+  current: string | null;
+  /** Hang off the bubble's right edge (outgoing messages sit at the right of the pane). */
+  alignRight: boolean;
+  onPick: (emoji: ReactionEmoji | '') => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label="React with"
+      className={`absolute bottom-full z-20 mb-1 flex items-center gap-0.5 rounded-full border border-gray-100 bg-white px-1.5 py-1 shadow-lg ${alignRight ? 'right-0' : 'left-0'}`}
+    >
+      {REACTION_EMOJI.map((emoji) => {
+        const mine = emoji === current;
+        return (
+          <button
+            key={emoji}
+            type="button"
+            role="menuitem"
+            onClick={() => onPick(mine ? '' : emoji)}
+            title={mine ? 'Remove your reaction' : `React ${emoji}`}
+            className={`rounded-full px-1.5 py-0.5 text-lg leading-none transition hover:scale-125 hover:bg-gray-100 ${mine ? 'bg-primary/10 ring-2 ring-primary/40' : ''}`}
+          >
+            {emoji}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Reactions under a message, grouped by emoji; one's own is highlighted and a click takes it off. */
+function ReactionChips({
+  reactions,
+  out,
+  disabled,
+  onToggle,
+}: {
+  reactions: Reaction[];
+  out: boolean;
+  disabled: boolean;
+  onToggle: (emoji: string) => void;
+}) {
+  const groups = new Map<string, Reaction[]>();
+  for (const r of reactions) groups.set(r.emoji, [...(groups.get(r.emoji) ?? []), r]);
+  return (
+    <div className={`mt-1 flex flex-wrap gap-1 ${out ? 'justify-end' : ''}`}>
+      {[...groups.entries()].map(([emoji, who]) => {
+        const mine = who.some((r) => r.fromMe);
+        const names = who.map((r) => r.senderName).join(', ');
+        return (
+          <button
+            key={emoji}
+            type="button"
+            disabled={disabled}
+            onClick={() => onToggle(emoji)}
+            title={names}
+            aria-label={`${emoji} by ${names}`}
+            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs leading-none transition disabled:cursor-default ${
+              mine
+                ? out
+                  ? 'border-white/60 bg-white/25 text-white'
+                  : 'border-primary/40 bg-primary/10 text-primary'
+                : out
+                  ? 'border-white/30 bg-white/10 text-white'
+                  : 'border-gray-200 bg-gray-50 text-gray-700'
+            }`}
+          >
+            <span className="text-sm">{emoji}</span>
+            {who.length > 1 && <span className="tabular-nums">{who.length}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Pick the chat a message goes to. Channels are left out: only their admins can post. */
+function ForwardDialog({
+  chats,
+  busy,
+  onPick,
+  onClose,
+}: {
+  chats: Chat[];
+  busy: boolean;
+  onPick: (chat: Chat) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const q = query.trim().toLowerCase();
+  const shown = chats
+    .filter((c) => c.kind !== 'channel')
+    .filter((c) => !q || c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q))
+    .slice(0, 60);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 p-4 sm:items-center"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div role="dialog" aria-modal="true" aria-label="Forward to" className="flex max-h-[80vh] w-full max-w-md flex-col rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+          <h2 className="font-semibold text-gray-900">Forward to…</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="p-3">
+          <input
+            type="text"
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search chats & groups…"
+            className={inputClass}
+          />
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {shown.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-gray-400">No chats match that search.</p>
+          ) : (
+            shown.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(c)}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-gray-50 disabled:opacity-50"
+              >
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${c.kind === 'group' ? 'bg-amber-100 text-amber-700' : 'bg-primary/10 text-primary'}`}
+                >
+                  {c.kind === 'group' ? <GroupIcon /> : initials(c.name)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-gray-900">{c.name}</span>
+                  <span className="block truncate text-xs text-gray-500">{c.id}</span>
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+        {busy && <p className="border-t border-gray-100 px-4 py-2 text-center text-xs text-gray-500">Forwarding…</p>}
+      </div>
+    </div>
   );
 }
 
@@ -320,8 +618,19 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   /** Chat whose archive/pin/mute request is in flight. */
   const [stateBusy, setStateBusy] = useState<string | null>(null);
+  /** The message being edited; the composer holds its new text meanwhile. */
+  const [editing, setEditing] = useState<{ id: string; original: string } | null>(null);
+  /** The message whose reaction picker is open. */
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  /** The message being forwarded, while the chat is chosen. */
+  const [forwarding, setForwarding] = useState<Message | null>(null);
+  /** Message whose react/edit/delete/forward request is in flight. */
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  /** A short confirmation ("Forwarded to Ops"), cleared on its own. */
+  const [notice, setNotice] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLInputElement>(null);
   /** Mirrors the open chat so the SSE handler doesn't need to re-subscribe. */
   const selectedRef = useRef<string | null>(null);
   /**
@@ -475,7 +784,19 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
   if (threadChatId !== effectiveSelected) {
     setThreadChatId(effectiveSelected);
     setThread([]);
+    // An edit or picker belongs to the chat it was opened in.
+    if (editing) {
+      setEditing(null);
+      setText('');
+    }
+    if (pickerFor) setPickerFor(null);
   }
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   useEffect(() => {
     if (!effectiveSelected) return;
     const id = effectiveSelected;
@@ -574,7 +895,97 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread.length, effectiveSelected]);
 
+  /**
+   * One request to /message-action. On success the thread is patched with the
+   * message the server returns (or reloaded when it returns none), so the
+   * change shows without waiting for the next event.
+   */
+  const messageAction = async (
+    message: Message,
+    body: Record<string, unknown>,
+    failure: string,
+  ): Promise<{ ok: boolean; chatId?: string }> => {
+    if (actionBusy) return { ok: false };
+    setActionBusy(message.id);
+    setError(null);
+    try {
+      const r = await fetch(scoped(`${base}/message-action`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: message.chatId, messageId: message.id, ...body }),
+      });
+      const d = (await r.json().catch(() => null)) as { message?: Message | null; chatId?: string; error?: string } | null;
+      if (!r.ok) {
+        setError(d?.error ?? failure);
+        return { ok: false };
+      }
+      if (d?.message) {
+        const updated = d.message;
+        setThread((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      } else if (selectedRef.current === message.chatId) {
+        await loadThread(message.chatId);
+      }
+      return { ok: true, chatId: d?.chatId };
+    } catch {
+      setError('Could not reach the server.');
+      return { ok: false };
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  /** React with `emoji`, or take our reaction off when it is the one we already gave. */
+  const reactTo = async (message: Message, emoji: string) => {
+    const mine = message.reactions?.find((r) => r.fromMe)?.emoji ?? null;
+    await messageAction(message, { action: 'react', emoji: emoji === mine ? '' : emoji }, 'Could not react to the message.');
+  };
+
+  const startEdit = (message: Message) => {
+    setEditing({ id: message.id, original: message.text });
+    setText(message.text);
+    setPickerFor(null);
+    textRef.current?.focus();
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setText('');
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    const message = thread.find((m) => m.id === editing.id);
+    const next = text.trim();
+    if (!message || !next) return;
+    if (next === editing.original) {
+      cancelEdit();
+      return;
+    }
+    const { ok } = await messageAction(message, { action: 'edit', text: next }, 'Could not edit the message.');
+    if (ok) cancelEdit();
+  };
+
+  const deleteMessage = async (message: Message) => {
+    if (!window.confirm('Delete this message for everyone?\n\nIt is removed from the chat on every device, including the other side.')) return;
+    if (editing?.id === message.id) cancelEdit();
+    await messageAction(message, { action: 'revoke' }, 'Could not delete the message.');
+  };
+
+  const forwardTo = async (message: Message, target: Chat) => {
+    const { ok } = await messageAction(message, { action: 'forward', to: target.id }, 'Could not forward the message.');
+    if (ok) {
+      setForwarding(null);
+      setNotice(`Forwarded to ${target.name}`);
+      void loadChats();
+    }
+  };
+
   const sendReply = async () => {
+    if (editing) {
+      await saveEdit();
+      return;
+    }
     if (!effectiveSelected || !text.trim()) return;
     setError(null);
     setSending(true);
@@ -843,6 +1254,11 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                   className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium tabular-nums transition ${active ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   {a.label ?? config.title}
+                  {a.shared && (
+                    <span className={`text-xs font-normal ${active ? 'text-white/80' : 'text-gray-500'}`} title={`Shared with your group by ${a.ownerName ?? 'a colleague'}`}>
+                      · {a.ownerName ?? 'shared'}
+                    </span>
+                  )}
                   {a.unread > 0 && !active && (
                     <span className="min-w-5 rounded-full bg-emerald-500 px-1.5 text-center text-[11px] font-semibold leading-5 text-white">
                       {a.unread}
@@ -864,15 +1280,18 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
             </svg>
             Add number
           </button>
-          {shownAccount && !adding && (
-            <button
-              type="button"
-              onClick={() => void unlinkAccount()}
-              disabled={unlinking}
-              className="ml-auto shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-500 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-            >
-              {unlinking ? 'Unlinking…' : 'Unlink number'}
-            </button>
+          {shownAccount && !adding && !shownAccount.shared && (
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <AccountGroupShare key={shownAccount.id} accountId={shownAccount.id} />
+              <button
+                type="button"
+                onClick={() => void unlinkAccount()}
+                disabled={unlinking}
+                className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-500 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+              >
+                {unlinking ? 'Unlinking…' : 'Unlink number'}
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -891,6 +1310,19 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
         <div className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 sm:px-6">
           {error}
         </div>
+      )}
+      {notice && (
+        <div role="status" className="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 sm:px-6">
+          {notice}
+        </div>
+      )}
+      {forwarding && (
+        <ForwardDialog
+          chats={sorted}
+          busy={actionBusy === forwarding.id}
+          onPick={(target) => void forwardTo(forwarding, target)}
+          onClose={() => setForwarding(null)}
+        />
       )}
 
       {adding || (status?.available && !status.authenticated) ? (
@@ -1115,17 +1547,33 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                 ) : (
                   thread.map((m) => {
                     const out = m.fromMe;
+                    const revoked = Boolean(m.revoked);
+                    const actionable = Boolean(config.messageActions) && canSend && !revoked;
+                    const myReaction = m.reactions?.find((r) => r.fromMe)?.emoji ?? null;
+                    const busy = actionBusy === m.id;
+                    const bubbleClass = revoked
+                      ? 'bg-gray-100 text-gray-500 italic'
+                      : out
+                        ? 'bg-primary text-white'
+                        : 'bg-white text-gray-900';
                     return (
-                      <div key={m.id} className={`flex ${out ? 'justify-end' : 'justify-start'}`}>
-                        <div
-                          className={`max-w-[78%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${out ? 'bg-primary text-white' : 'bg-white text-gray-900'}`}
-                        >
+                      <div
+                        key={m.id}
+                        className={`group/msg flex items-end gap-0.5 ${out ? 'flex-row-reverse' : 'flex-row'} ${editing?.id === m.id ? 'rounded-2xl ring-2 ring-amber-300' : ''}`}
+                      >
+                        <div className={`relative max-w-[78%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${bubbleClass}`}>
                           {isGroupThread && !out && (
                             <p className="text-xs font-semibold" style={{ color: nameColor(m.senderName) }}>
                               {m.senderName}
                             </p>
                           )}
-                          {m.media && (
+                          {m.forwarded && !revoked && (
+                            <p className={`mb-0.5 flex items-center gap-1 text-[11px] italic ${out ? 'text-white/70' : 'text-gray-400'}`}>
+                              <ForwardIcon className="h-3 w-3" />
+                              Forwarded
+                            </p>
+                          )}
+                          {m.media && !revoked && (
                             <div className={m.text ? 'mb-1.5' : ''}>
                               <MessageMediaView
                                 accountId={shownAccountId}
@@ -1137,10 +1585,42 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                             </div>
                           )}
                           {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
-                          <div className={`mt-0.5 text-right text-[10px] ${out ? 'text-white/70' : 'text-gray-400'}`}>
-                            {timeOf(m.timestamp)}
+                          <div className={`mt-0.5 flex items-center justify-end gap-1 text-[10px] ${out ? 'text-white/70' : 'text-gray-400'}`}>
+                            {m.edited && !revoked && <span>edited ·</span>}
+                            <span>{timeOf(m.timestamp)}</span>
                           </div>
+                          {(m.reactions?.length ?? 0) > 0 && (
+                            <ReactionChips
+                              reactions={m.reactions!}
+                              out={out}
+                              disabled={!actionable || busy}
+                              onToggle={(emoji) => void reactTo(m, emoji)}
+                            />
+                          )}
+                          {pickerFor === m.id && (
+                            <ReactionPicker
+                              current={myReaction}
+                              alignRight={out}
+                              onPick={(emoji) => {
+                                setPickerFor(null);
+                                void reactTo(m, emoji);
+                              }}
+                              onClose={() => setPickerFor(null)}
+                            />
+                          )}
                         </div>
+                        {actionable && (
+                          <MessageActionsBar
+                            out={out}
+                            busy={busy}
+                            canEdit={out && !m.media}
+                            canDelete={out}
+                            onReact={() => setPickerFor((v) => (v === m.id ? null : m.id))}
+                            onForward={() => setForwarding(m)}
+                            onEdit={() => startEdit(m)}
+                            onDelete={() => void deleteMessage(m)}
+                          />
+                        )}
                       </div>
                     );
                   })
@@ -1153,7 +1633,19 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                   Channels are read-only here — only the channel&apos;s admins can post.
                 </div>
               ) : (
-              <div className="flex items-center gap-2 border-t border-gray-100 bg-white p-3">
+              <div className="border-t border-gray-100 bg-white">
+              {editing && (
+                <div className="flex items-center justify-between gap-2 border-b border-amber-100 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
+                  <span className="inline-flex items-center gap-1.5">
+                    <PencilIcon className="h-3.5 w-3.5" />
+                    Editing message
+                  </span>
+                  <button type="button" onClick={cancelEdit} className="font-semibold hover:underline">
+                    Cancel
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-2 p-3">
                 <input
                   ref={fileRef}
                   type="file"
@@ -1168,7 +1660,7 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  disabled={!canSend || sending}
+                  disabled={!canSend || sending || Boolean(editing)}
                   title="Attach a file"
                   aria-label="Attach a file"
                   className="shrink-0 rounded-xl p-2.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
@@ -1178,6 +1670,7 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                   </svg>
                 </button>
                 <input
+                  ref={textRef}
                   type="text"
                   value={text}
                   onChange={(e) => setText(e.target.value)}
@@ -1186,19 +1679,21 @@ export default function MessagingConsole({ config, signIn, initialAccountId, ini
                       e.preventDefault();
                       void sendReply();
                     }
+                    if (e.key === 'Escape' && editing) cancelEdit();
                   }}
-                  placeholder={canSend ? 'Type a message…' : `Configure ${config.title} to send messages`}
+                  placeholder={canSend ? (editing ? 'Edit your message…' : 'Type a message…') : `Configure ${config.title} to send messages`}
                   disabled={!canSend}
                   className={inputClass}
                 />
                 <button
                   type="button"
                   onClick={sendReply}
-                  disabled={!canSend || sending || !text.trim()}
+                  disabled={!canSend || sending || !text.trim() || (editing !== null && actionBusy !== null)}
                   className="shrink-0 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {sending ? '…' : 'Send'}
+                  {sending || (editing && actionBusy) ? '…' : editing ? 'Save' : 'Send'}
                 </button>
+              </div>
               </div>
               )}
             </>

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { API_ACCESS } from '@/lib/api-access';
 import { requireModuleRequest } from '@/lib/request-auth';
 import { personalTodoCreateSchema } from '@/lib/validation';
+import { sharedTodoIds } from '@/lib/user-groups';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -87,10 +88,8 @@ export async function GET(request: NextRequest) {
   let sharedIds: number[] = [];
 
   try {
-    const sharedResults = await prisma.$queryRaw<Array<{ todoId: number }>>`
-      SELECT "todoId" FROM "PersonalTodoShare" WHERE "userId" = ${auth.user.id}
-    `;
-    sharedIds = sharedResults.map((row) => row.todoId);
+    // Shared with them directly, or with one of their groups.
+    sharedIds = await sharedTodoIds(auth.user.id);
   } catch {
     sharedIds = [];
   }

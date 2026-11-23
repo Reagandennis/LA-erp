@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_RULES,
+  STANDARD_CODES,
+  ownCodes,
   type CellLookup,
   type RosterCell,
   type RosterLine,
@@ -128,7 +130,8 @@ describe('validation', () => {
 
     // TRC-4 (off) is put on Day as well.
     const double = validateRoster(rules, lines, withOverrides({ 'TRC-4|2026-12-01': { planned: 'D' } }), '2026-12-01', '2026-12-01');
-    expect(double.map((v) => v.rule)).toContain('coverage_double');
+    // Two on one shift is allowed and shown as a double: a warning, not a block.
+    expect(double.filter((v) => v.rule === 'coverage_double').map((v) => v.severity)).toEqual(['warn']);
   });
 
   it('accepts leave once the on-call person covers the shift, and warns that nobody is on call', () => {
@@ -138,7 +141,8 @@ describe('validation', () => {
     });
     const result = validateRoster(rules, lines, lookup, '2026-12-01', '2026-12-01');
     expect(result.filter((v) => v.severity === 'block')).toEqual([]);
-    expect(result.map((v) => v.rule)).toEqual(['no_on_call']);
+    // With no Project Coordinator at a desk there is no fallback either.
+    expect(result.map((v) => v.rule)).toEqual(['no_fallback']);
   });
 
   it('treats a sick person as a gap until someone is called in', () => {
@@ -365,9 +369,11 @@ describe("the roster's own codes", () => {
 
   it('are checked when the rules are saved', () => {
     const save = (extra: unknown) => sanitizeRules({ ...rules, extra });
-    expect(save([{ code: ' WT ', as: 'W' }]).extra).toEqual([{ code: 'WT', name: 'WT', as: 'W', start: null, end: null, hours: null }]);
-    expect(save([{ code: 'UP', name: ' Unpaid ', as: 'LV', start: '08:00', end: '17:00', hours: 9 }]).extra).toEqual([{ code: 'UP', name: 'Unpaid', as: 'LV', start: null, end: null, hours: null }]);
-    expect(save(undefined).extra).toEqual([]);
+    expect(ownCodes(save([{ code: ' WT ', as: 'W' }]))).toEqual([{ code: 'WT', name: 'WT', as: 'W', start: null, end: null, hours: null, tag: null, breakHours: null }]);
+    expect(ownCodes(save([{ code: 'UP', name: ' Unpaid ', as: 'LV', start: '08:00', end: '17:00', hours: 9 }]))).toEqual([{ code: 'UP', name: 'Unpaid', as: 'LV', start: null, end: null, hours: null, tag: null, breakHours: null }]);
+    expect(ownCodes(save(undefined))).toEqual([]);
+    // The standard codes are always there, whatever is saved.
+    expect(save(undefined).extra.map((extra) => extra.code)).toEqual(STANDARD_CODES.map((standard) => standard.code));
     expect(() => save([{ code: 'd', as: 'D' }])).toThrow(/already in use/);
     expect(() => save([{ code: 'WT', as: 'W' }, { code: 'wt', as: 'X' }])).toThrow(/already in use/);
     expect(() => save([{ code: 'two words', as: 'W' }])).toThrow(/cannot be a roster code/);

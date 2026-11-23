@@ -254,7 +254,7 @@ describe('reading a roster sheet', () => {
       { code: 'SOC-N', count: 6, as: 'N', guessed: true },
       { code: 'SOC-D', count: 1, as: 'D', guessed: true },
     ]);
-    expect(learned.rules.extra.map((e) => [e.code, e.as])).toEqual([['UP', 'LV'], ['SOC-N', 'N'], ['SOC-D', 'D']]);
+    expect(learned.rules.extra.filter((e) => !e.tag).map((e) => [e.code, e.as])).toEqual([['UP', 'LV'], ['SOC-N', 'N'], ['SOC-D', 'D']]);
     const again = readRosterSheet(rows, NOV, learned.rules);
     expect(again.unknown).toEqual([{ token: 'INT', count: 10 }]);
     expect(again.people[0]?.cells.slice(0, 5).map((c) => c.code)).toEqual(['SOC-D', 'X', 'X', 'X', 'SOC-N']);

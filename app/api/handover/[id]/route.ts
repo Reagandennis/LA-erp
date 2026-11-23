@@ -43,7 +43,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const owns = await canManageHandover(id, auth.user.id);
   if (owns === null) return NextResponse.json({ error: 'Handover not found' }, { status: 404 });
   if (!owns && !userHasRole(auth.user, ADMIN_ROLE_NAME)) {
-    return NextResponse.json({ error: 'Only the author can edit this handover' }, { status: 403 });
+    return NextResponse.json({ error: 'Only the author or someone in their group can edit this handover' }, { status: 403 });
   }
 
   const body = await request.json().catch(() => null);
@@ -85,7 +85,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const owns = await canManageHandover(id, auth.user.id);
   if (owns === null) return NextResponse.json({ error: 'Handover not found' }, { status: 404 });
   if (!owns && !userHasRole(auth.user, ADMIN_ROLE_NAME)) {
-    return NextResponse.json({ error: 'Only the author can delete this handover' }, { status: 403 });
+    return NextResponse.json({ error: 'Only the author or someone in their group can delete this handover' }, { status: 403 });
   }
 
   const ok = await deleteHandover(id);

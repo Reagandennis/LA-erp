@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { RosterError, decideLeave } from '@/lib/shift-planning';
-import { readJson, requireManager, respond } from '@/lib/shift-planning-route';
+import { readJson, requireManager, respond, notifyStaff } from '@/lib/shift-planning-route';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -11,6 +11,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   return respond(async () => {
     const { ctx, response } = await requireManager(request);
     if (response) return response;
+    notifyStaff(request);
     const id = Number((await params).leaveId);
     const { decision } = await readJson(request);
     if (decision !== 'approve' && decision !== 'decline' && decision !== 'cancel') throw new RosterError('Unknown decision.');

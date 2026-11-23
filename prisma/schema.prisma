@@ -41,6 +41,7 @@ model User {
   messagingAccounts              MessagingAccount[]               @relation("MessagingAccountOwner")
   publicHolidaysCreated          PublicHoliday[]                  @relation("PublicHolidayCreatedBy")
   shiftLine                      ShiftLine?                       @relation("ShiftLineUser")
+  groupMemberships               UserGroupMember[]
   createdQuotes                  Quote[]                          @relation("QuoteCreatedBy")
   approvableQuotes               Quote[]                          @relation("QuoteApprover")
   quoteNotifications             QuoteNotification[]
@@ -124,6 +125,7 @@ model PersonalTodo {
   user          User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
   attachments   PersonalTodoAttachment[]
   shares        PersonalTodoShare[]
+  groupShares   PersonalTodoGroupShare[]
   notifications PersonalTodoNotification[]
   comments      PersonalTodoComment[]
   subtasks      Json?
@@ -159,6 +161,46 @@ model PersonalTodoShare {
 
   @@unique([todoId, userId])
   @@index([userId, createdAt])
+}
+
+/// A to-do shared with a whole group: every current member sees it, including
+/// anyone who joins the group later.
+model PersonalTodoGroupShare {
+  id        Int          @id @default(autoincrement())
+  todoId    Int
+  groupId   Int
+  createdAt DateTime     @default(now())
+  todo      PersonalTodo @relation(fields: [todoId], references: [id], onDelete: Cascade)
+  group     UserGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([todoId, groupId])
+  @@index([groupId])
+}
+
+/// A team of users set up in Admin. Members see the trips created or owned by
+/// any other member (and may edit them), and to-dos shared with the group
+/// (lib/user-groups.ts).
+model UserGroup {
+  id              Int                          @id @default(autoincrement())
+  name            String                       @unique
+  description     String?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  members         UserGroupMember[]
+  todoShares      PersonalTodoGroupShare[]
+  messagingShares MessagingAccountGroupShare[]
+}
+
+model UserGroupMember {
+  id      Int       @id @default(autoincrement())
+  groupId Int
+  userId  Int
+  addedAt DateTime  @default(now())
+  group   UserGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
 }
 
 model PersonalTodoNotification {
@@ -878,16 +920,31 @@ model MessagingAccount {
   /// --after`, Telegram message ids). Null until the first sync completes.
   syncedUpTo DateTime?
 
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
-  user      User               @relation("MessagingAccountOwner", fields: [userId], references: [id], onDelete: Cascade)
-  chats     MessagingChat[]
-  messages  MessagingMessage[]
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+  user        User                         @relation("MessagingAccountOwner", fields: [userId], references: [id], onDelete: Cascade)
+  chats       MessagingChat[]
+  messages    MessagingMessage[]
+  groupShares MessagingAccountGroupShare[]
 
   /// WhatsApp allows several accounts per user, one per wacli store; Telegram
   /// and Signal keep one each, which lib/messaging-accounts.ts enforces.
   @@unique([userId, provider, handle])
   @@index([provider])
+}
+
+/// A WhatsApp number its owner shares with a group: every member can read its
+/// chats and reply from it. Only the owner can unlink it or change the sharing.
+model MessagingAccountGroupShare {
+  id        Int              @id @default(autoincrement())
+  accountId Int
+  groupId   Int
+  createdAt DateTime         @default(now())
+  account   MessagingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  group     UserGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, groupId])
+  @@index([groupId])
 }
 
 /// A conversation mirrored from a linked messaging account.
@@ -932,6 +989,16 @@ model MessagingMessage {
   fromMe     Boolean  @default(false)
   text       String   @default("")
   at         DateTime
+  /// Provider-side sender id (a WhatsApp JID). Reacting to someone else's
+  /// message in a group needs it.
+  senderJid  String?
+  /// Reactions on this message: [{ senderJid, senderName, emoji, fromMe, at }]
+  /// (see `MessageReaction` in lib/messaging-store.ts). One entry per reactor.
+  reactions  Json     @default("[]")
+  edited     Boolean  @default(false)
+  /// Deleted for everyone by its sender; `text` holds a placeholder.
+  revoked    Boolean  @default(false)
+  forwarded  Boolean  @default(false)
 
   mediaKind String?
   mediaRef  String?
@@ -1921,6 +1988,13 @@ model ShiftConfig {
   publishLeadDays      Int      @default(14)
   /// ISO weekday the payroll week starts on: 1 = Monday … 7 = Sunday.
   weekStart            Int      @default(1)
+  /// A Monday on which the drivers' two-week day/night blocks start.
+  driverAnchor         String   @default("2026-11-30")
+  /// Sick leave in any 12 months: days on full pay, then days on half pay.
+  sickFullDays         Int      @default(7)
+  sickHalfDays         Int      @default(7)
+  /// A compensatory day lapses this many days after it is earned.
+  ctoExpiryDays        Int      @default(90)
   updatedById          Int?
   updatedAt            DateTime @updatedAt
 }
@@ -1935,10 +2009,13 @@ model ShiftLine {
   userId               Int?     @unique
   /// Shown when no account is linked.
   displayName          String?
-  /// line | hybrid | fallback
+  /// Superseded by `position`; kept so older rows still load.
   role                 String   @default("line")
-  /// Zero-based cycle day this line is on at ShiftConfig.rotationStart. Null
-  /// keeps the line out of the generated rotation (a fallback).
+  /// trc | pc | driver (Travel Risk Coordinator, Project Coordinator, Driver).
+  position             String   @default("trc")
+  /// TRC: zero-based cycle day at ShiftConfig.rotationStart; null keeps them
+  /// out of the rotation. Driver: 0 starts the anchor fortnight on days, 1 on
+  /// nights. Not used for a Project Coordinator.
   cycleOffset          Int?
   /// Inclusive 'YYYY-MM-DD' bounds of service on the roster; null = open.
   startDate            String?
@@ -1954,6 +2031,8 @@ model ShiftLine {
   user    User?         @relation("ShiftLineUser", fields: [userId], references: [id], onDelete: SetNull)
   records ShiftRecord[]
   leaves  ShiftLeave[]
+  ctos    ShiftCto[]
+  notice  ShiftNotice?
 
   @@index([active, sortOrder])
 }
@@ -1982,7 +2061,7 @@ model ShiftRecord {
   plannedCode   String
   /// What was actually worked when it differs from the plan (a call-in).
   workedCode    String?
-  /// planned | worked | sick | leave | swapped | call-in | no-show
+  /// planned | worked | sick | leave | swapped | call-in | cover | no-show
   status        String   @default("planned")
   plannedStart  String?
   plannedEnd    String?
@@ -2010,8 +2089,10 @@ model ShiftRecord {
 model ShiftCallIn {
   id                     Int       @id @default(autoincrement())
   recordId               Int       @unique
-  /// absence | task_load | incident | event
+  /// absence | task_load | incident | event | leave_cover
   trigger                String
+  /// Which step of the cover order was used: first_oc | pc | second_oc | overtime.
+  source                 String?
   calledById             Int?
   calledAt               DateTime
   acknowledgedAt         DateTime?
@@ -2032,7 +2113,7 @@ model ShiftCallIn {
 model ShiftLeave {
   id            Int       @id @default(autoincrement())
   lineId        Int
-  /// annual | sick | other
+  /// annual | sick | cto | unpaid (LV, SL, CTO, UL on the roster)
   type          String    @default("annual")
   /// Inclusive 'YYYY-MM-DD' bounds.
   startDate     String
@@ -2051,6 +2132,46 @@ model ShiftLeave {
 
   @@index([lineId, startDate])
   @@index([status])
+}
+
+/// The compensatory-time ledger: a day earned by working a rest day or a
+/// public holiday, or entered by hand. Days taken are the CTO days on the
+/// roster; the balance is what is earned, not yet taken and not lapsed.
+model ShiftCto {
+  id           Int      @id @default(autoincrement())
+  lineId       Int
+  /// 'YYYY-MM-DD' the day was earned.
+  date         String
+  days         Float    @default(1)
+  /// holiday_callin | overtime_callin | manual
+  source       String
+  /// The call-in that earned it; cancelled with it.
+  recordId     Int?     @unique
+  /// Last date it can be taken; null never lapses.
+  expiresOn    String?
+  note         String?
+  approvedById Int?
+  createdAt    DateTime @default(now())
+
+  line ShiftLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@index([lineId, date])
+}
+
+/// What a person on the roster was last emailed about their shifts, so a later
+/// change emails only the difference (lib/shift-notify.ts).
+model ShiftNotice {
+  lineId     Int       @id
+  /// The account the emails went to; linking a different one starts over with a welcome.
+  userId     Int
+  email      String
+  welcomedAt DateTime  @default(now())
+  /// Upcoming published shifts as last sent, by date: { code, name, start, end, seq }.
+  sent       Json      @default("{}")
+  lastSentAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  line ShiftLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
 }
 
 /// A public holiday. Hours worked on one are flagged for payroll at 2x.

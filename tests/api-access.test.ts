@@ -36,6 +36,7 @@ const SIGNED_IN_ONLY: Record<string, string> = {
   'share/trip/[token]/attachments/[attachmentId]': "public: files on a client's share link, behind the same token",
   'auth/device/options': 'sign-in step: authorised by the device-gate cookie a correct password earned, or the caller registering a device for themselves',
   'auth/device/register': 'sign-in step: same device-gate cookie or own session; the device stays unusable until an admin approves it',
+  'auth/device/diagnostic': 'sign-in step: same device-gate cookie or own session; only writes a log line about the browser',
   'auth/device/verify': 'sign-in step: the device-gate cookie plus a signature from an approved device',
   'auth/logout': "the caller's own session",
   'auth/session': "the caller's own session",

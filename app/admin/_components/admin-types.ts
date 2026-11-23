@@ -12,7 +12,7 @@ export type AdminRole = AdminRoleSummary;
 export type AdminModule = ModuleSummary;
 export type { AdminDevice, AdminOverview, AdminSession, AttentionItem, AuditLogEntry, AuditQueryResult, HealthCheck };
 
-export type AdminTab = 'overview' | 'users' | 'roles' | 'sessions' | 'devices' | 'audit' | 'settings';
+export type AdminTab = 'overview' | 'users' | 'roles' | 'groups' | 'sessions' | 'devices' | 'audit' | 'settings';
 
 /** Quick filters on the Users tab, opened from the overview's attention list. */
 export type UserQuickFilter = 'no-access' | 'never-signed-in' | 'dormant';

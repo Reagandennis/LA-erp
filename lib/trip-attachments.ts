@@ -4,7 +4,7 @@ import sharp from 'sharp';
 
 import { MAX_ATTACHMENTS_PER_ITEM, isPreviewableImage, resolveAttachmentType } from './attachment-types';
 import { prisma } from './prisma';
-import { canEditTrip, getTripForUser, type TripDetail } from './trips';
+import { canEditTrip, getTripForUser, isTeamTrip, tripPeers, type TripDetail } from './trips';
 import { getUploadLimitMb, mbToBytes } from './upload-limits';
 
 type AttachmentError = { error: string; status: number };
@@ -19,7 +19,7 @@ async function loadItem(tripId: number, itemId: number, userId: number, isAdmin:
     },
   });
   // Someone outside the trip learns nothing, not even that the item exists.
-  if (!item || !(isAdmin || item.trip.createdById === userId || item.trip.ownerId === userId)) {
+  if (!item || !(isAdmin || isTeamTrip(item.trip, userId, await tripPeers(userId, isAdmin)))) {
     return null;
   }
   return item;
@@ -47,7 +47,7 @@ export async function addTripItemAttachments(params: {
 }): Promise<TripDetail | AttachmentError> {
   const item = await loadItem(params.tripId, params.itemId, params.userId, params.isAdmin);
   if (!item) return { error: 'Item not found', status: 404 };
-  if (!canEditTrip(item.trip, params.userId, params.isAdmin)) {
+  if (!canEditTrip(item.trip, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${item.trip.status}"`, status: 400 };
   }
   if (params.files.length === 0) return { error: 'No files uploaded', status: 400 };
@@ -106,7 +106,7 @@ export async function deleteTripItemAttachment(params: {
 }): Promise<TripDetail | AttachmentError> {
   const item = await loadItem(params.tripId, params.itemId, params.userId, params.isAdmin);
   if (!item) return { error: 'Item not found', status: 404 };
-  if (!canEditTrip(item.trip, params.userId, params.isAdmin)) {
+  if (!canEditTrip(item.trip, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${item.trip.status}"`, status: 400 };
   }
   const { count } = await prisma.tripItemAttachment.deleteMany({

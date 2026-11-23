@@ -24,9 +24,55 @@ const GoogleAuthContext = createContext<GoogleAuthContextType>({
 });
 
 const STORAGE_KEY = 'la_erp_google_access_token';
+const EXPIRY_KEY = 'la_erp_google_access_token_expires_at';
+/** Implicit-flow tokens last an hour; assume that when Google omits expires_in. */
+const DEFAULT_TTL_SECONDS = 3600;
+/** Treat a token as dead a little before Google does, so in-flight calls don't catch the edge. */
+const EXPIRY_MARGIN_MS = 60 * 1000;
+
+function readSavedToken(): string | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
+    const expiresAt = Number(localStorage.getItem(EXPIRY_KEY));
+    // Legacy entries have no expiry and may be hours old; a token we cannot
+    // vouch for is worse than none, because every module would retry with it.
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0 || expiresAt - EXPIRY_MARGIN_MS <= Date.now()) {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(EXPIRY_KEY);
+      return null;
+    }
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+function saveToken(token: string, expiresInSeconds: number | undefined) {
+  const ttl = Number.isFinite(expiresInSeconds) && (expiresInSeconds ?? 0) > 0
+    ? (expiresInSeconds as number)
+    : DEFAULT_TTL_SECONDS;
+  try {
+    localStorage.setItem(STORAGE_KEY, token);
+    localStorage.setItem(EXPIRY_KEY, String(Date.now() + ttl * 1000));
+  } catch {
+    // Storage may be unavailable (private mode, quota); the in-memory token still works.
+  }
+}
+
+function clearSavedToken() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(EXPIRY_KEY);
+    // Also remove the old legacy tokens so they don't cause conflicts if someone downgrades
+    localStorage.removeItem('gdrive_access_token');
+  } catch {
+    // Nothing to clear.
+  }
+}
 
 /** The slice of Google Identity Services this provider touches. */
-type TokenResponse = { error?: string; access_token: string };
+type TokenResponse = { error?: string; access_token: string; expires_in?: number };
 type GoogleIdentity = {
   accounts: {
     oauth2: {
@@ -58,12 +104,7 @@ export function GoogleAuthProvider({ children }: Readonly<{ children: ReactNode 
   const [restored, setRestored] = useState(false);
   if (isClient && !restored) {
     setRestored(true);
-    let saved: string | null = null;
-    try {
-      saved = localStorage.getItem(STORAGE_KEY);
-    } catch {
-      saved = null;
-    }
+    const saved = readSavedToken();
     if (saved) setToken(saved);
   }
 
@@ -88,7 +129,7 @@ export function GoogleAuthProvider({ children }: Readonly<{ children: ReactNode 
           }
           const accessToken = resp.access_token;
           setToken(accessToken);
-          localStorage.setItem(STORAGE_KEY, accessToken);
+          saveToken(accessToken, resp.expires_in);
           setLoading(false);
         },
         error_callback: () => {
@@ -105,9 +146,7 @@ export function GoogleAuthProvider({ children }: Readonly<{ children: ReactNode 
 
   const logout = useCallback(() => {
     setToken(null);
-    localStorage.removeItem(STORAGE_KEY);
-    // Also remove the old legacy tokens so they don't cause conflicts if someone downgrades
-    localStorage.removeItem('gdrive_access_token');
+    clearSavedToken();
   }, []);
 
   return (

@@ -35,7 +35,7 @@ export async function DELETE(
   });
   if (result === 'not-found') return NextResponse.json({ error: 'Log entry not found' }, { status: 404 });
   if (result === 'forbidden') {
-    return NextResponse.json({ error: 'Only the author or an admin can remove this entry' }, { status: 403 });
+    return NextResponse.json({ error: 'Only the author, someone in their group or an admin can remove this entry' }, { status: 403 });
   }
 
   await recordAuditEvent({

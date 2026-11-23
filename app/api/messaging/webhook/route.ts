@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { findAccount, getAccount } from '@/lib/messaging-accounts';
-import { cacheWhatsAppMedia, wacliToIngest } from '@/lib/messaging-ingest';
-import { ingestMessages } from '@/lib/messaging-repo';
+import { applyWacliMessageUpdates, cacheWhatsAppMedia, wacliToIngest, wacliToReaction } from '@/lib/messaging-ingest';
+import { applyReactions, ingestMessages } from '@/lib/messaging-repo';
 import { webhookSecret } from '@/lib/messaging-webhook-secret';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,9 @@ export const runtime = 'nodejs';
  * Live message sink for `wacli sync --follow --webhook`.
  *
  * The sync process posts each incoming WhatsApp message here the moment it
- * arrives, which is what makes the console update without polling.
+ * arrives, which is what makes the console update without polling. Besides new
+ * messages the stream carries reactions, edits and deletions, each as a record
+ * about an existing message; those update the mirror in place.
  *
  * This endpoint is NOT session-authenticated — it is called by a local child
  * process, not a browser — so it is gated on a per-process secret carried in
@@ -44,13 +46,14 @@ export async function POST(request: NextRequest) {
   if (!body) return NextResponse.json({ error: 'bad-request' }, { status: 400 });
 
   // wacli posts either a single message object or an array of them.
-  const raw = Array.isArray(body) ? body : [body];
-  const batch = raw
-    .map((m) => wacliToIngest(m as Parameters<typeof wacliToIngest>[0]))
-    .filter((m): m is NonNullable<typeof m> => m !== null);
+  const raw = (Array.isArray(body) ? body : [body]) as Parameters<typeof wacliToIngest>[0][];
+  const batch = raw.map((m) => wacliToIngest(m)).filter((m): m is NonNullable<typeof m> => m !== null);
+  const reactions = raw.map((m) => wacliToReaction(m)).filter((r): r is NonNullable<typeof r> => r !== null);
 
   const fresh = await ingestMessages(account.id, account.userId, batch);
   // Fetch new photos and voice notes now, while WhatsApp still serves them.
   cacheWhatsAppMedia(account, fresh);
-  return NextResponse.json({ ok: true, ingested: fresh.length });
+  await applyWacliMessageUpdates(account, raw, new Set(fresh.map((m) => m.id)));
+  const reacted = reactions.length > 0 ? await applyReactions(account.id, account.userId, reactions) : 0;
+  return NextResponse.json({ ok: true, ingested: fresh.length, reacted });
 }

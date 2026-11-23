@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { type CallInInput, cancelCallIn, saveCallIn } from '@/lib/shift-planning';
-import { readJson, requireManager, respond } from '@/lib/shift-planning-route';
+import { readJson, requireManager, respond, notifyStaff } from '@/lib/shift-planning-route';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
   return respond(async () => {
     const { ctx, response } = await requireManager(request);
     if (response) return response;
+    notifyStaff(request);
     const body = await readJson(request);
     const result = await saveCallIn(ctx.actor, {
       lineId: Number(body.lineId),
@@ -38,6 +39,7 @@ export async function DELETE(request: NextRequest) {
   return respond(async () => {
     const { ctx, response } = await requireManager(request);
     if (response) return response;
+    notifyStaff(request);
     const lineId = Number(request.nextUrl.searchParams.get('lineId'));
     const date = request.nextUrl.searchParams.get('date') ?? '';
     const record = Number.isInteger(lineId) ? await cancelCallIn(ctx.actor, lineId, date) : null;

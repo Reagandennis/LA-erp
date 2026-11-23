@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { findMany, count, groupBy } = vi.hoisted(() => ({ findMany: vi.fn(), count: vi.fn(), groupBy: vi.fn() }));
 
 vi.mock('server-only', () => ({}));
+vi.mock('../lib/user-groups', async () => (await import('./support/user-groups-stub')).userGroupsStub);
 vi.mock('../lib/prisma', () => ({ prisma: { trip: { findMany, count, groupBy } } }));
 vi.mock('../lib/attachment-types', () => ({ isPreviewableImage: () => false }));
 
@@ -47,7 +48,7 @@ describe('trip search query', () => {
   it('admins see everything; others only their own trips', () => {
     expect(buildTripSearchWhere({ userId: 4, isAdmin: true })).toEqual({ AND: [{}] });
     expect(buildTripSearchWhere({ userId: 4, isAdmin: false })).toEqual({
-      AND: [{ OR: [{ createdById: 4 }, { ownerId: 4 }] }],
+      AND: [{ OR: [{ createdById: 4 }, { ownerId: 4 }, { createdBy: { groupMemberships: { some: { group: { members: { some: { userId: 4 } } } } } } }, { owner: { groupMemberships: { some: { group: { members: { some: { userId: 4 } } } } } } }] }],
     });
   });
 
@@ -127,7 +128,7 @@ describe('trip search query', () => {
       total: 1532,
     });
     expect(groupBy).toHaveBeenCalledWith(
-      expect.objectContaining({ by: ['status'], where: { OR: [{ createdById: 3 }, { ownerId: 3 }] } }),
+      expect.objectContaining({ by: ['status'], where: { OR: [{ createdById: 3 }, { ownerId: 3 }, { createdBy: { groupMemberships: { some: { group: { members: { some: { userId: 3 } } } } } } }, { owner: { groupMemberships: { some: { group: { members: { some: { userId: 3 } } } } } } }] } }),
     );
   });
 });

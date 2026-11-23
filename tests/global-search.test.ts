@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
+vi.mock('../lib/user-groups', async () => (await import('./support/user-groups-stub')).userGroupsStub);
 
 /** Every delegate the searchers use, each with a findMany spy. */
 const DELEGATES = [
@@ -44,7 +45,7 @@ describe('global search', () => {
 
   it('applies the trip owner rule for everyone but admins', async () => {
     await searchEverything(user(['trip-planning']), 'TR-');
-    expect(db.trip.findMany.mock.calls[0]![0].where.AND[0]).toEqual({ OR: [{ createdById: 42 }, { ownerId: 42 }] });
+    expect(db.trip.findMany.mock.calls[0]![0].where.AND[0]).toEqual({ OR: [{ createdById: 42 }, { ownerId: 42 }, { createdBy: { groupMemberships: { some: { group: { members: { some: { userId: 42 } } } } } } }, { owner: { groupMemberships: { some: { group: { members: { some: { userId: 42 } } } } } } }] });
 
     db.trip.findMany.mockClear();
     await searchEverything(user([], true), 'TR-');
@@ -53,8 +54,12 @@ describe('global search', () => {
 
   it("never reaches into anyone else's chats — not even for an admin", async () => {
     await searchEverything(user([], true), 'invoice');
+    // Their own accounts, or a WhatsApp number shared with a group they are in; nothing else.
     for (const call of db.messagingAccount.findMany.mock.calls) {
-      expect(call[0].where.userId).toBe(42);
+      expect(call[0].where.OR).toEqual([
+        { userId: 42 },
+        { provider: 'whatsapp', groupShares: { some: { group: { members: { some: { userId: 42 } } } } } },
+      ]);
     }
     // No linked accounts of their own: chats and messages aren't queried at all.
     expect(db.messagingChat.findMany).not.toHaveBeenCalled();
@@ -65,7 +70,7 @@ describe('global search', () => {
     await searchEverything(user(['notes', 'calendar', 'todo-personal']), 'plan');
     expect(db.note.findMany.mock.calls[0]![0].where.userId).toBe(42);
     expect(db.calendarEvent.findMany.mock.calls[0]![0].where.userId).toBe(42);
-    expect(db.personalTodo.findMany.mock.calls[0]![0].where.OR).toEqual([{ userId: 42 }, { shares: { some: { userId: 42 } } }]);
+    expect(db.personalTodo.findMany.mock.calls[0]![0].where.OR).toEqual([{ userId: 42 }, { shares: { some: { userId: 42 } } }, { groupShares: { some: { group: { members: { some: { userId: 42 } } } } } }]);
   });
 
   it('never loads stored files, photos or documents, nor passport and medical details', async () => {

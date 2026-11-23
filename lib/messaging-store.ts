@@ -58,6 +58,20 @@ export interface StoredMedia {
   sizeBytes: number | null;
 }
 
+/** One person's reaction to a message. A person has at most one; a new emoji replaces the old. */
+export interface MessageReaction {
+  /** Provider-side id of who reacted; null when the provider didn't say. */
+  senderJid: string | null;
+  senderName: string;
+  emoji: string;
+  fromMe: boolean;
+  /** ISO instant of the reaction. */
+  at: string;
+}
+
+/** Shown in place of the text of a message its sender deleted for everyone. */
+export const REVOKED_TEXT = 'This message was deleted';
+
 export interface StoredMessage {
   id: string;
   chatId: string;
@@ -67,6 +81,15 @@ export interface StoredMessage {
   text: string;
   timestamp: string;
   media?: StoredMedia | null;
+  /**
+   * Message state the WhatsApp mirror keeps. The in-memory store (Telegram,
+   * Signal) doesn't track it, so the fields are optional and read as "no".
+   */
+  senderJid?: string | null;
+  reactions?: MessageReaction[];
+  edited?: boolean;
+  revoked?: boolean;
+  forwarded?: boolean;
 }
 
 const MAX_MESSAGES_PER_CHAT = 500;

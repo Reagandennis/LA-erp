@@ -1,10 +1,11 @@
 import 'server-only';
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 
 import { ADMIN_ROLE_NAME } from './rbac';
 import { requireRequestAuth } from './request-auth';
 import { type Actor, RosterError } from './shift-planning';
+import { sendShiftNotices } from './shift-notify';
 import { userHasModule, userHasRole } from './user';
 
 /**
@@ -78,4 +79,25 @@ export async function readJson(request: NextRequest): Promise<Record<string, unk
 export function monthParam(request: NextRequest, fallback: string): string {
   const value = request.nextUrl.searchParams.get('month');
   return value && /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : fallback;
+}
+
+/**
+ * After the response, emails anyone whose upcoming published shifts this
+ * change touched (and welcomes anyone newly linked). Never fails the request.
+ */
+export function notifyStaff(request: NextRequest): void {
+  const origin = request.nextUrl.origin;
+  const task = async () => {
+    try {
+      await sendShiftNotices(origin);
+    } catch (error) {
+      console.error('[shift-notify]', error);
+    }
+  };
+  try {
+    after(task);
+  } catch {
+    // Outside a request scope (a script or a test): there is no response to wait for.
+    void task();
+  }
 }

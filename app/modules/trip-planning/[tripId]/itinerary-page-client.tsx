@@ -70,6 +70,8 @@ interface ItineraryPageClientProps {
   clientTravelers: TravelerOption[];
   currentUser: { id: number; name: string; email: string };
   isAdmin: boolean;
+  /** The user and their group-mates (Admin → Groups): they edit each other's trips as their own. */
+  teamIds: number[];
   /** Open the page on this event (`?event=<id>`), when it is on the trip. */
   focusItemId?: number | null;
 }
@@ -484,6 +486,7 @@ export default function ItineraryPageClient({
   clientTravelers: initialClientTravelers,
   currentUser,
   isAdmin,
+  teamIds,
   focusItemId = null,
 }: ItineraryPageClientProps) {
   const [trip, setTrip] = useSyncedState<TripDetail>(initialTrip);
@@ -538,11 +541,16 @@ export default function ItineraryPageClient({
     };
   }, [highlightItemId]);
 
-  const isCreator = trip.createdBy.id === currentUser.id;
+  // Mirrors canEditTrip (lib/trips.ts), which the API enforces: a trip created
+  // or owned by a group-mate is edited like one's own.
   const isOwner = trip.owner?.id === currentUser.id;
+  const isTeamTrip =
+    isOwner ||
+    trip.createdBy.id === currentUser.id ||
+    teamIds.includes(trip.createdBy.id) ||
+    (trip.owner != null && teamIds.includes(trip.owner.id));
   const canEdit =
-    isAdmin ||
-    (trip.status !== 'Cancelled' && (trip.status !== 'Completed' ? isCreator || isOwner : isOwner));
+    isAdmin || (trip.status !== 'Cancelled' && (trip.status !== 'Completed' ? isTeamTrip : isOwner));
 
   // Days are rows now, so membership comes from `dayId` rather than from
   // re-deriving a date out of each item's timestamp.
@@ -1337,7 +1345,7 @@ export default function ItineraryPageClient({
                 tripId={trip.id}
                 description={trip.description}
                 notes={trip.notes}
-                currentUserId={currentUser.id}
+                teamIds={teamIds}
                 isAdmin={isAdmin}
                 onCountChange={setLogCount}
               />

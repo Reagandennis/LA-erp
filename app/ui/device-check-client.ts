@@ -39,6 +39,10 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 function browserFailure(error: unknown, registering: boolean): DeviceCheckFailure {
   if (error instanceof DeviceCheckFailure) return error;
   const name = error instanceof Error ? error.name : '';
+  // simplewebauthn wraps the browser's DOMException; the original is in `cause`.
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null;
+  reportBrowserError(registering ? 'register' : 'verify', error, cause);
+  const detail = ` (${cause?.name || name || 'Error'}: ${(cause?.message || (error instanceof Error ? error.message : String(error))).slice(0, 160)})`;
   if (name === 'InvalidStateError' && registering) {
     return new DeviceCheckFailure('This device is already registered. Use "Confirm this device" instead.', 'already-registered');
   }
@@ -51,13 +55,76 @@ function browserFailure(error: unknown, registering: boolean): DeviceCheckFailur
     );
   }
   if (name === 'NotSupportedError' || name === 'SecurityError') {
-    return new DeviceCheckFailure('This browser cannot do the device check here. Use an up-to-date Chrome, Edge or Safari.', 'unsupported');
+    return new DeviceCheckFailure(
+      registering
+        ? `This computer refused to create a device key. On Windows, set up Windows Hello (a PIN or fingerprint) in Settings → Accounts → Sign-in options, then try again. On a Mac, use Chrome and choose to save the passkey in the Chrome profile on this Mac.${detail}`
+        : `This computer refused the device check.${detail}`,
+      'unsupported',
+    );
   }
-  return new DeviceCheckFailure('The device check failed. Please try again.');
+  return new DeviceCheckFailure(`The device check failed. Please try again.${detail}`);
+}
+
+/** Sends the browser's own error to the server log so an administrator can see it. */
+function reportBrowserError(step: string, error: unknown, cause: Error | null): void {
+  if (typeof window === 'undefined') return;
+  const e = error instanceof Error ? error : null;
+  const facts: Record<string, string | boolean | null> = {
+    step,
+    errorName: e?.name ?? null,
+    errorCode: (e as { code?: string } | null)?.code ?? null,
+    errorMessage: (e?.message ?? String(error)).slice(0, 300),
+    causeName: cause?.name ?? null,
+    causeMessage: cause?.message?.slice(0, 300) ?? null,
+    origin: window.location.origin,
+    userAgent: navigator.userAgent.slice(0, 300),
+  };
+  void fetch('/api/auth/device/diagnostic', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ context: 'login', facts }),
+  }).catch(() => undefined);
 }
 
 export function deviceCheckSupported(): boolean {
   return typeof window !== 'undefined' && typeof window.PublicKeyCredential === 'function';
+}
+
+/** Tell the server what this browser lacks, for the administrator's log. */
+export function reportDeviceCheckProblem(context: 'login' | 'session'): void {
+  if (typeof window === 'undefined') return;
+  const facts: Record<string, string | boolean | null> = {
+    origin: window.location.origin,
+    isSecureContext: window.isSecureContext,
+    publicKeyCredential: typeof window.PublicKeyCredential,
+    credentials: typeof navigator.credentials,
+    inFrame: window.self !== window.top,
+    userAgent: navigator.userAgent.slice(0, 300),
+  };
+  void fetch('/api/auth/device/diagnostic', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ context, facts }),
+  }).catch(() => undefined);
+}
+
+/**
+ * Why the device check cannot run here, in words the person can act on.
+ * Browsers hide passkeys on pages they do not consider secure (plain http,
+ * a bare IP address, or a certificate warning that was clicked through), which
+ * is far more common than a browser that genuinely lacks support.
+ */
+export function deviceCheckProblem(): string {
+  if (typeof window === 'undefined') return '';
+  const here = `${window.location.origin}, ${suggestDeviceLabel()}`;
+  if (!window.isSecureContext || window.location.protocol !== 'https:') {
+    return `The browser does not treat this address (${here}) as secure, so it blocks the device check. Open the site at its normal https:// address with no certificate warning.`;
+  }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(window.location.hostname)) {
+    return `Device checks do not work on an IP address (${here}). Open the site by its name instead.`;
+  }
+  return `This browser has the device check switched off (${here}). Use an up-to-date Chrome, Edge or Safari outside private or in-app browsing, and check that a company policy is not blocking passkeys.`;
 }
 
 /** "Chrome on macOS": a starting name for the device the person can change. */

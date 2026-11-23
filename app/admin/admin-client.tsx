@@ -21,6 +21,7 @@ import type {
 import AuditPanel from './_components/audit-panel';
 import CreateUserModal from './_components/create-user-modal';
 import DevicesPanel, { type DeviceAction } from './_components/devices-panel';
+import GroupsPanel from './_components/groups-panel';
 import OverviewPanel from './_components/overview-panel';
 import RolesPanel from './_components/roles-panel';
 import SessionsPanel from './_components/sessions-panel';
@@ -48,6 +49,7 @@ const TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'users', label: 'Users' },
   { id: 'roles', label: 'Roles' },
+  { id: 'groups', label: 'Groups' },
   { id: 'sessions', label: 'Sessions' },
   { id: 'devices', label: 'Devices' },
   { id: 'audit', label: 'Audit log' },
@@ -354,6 +356,7 @@ export default function AdminClient({
             notify={notify}
           />
         )}
+        {tab === 'groups' && <GroupsPanel users={users} onOpenUser={setOpenUserId} notify={notify} />}
         {tab === 'sessions' && <SessionsPanel sessions={sessions} now={now} onRevoke={revokeSession} onOpenUser={setOpenUserId} />}
         {tab === 'devices' && (
           <DevicesPanel

@@ -3,7 +3,7 @@ import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getDriveToken } from './google-drive-session';
-import { DriveError } from './google-drive';
+import { DriveError, isTokenRejection } from './google-drive';
 import { ADMIN_ROLE_NAME } from './rbac';
 import { requireRequestAuth } from './request-auth';
 import { userHasModule, userHasRole } from './user';
@@ -58,11 +58,15 @@ export async function resolveDriveRequest(
 export function driveErrorResponse(error: unknown): NextResponse {
   if (error instanceof DriveError) {
     // A rejected token means the consent lapsed mid-session.
-    const status = error.status === 401 || error.status === 403 ? 428 : 502;
-    return NextResponse.json(
-      { error: status === 428 ? 'not-connected' : error.message },
-      { status },
-    );
+    if (isTokenRejection(error)) {
+      return NextResponse.json({ error: 'not-connected' }, { status: 428 });
+    }
+    // Anything else — the Drive API switched off in the Cloud project, a file
+    // the user cannot touch, quota — is not fixed by reconnecting, so keep
+    // Google's own explanation where an admin can read it.
+    console.error(`[google-drive] ${error.status} ${error.reason ?? ''}: ${error.message}`);
+    const status = error.status === 403 || error.status === 404 || error.status === 429 ? error.status : 502;
+    return NextResponse.json({ error: error.message }, { status });
   }
   return NextResponse.json(
     { error: error instanceof Error ? error.message : 'Google Drive request failed' },

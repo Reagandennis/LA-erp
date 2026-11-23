@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import type { ImportCodeChoices, ImportTarget } from '@/lib/shift-import';
 import { RosterError, currentMonth, importRoster, rosterTemplateRows } from '@/lib/shift-planning';
-import { monthParam, requireManager, respond } from '@/lib/shift-planning-route';
+import { monthParam, requireManager, respond, notifyStaff } from '@/lib/shift-planning-route';
 import { isCodeLike, isMonthKey, isShiftCode } from '@/lib/shift-rules';
 import { SpreadsheetError, readSpreadsheet } from '@/lib/spreadsheet-read';
 
@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
   return respond(async () => {
     const { ctx, response } = await requireManager(request);
     if (response) return response;
+    notifyStaff(request);
 
     const rateLimit = await enforceRateLimit({ scope: 'shift.import', key: `${ctx.actor.id}`, limit: 40, windowMs: 60 * 1000 });
     if (!rateLimit.allowed) {

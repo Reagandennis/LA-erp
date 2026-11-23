@@ -15,6 +15,7 @@ const { tx, transaction } = vi.hoisted(() => {
 });
 
 vi.mock('server-only', () => ({}));
+vi.mock('../lib/user-groups', async () => (await import('./support/user-groups-stub')).userGroupsStub);
 vi.mock('../lib/trip-notifications', () => ({ syncCrewGapNotifications: vi.fn() }));
 vi.mock('../lib/prisma', () => ({ prisma: { $transaction: transaction, ...tx } }));
 

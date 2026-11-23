@@ -4,12 +4,15 @@
  */
 
 import type {
+  AwayCode,
   CallInTrigger,
   CellLookup,
+  CoverSource,
+  CtoBalance,
   LeaveType,
-  LineRole,
   LineTotals,
   PayrollTotals,
+  Position,
   RecordStatus,
   RosterCell,
   RosterLine,
@@ -27,7 +30,7 @@ export interface LineView extends RosterLine {
   name: string;
   email: string | null;
   displayName: string | null;
-  role: LineRole;
+  position: Position;
   contractHoursPerWeek: number;
   leaveEntitlementDays: number;
   leaveOpeningBalance: number;
@@ -37,6 +40,8 @@ export interface LineView extends RosterLine {
 export interface CallInView {
   id: number;
   trigger: CallInTrigger;
+  /** Which step of the cover order this was; null on call-ins saved before it was recorded. */
+  source: CoverSource | null;
   calledAt: string;
   acknowledgedAt: string | null;
   arrivedAt: string | null;
@@ -141,10 +146,13 @@ export interface LeaveView {
   lineCode: string;
   personName: string;
   type: LeaveType;
+  /** The code it puts on the roster: LV, SL, CTO or UL. */
+  code: string;
   startDate: string;
   endDate: string;
   status: LeaveStatus;
-  shiftsCharged: number;
+  /** Calendar days recorded: every day of the period, rest and on-call days included. */
+  days: number;
   note: string | null;
   requestedByName: string | null;
   decidedByName: string | null;
@@ -152,15 +160,51 @@ export interface LeaveView {
   createdAt: string;
 }
 
+/**
+ * What the roster records about a person's time away. Days are calendar days
+ * as rostered; how they count against an entitlement is HR's rule, applied
+ * downstream.
+ */
 export interface LeaveBalance {
   entitlement: number;
   opening: number;
   accrued: number;
-  /** Shifts charged to approved annual leave this year. */
+  /** Calendar days of approved annual leave this year. */
   taken: number;
-  /** Shifts a pending request would charge. */
+  /** Calendar days a pending annual request covers. */
   pending: number;
   balance: number;
+  /** Days on the roster under each code this calendar year. */
+  away: Record<AwayCode, number>;
+  /** Sick days in the 12 months to today, against the full-pay and half-pay allowances. */
+  sick12m: number;
+  cto: CtoBalance;
+}
+
+export const EMPTY_LEAVE_BALANCE: LeaveBalance = {
+  entitlement: 0,
+  opening: 0,
+  accrued: 0,
+  taken: 0,
+  pending: 0,
+  balance: 0,
+  away: { LV: 0, SL: 0, CTO: 0, UL: 0 },
+  sick12m: 0,
+  cto: { earned: 0, taken: 0, lapsed: 0, balance: 0, expiringSoon: 0, nextExpiry: null },
+};
+
+/** One entry of the compensatory-time ledger. */
+export interface CtoEntryView {
+  id: number;
+  lineId: number;
+  lineCode: string;
+  personName: string;
+  date: string;
+  days: number;
+  source: 'holiday_callin' | 'overtime_callin' | 'manual';
+  expiresOn: string | null;
+  note: string | null;
+  createdAt: string;
 }
 
 export interface AuditView {
@@ -213,6 +257,8 @@ export interface AdminOverview {
   holidays: HolidayView[];
   leaves: LeaveView[];
   balances: Record<number, LeaveBalance>;
+  /** The compensatory-time ledger, newest first. */
+  cto: CtoEntryView[];
   users: UserOption[];
 }
 
@@ -258,6 +304,10 @@ export interface DashboardNow {
     end: string | null;
   }>;
   onCall: string[];
+  /** Project Coordinators at their desk today: the weekday fallback when no TRC is on call. */
+  fallback: string[];
+  /** Drivers rostered today, and whether each shift is running. */
+  drivers: Array<{ name: string; code: string; start: string | null; end: string | null; active: boolean }>;
   nextHandover: { date: string; time: string } | null;
 }
 
@@ -265,6 +315,11 @@ export interface DashboardLine {
   lineId: number;
   code: string;
   name: string;
+  position: Position;
+  /** Days of work in the seven days ending today. */
+  workDays7: number;
+  /** Days away this month under each code. */
+  awayMonth: Record<AwayCode, number>;
   /** Hours in the seven days ending today. */
   last7: number;
   /** The heaviest seven-day window in the coming week. */
@@ -288,8 +343,10 @@ export interface DashboardCallIn {
   date: string;
   lineCode: string;
   name: string;
+  position: Position;
   code: ShiftCode;
   trigger: CallInTrigger;
+  source: CoverSource | null;
   responseMinutes: number | null;
   late: boolean;
 }
@@ -314,9 +371,18 @@ export interface Dashboard {
   callIns: DashboardCallIn[];
   callInRate: number | null;
   requests: DashboardRequest[];
-  reliability: { slots: number; asPlanned: number; callIn: number; gaps: number; unconfirmed: number };
+  /** How the console plan was delivered, month to date. */
+  reliability: { slots: number; asPlanned: number; callIn: number; cover: number; overtime: number; gaps: number; unconfirmed: number };
+  /** TRC hours worked against the weekly target, month to date. */
   utilization: number | null;
-  fairness: { nights: number; weekends: number; holidays: number };
+  /** Spread between TRCs over the quarter, and night weeks between drivers. */
+  fairness: { nights: number; weekends: number; holidays: number; callIns: number; driverNights: number };
+  /** Project Coordinators this month: weekdays as the fallback, console covers, and desk days lost to them. */
+  fallbackLoad: { fallbackDays: number; covers: number; deskDaysLost: number };
+  /** Working days this month so far with one day and one night driver, of those with drivers rostered. */
+  driverCoverage: { met: number; total: number };
+  /** Call-ins per TRC per cycle in each of the last three months; above 1.0 two months running is a hiring signal. */
+  hiring: { months: Array<{ month: string; rate: number | null; pcCovers: number }>; signal: boolean };
   months: MonthView[];
   compliance: AuditView[];
 }

@@ -11,7 +11,9 @@ const CONTENT_SECURITY_POLICY = [
     'https://*.tile-cyclosm.openstreetmap.fr https://tileserver.memomaps.de ' +
     // Aircraft photos in the flight tracker.
     'https://t.plnspttrs.net',
-  "connect-src 'self' https://*.googleapis.com https://accounts.google.com https://api.planespotters.net",
+  // Zello push-to-talk channel sockets (Zello Work, and consumer Zello).
+  "connect-src 'self' https://*.googleapis.com https://accounts.google.com https://api.planespotters.net " +
+    'wss://zellowork.io wss://zello.io',
   "frame-src https://accounts.google.com",
   "frame-ancestors 'none'",
   "object-src 'none'",

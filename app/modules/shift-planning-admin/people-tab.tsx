@@ -4,24 +4,33 @@ import { type FormEvent, useMemo, useState } from 'react';
 
 import { CODE_STYLE, Card, Label, Pill, formatDay, formatHours, ghostButton, inputClass, primaryButton } from '@/app/modules/_components/shift-ui';
 import { useConfirm } from '@/app/ui/confirm-dialog';
-import { CONSOLE_CODES, LINE_ROLES, type ShiftCode, addDays, generatedCode } from '@/lib/shift-rules';
+import { CONSOLE_CODES, POSITIONS, POSITION_LABEL, type Position, type ShiftCode, addDays, generatedCode } from '@/lib/shift-rules';
 import type { AdminOverview, LineView } from '@/lib/shift-types';
 
 import { message, sendJson } from './api';
+import NotifyCard from './notify-card';
 
 interface Props {
   data: AdminOverview;
   reload: () => Promise<void>;
 }
 
-const ROLE_LABEL: Record<(typeof LINE_ROLES)[number], string> = { line: 'Line', hybrid: 'Hybrid', fallback: 'Fallback' };
+/** How each position's place in its pattern reads in the list. */
+function patternLabel(line: LineView): string | null {
+  if (line.position === 'pc') return 'Weekday desk, 08:00–17:00';
+  if (line.position === 'driver') return line.cycleOffset === 1 ? 'Starts on nights' : 'Starts on days';
+  return line.cycleOffset === null ? null : `Starts on day ${line.cycleOffset + 1}`;
+}
+
+/** The billet prefix a position's codes are written with. */
+const BILLET_PREFIX: Record<Position, string> = { trc: 'TRC-', pc: 'TRC-', driver: 'DRV-' };
 
 interface Form {
   id: number | null;
   code: string;
   userId: string;
   displayName: string;
-  role: string;
+  position: Position;
   cycleOffset: string;
   startDate: string;
   endDate: string;
@@ -37,7 +46,7 @@ function formOf(line: LineView): Form {
     code: line.code,
     userId: line.userId === null ? '' : String(line.userId),
     displayName: line.displayName ?? '',
-    role: line.role,
+    position: line.position,
     cycleOffset: line.cycleOffset === null ? '' : String(line.cycleOffset),
     startDate: line.startDate ?? '',
     endDate: line.endDate ?? '',
@@ -56,7 +65,7 @@ export default function PeopleTab({ data, reload }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const cycle = rules.pattern.length;
-  const rotation = lines.filter((line) => line.active && line.cycleOffset !== null);
+  const rotation = lines.filter((line) => line.active && line.position === 'trc' && line.cycleOffset !== null);
   const cycleDates = useMemo(() => Array.from({ length: cycle }, (_, i) => addDays(rules.rotationStart, i)), [cycle, rules.rotationStart]);
   const needed: ShiftCode[] = [...CONSOLE_CODES.filter((c) => rules.pattern.includes(c)), ...(rules.pattern.includes('OC') ? (['OC'] as ShiftCode[]) : [])];
 
@@ -69,17 +78,36 @@ export default function PeopleTab({ data, reload }: Props) {
   });
   const balanced = cover.every((problems) => problems.length === 0);
 
+  /** The next free billet for a position: TRC-6 after TRC-5, DRV-1 for the first driver. */
+  const nextCode = (position: Position): string => {
+    const prefix = BILLET_PREFIX[position];
+    const numbers = lines.filter((line) => line.code.startsWith(prefix)).map((line) => Number(line.code.slice(prefix.length))).filter(Number.isInteger);
+    return `${prefix}${Math.max(0, ...numbers) + 1}`;
+  };
+
+  /** Where a new person of a position starts: the next gap in the stagger, or opposite the other driver. */
+  const nextOffset = (position: Position): string => {
+    if (position === 'pc') return '';
+    if (position === 'driver') return lines.some((line) => line.active && line.position === 'driver' && line.cycleOffset !== 1) ? '1' : '0';
+    return String((rotation.length * 2) % cycle);
+  };
+
+  const changePosition = (position: Position) => {
+    if (!form) return;
+    // A new person's billet and starting place follow the position until they are typed over.
+    const fresh = form.id === null && form.code === nextCode(form.position);
+    setForm({ ...form, position, cycleOffset: nextOffset(position), code: fresh ? nextCode(position) : form.code });
+  };
+
   const openNew = () => {
-    const last = lines[lines.length - 1]?.code ?? 'TRC-0';
-    const number = Number(last.match(/(\d+)$/)?.[1] ?? lines.length) + 1;
     setError(null);
     setForm({
       id: null,
-      code: `${last.replace(/\d+$/, '') || 'TRC-'}${number}`,
+      code: nextCode('trc'),
       userId: '',
       displayName: '',
-      role: 'line',
-      cycleOffset: String((rotation.length * 2) % cycle),
+      position: 'trc',
+      cycleOffset: nextOffset('trc'),
       startDate: '',
       endDate: '',
       contractHoursPerWeek: String(rules.targetHours7d),
@@ -98,8 +126,8 @@ export default function PeopleTab({ data, reload }: Props) {
       code: form.code,
       userId: form.userId ? Number(form.userId) : null,
       displayName: form.displayName,
-      role: form.role,
-      cycleOffset: form.cycleOffset === '' ? null : Number(form.cycleOffset),
+      position: form.position,
+      cycleOffset: form.position === 'pc' || form.cycleOffset === '' ? null : Number(form.cycleOffset),
       startDate: form.startDate || null,
       endDate: form.endDate || null,
       contractHoursPerWeek: Number(form.contractHoursPerWeek),
@@ -144,7 +172,8 @@ export default function PeopleTab({ data, reload }: Props) {
           <div>
             <h2 className="text-sm font-semibold text-gray-900">The rotation</h2>
             <p className="mt-0.5 text-sm text-gray-500">
-              A {cycle}-day cycle. Each person starts on a different cycle day, so every day has one person on each console shift and one on call.
+              Travel Risk Coordinators run a {cycle}-day cycle. Each starts on a different cycle day, so every day has one person on each console shift and one on call.
+              Project Coordinators keep a weekday desk and drivers alternate two weeks of days with two of nights; neither is in this rotation.
             </p>
           </div>
           {rotation.length > 0 && (balanced ? <Pill tone="ok">Every cycle day is covered</Pill> : <Pill tone="danger">The stagger leaves gaps</Pill>)}
@@ -193,6 +222,8 @@ export default function PeopleTab({ data, reload }: Props) {
         )}
       </Card>
 
+      <NotifyCard refreshKey={lines} />
+
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <h2 className="text-sm font-semibold text-gray-900">People on the roster</h2>
@@ -201,13 +232,13 @@ export default function PeopleTab({ data, reload }: Props) {
           </button>
         </div>
         {lines.length === 0 ? (
-          <p className="px-5 pb-10 pt-4 text-center text-sm text-gray-400">No one is on the roster yet. Add the first person to start the rotation.</p>
+          <p className="px-5 pb-10 pt-4 text-center text-sm text-gray-400">No one is on the roster yet. Add the first person, or upload a roster from the Roster tab.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-y border-gray-100 bg-gray-50/60 text-left text-xs text-gray-400">
-                  {['Line', 'Person', 'Role', 'Rotation', 'On the roster', 'Contract', 'Leave / year', ''].map((h) => (
+                  {['Billet', 'Person', 'Position', 'Pattern', 'On the roster', 'Contract', 'Leave / year', ''].map((h) => (
                     <th key={h} className="px-5 py-2 font-medium">{h}</th>
                   ))}
                 </tr>
@@ -229,8 +260,8 @@ export default function PeopleTab({ data, reload }: Props) {
                         </>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-gray-600">{ROLE_LABEL[line.role]}</td>
-                    <td className="px-5 py-3 text-gray-600">{line.cycleOffset === null ? <span className="text-gray-400">Not in rotation</span> : `Starts on day ${line.cycleOffset + 1}`}</td>
+                    <td className="px-5 py-3 text-gray-600">{POSITION_LABEL[line.position]}</td>
+                    <td className="px-5 py-3 text-gray-600">{patternLabel(line) ?? <span className="text-gray-400">Not in rotation</span>}</td>
                     <td className="px-5 py-3 text-gray-600">
                       {!line.active ? (
                         <Pill tone="muted">Inactive</Pill>
@@ -265,14 +296,14 @@ export default function PeopleTab({ data, reload }: Props) {
             </div>
             <div className="grid grid-cols-2 gap-4 px-6 py-5">
               <div>
-                <Label>Roster code *</Label>
+                <Label>Billet *</Label>
                 <input className={inputClass} required maxLength={20} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="TRC-1" autoFocus />
               </div>
               <div>
-                <Label>Role</Label>
-                <select className={inputClass} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                  {LINE_ROLES.map((role) => (
-                    <option key={role} value={role}>{ROLE_LABEL[role]}</option>
+                <Label>Position</Label>
+                <select className={inputClass} value={form.position} onChange={(e) => changePosition(e.target.value as Position)}>
+                  {POSITIONS.map((position) => (
+                    <option key={position} value={position}>{POSITION_LABEL[position]}</option>
                   ))}
                 </select>
               </div>
@@ -293,17 +324,34 @@ export default function PeopleTab({ data, reload }: Props) {
                   <input className={inputClass} maxLength={80} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
                 </div>
               )}
-              <div className="col-span-2">
-                <Label>Starts the rotation on</Label>
-                <select className={inputClass} value={form.cycleOffset} onChange={(e) => setForm({ ...form, cycleOffset: e.target.value })}>
-                  <option value="">Not in the rotation (fallback cover only)</option>
-                  {rules.pattern.map((code, i) => (
-                    <option key={i} value={i}>
-                      Cycle day {i + 1} · {rules.codes[code].name} on {formatDay(rules.rotationStart)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {form.position === 'trc' && (
+                <div className="col-span-2">
+                  <Label>Starts the rotation on</Label>
+                  <select className={inputClass} value={form.cycleOffset} onChange={(e) => setForm({ ...form, cycleOffset: e.target.value })}>
+                    <option value="">Not in the rotation (cover only)</option>
+                    {rules.pattern.map((code, i) => (
+                      <option key={i} value={i}>
+                        Cycle day {i + 1} · {rules.codes[code].name} on {formatDay(rules.rotationStart)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {form.position === 'driver' && (
+                <div className="col-span-2">
+                  <Label>Two-week blocks, from {formatDay(rules.driverAnchor)}</Label>
+                  <select className={inputClass} value={form.cycleOffset || '0'} onChange={(e) => setForm({ ...form, cycleOffset: e.target.value })}>
+                    <option value="0">Starts on days, then nights</option>
+                    <option value="1">Starts on nights, then days</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-400">The two drivers are opposite each other, so every working day has one on days and one on nights.</p>
+                </div>
+              )}
+              {form.position === 'pc' && (
+                <p className="col-span-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                  A Project Coordinator is rostered at their desk Monday to Friday, 08:00–17:00, and off on weekends and public holidays. They are the weekday fallback when no TRC is on call, and cover a vacant console shift after the TRC on their first on-call day.
+                </p>
+              )}
               <div>
                 <Label>On the roster from</Label>
                 <input type="date" className={inputClass} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />

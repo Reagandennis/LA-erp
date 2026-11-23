@@ -19,6 +19,7 @@ const { tx, $queryRaw, transaction } = vi.hoisted(() => {
 const { syncCrewGapNotifications } = vi.hoisted(() => ({ syncCrewGapNotifications: vi.fn() }));
 
 vi.mock('server-only', () => ({}));
+vi.mock('../lib/user-groups', async () => (await import('./support/user-groups-stub')).userGroupsStub);
 vi.mock('../lib/trip-notifications', () => ({ syncCrewGapNotifications }));
 vi.mock('../lib/prisma', () => {
   // Every driver, CPO and vehicle picked is on the Task Assignment register.

@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 
 import { airportTimeZone } from './airports';
 import { isPreviewableImage } from './attachment-types';
+import { groupPeerIds, inGroupWith } from './user-groups';
 import { crewGaps } from './crew-gaps';
 import { addDays, dateKey, parseDateKey } from './date-grid';
 import { prisma } from './prisma';
@@ -785,10 +786,27 @@ function pad4(n: number): string {
   return String(n).padStart(4, '0');
 }
 
-/** Who may see a record: admins everything, others only their own. Shared with global search. */
-export function buildAccessFilter(userId: number, isAdmin: boolean) {
+/**
+ * Who may see a trip: admins everything; others their own, and those created
+ * or owned by anyone in one of their groups (lib/user-groups.ts). Shared with
+ * global search.
+ */
+export function buildAccessFilter(userId: number, isAdmin: boolean): Prisma.TripWhereInput {
   if (isAdmin) return {};
-  return { OR: [{ createdById: userId }, { ownerId: userId }] };
+  const team = inGroupWith(userId);
+  return { OR: [{ createdById: userId }, { ownerId: userId }, { createdBy: team }, { owner: team }] };
+}
+
+/** The people whose trips this user may work on as their own: their group-mates. None for an admin, who needs none. */
+export async function tripPeers(userId: number, isAdmin: boolean): Promise<ReadonlySet<number> | undefined> {
+  return isAdmin ? undefined : groupPeerIds(userId);
+}
+
+/** Whether a trip is the user's, or a group-mate's. */
+export function isTeamTrip(record: Pick<TripRecord, 'ownerId' | 'createdById'>, userId: number, peers?: ReadonlySet<number>): boolean {
+  if (record.createdById === userId || record.ownerId === userId) return true;
+  if (!peers) return false;
+  return peers.has(record.createdById) || (record.ownerId !== null && peers.has(record.ownerId));
 }
 
 export async function listTripsForUser(params: {
@@ -923,8 +941,7 @@ export async function getTripForUser(params: {
 }): Promise<TripDetail | null> {
   const record = await tripClient.findUnique({ where: { id: params.id }, include: tripInclude });
   if (!record) return null;
-  const isParticipant =
-    params.isAdmin || record.createdById === params.userId || record.ownerId === params.userId;
+  const isParticipant = params.isAdmin || isTeamTrip(record, params.userId, await tripPeers(params.userId, params.isAdmin));
   if (!isParticipant) return null;
   return serializeDetail(record);
 }
@@ -946,7 +963,7 @@ export async function getEditableTrip(params: {
 }): Promise<{ trip: TripDetail } | { error: string; status: number }> {
   const record = await tripClient.findUnique({ where: { id: params.id }, include: tripInclude });
   if (!record) return { error: 'Trip not found', status: 404 };
-  if (!canEditTrip(record, params.userId, params.isAdmin)) {
+  if (!canEditTrip(record, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${record.status}"`, status: 400 };
   }
   return { trip: serializeDetail(record) };
@@ -957,6 +974,8 @@ export function canEditTrip(
   record: Pick<TripRecord, 'status' | 'ownerId' | 'createdById'>,
   userId: number,
   isAdmin: boolean,
+  /** The user's group-mates (tripPeers): they edit each other's trips as their own. */
+  peers?: ReadonlySet<number>,
 ): boolean {
   if (isAdmin) return true;
   if (record.status === 'Completed') {
@@ -964,7 +983,7 @@ export function canEditTrip(
     return record.ownerId === userId;
   }
   if (record.status === 'Cancelled') return false;
-  return record.createdById === userId || record.ownerId === userId;
+  return isTeamTrip(record, userId, peers);
 }
 
 /** An existing traveller of the trip's client, or the name of a new one to add to that client. */
@@ -1222,7 +1241,7 @@ export async function updateTrip(params: {
 }): Promise<TripDetail | { error: string; status?: number }> {
   const existing = await tripClient.findUnique({ where: { id: params.id }, include: tripInclude });
   if (!existing) return { error: 'Trip not found', status: 404 };
-  if (!canEditTrip(existing, params.userId, params.isAdmin)) {
+  if (!canEditTrip(existing, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
   // A staged resource no event used is verified (billed or not) before the
@@ -1284,8 +1303,10 @@ export async function deleteTrip(params: {
 }): Promise<true | { error: string; status?: number }> {
   const existing = await tripClient.findUnique({ where: { id: params.id }, include: tripInclude });
   if (!existing) return { error: 'Trip not found', status: 404 };
-  if (!params.isAdmin && existing.createdById !== params.userId) {
-    return { error: 'Only the creator can delete this trip', status: 403 };
+  // The creator, or anyone in a group with them (peers include the user).
+  const peers = await tripPeers(params.userId, params.isAdmin);
+  if (!params.isAdmin && !peers?.has(existing.createdById)) {
+    return { error: 'Only the creator or someone in their group can delete this trip', status: 403 };
   }
   if (existing.status !== 'Draft' && existing.status !== 'Cancelled') {
     return { error: `Cannot delete a trip in status "${existing.status}"`, status: 400 };
@@ -1302,7 +1323,7 @@ export async function addTripItems(params: {
 }): Promise<TripDetail | { error: string; status?: number }> {
   const existing = await tripClient.findUnique({ where: { id: params.tripId }, include: tripInclude });
   if (!existing) return { error: 'Trip not found', status: 404 };
-  if (!canEditTrip(existing, params.userId, params.isAdmin)) {
+  if (!canEditTrip(existing, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
 
@@ -1439,7 +1460,7 @@ export async function updateTripItem(params: {
 }): Promise<TripDetail | { error: string; status?: number }> {
   const existing = await tripClient.findUnique({ where: { id: params.tripId }, include: tripInclude });
   if (!existing) return { error: 'Trip not found', status: 404 };
-  if (!canEditTrip(existing, params.userId, params.isAdmin)) {
+  if (!canEditTrip(existing, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
   const item = existing.items.find((i) => i.id === params.itemId);
@@ -1574,7 +1595,7 @@ export async function deleteTripItem(params: {
 }): Promise<TripDetail | { error: string; status?: number }> {
   const existing = await tripClient.findUnique({ where: { id: params.tripId }, include: tripInclude });
   if (!existing) return { error: 'Trip not found', status: 404 };
-  if (!canEditTrip(existing, params.userId, params.isAdmin)) {
+  if (!canEditTrip(existing, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
   const item = existing.items.find((i) => i.id === params.itemId);
@@ -1791,7 +1812,7 @@ async function loadTripForDayEdit(
 ): Promise<DayGuard> {
   const trip = await tripClient.findUnique({ where: { id: tripId }, include: tripInclude });
   if (!trip) return { error: 'Trip not found', status: 404 };
-  if (!canEditTrip(trip, userId, isAdmin)) {
+  if (!canEditTrip(trip, userId, isAdmin, await tripPeers(userId, isAdmin))) {
     return { error: `Cannot edit a trip in status "${trip.status}"`, status: 400 };
   }
   const days = [...(trip.days ?? [])].sort((a, b) => a.dayNumber - b.dayNumber);
@@ -2081,7 +2102,7 @@ export async function reorderTripItems(params: {
     include: tripInclude,
   });
   if (!existing) return { error: 'Trip not found', status: 404 };
-  if (!canEditTrip(existing, params.userId, params.isAdmin)) {
+  if (!canEditTrip(existing, params.userId, params.isAdmin, await tripPeers(params.userId, params.isAdmin))) {
     return { error: `Cannot edit a trip in status "${existing.status}"`, status: 400 };
   }
 

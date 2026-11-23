@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { isAppWacliAccountName } from './messaging-accounts';
+import type { ReactionEmoji } from './messaging-reactions';
 import { runWacli, wacliScratch } from './wacli-runtime';
 
 /**
@@ -256,10 +257,19 @@ interface SentData {
  * person sends it again — whereas wacli's own timeout says whether it was sent.
  */
 async function send(account: string, args: string[], timeoutMs: number): Promise<SendResult> {
+  return delegated(account, ['send', ...args], timeoutMs);
+}
+
+/**
+ * Run any command the running `sync --follow` accepts over its delegate socket
+ * (`send …`, `messages edit`, `contacts check`): the same fast path and lock
+ * handling as `send`, for commands that live under other subcommands.
+ */
+async function delegated(account: string, args: string[], timeoutMs: number): Promise<SendResult> {
   const { syncStatus } = await import('./whatsapp-sync');
   const fast = syncStatus(account).running ? ['--post-send-wait', '0'] : [];
   const deadline = `${Math.max(5, Math.floor(timeoutMs / 1000) - 10)}s`;
-  const fullArgs = ['--timeout', deadline, 'send', ...args, ...fast];
+  const fullArgs = ['--timeout', deadline, ...args, ...fast];
 
   for (let attempt = 0; ; attempt++) {
     try {
@@ -339,6 +349,141 @@ export async function setChatState(
 /** Send a text message to a chat or group by JID. */
 export function sendText(account: string, jid: string, message: string): Promise<SendResult> {
   return send(account, ['text', '--to', jid, '--message', message], 60_000);
+}
+
+// ---- Reactions, edits, deletes ----
+
+/**
+ * React to a message, or take our reaction off it with an empty emoji.
+ *
+ * In a group WhatsApp needs to know who sent the message being reacted to
+ * (`--sender`): the author's JID for someone else's message, our own for
+ * ours. Direct chats need none. Delegated to the running sync, like a send.
+ */
+export function sendReaction(
+  account: string,
+  jid: string,
+  messageId: string,
+  emoji: ReactionEmoji | '',
+  senderJid?: string | null,
+): Promise<SendResult> {
+  const args = ['react', '--to', jid, '--id', messageId, '--reaction', emoji];
+  if (senderJid) args.push('--sender', senderJid);
+  return send(account, args, 30_000);
+}
+
+/**
+ * Change the text of one of our own recent messages. WhatsApp allows this for
+ * about fifteen minutes after sending, and only for text; wacli enforces both
+ * and reports why when it refuses.
+ */
+export function editMessage(account: string, jid: string, messageId: string, text: string): Promise<SendResult> {
+  return delegated(account, ['messages', 'edit', '--chat', jid, '--id', messageId, '--message', text], 40_000);
+}
+
+/**
+ * Delete one of our own messages for everyone.
+ *
+ * Unlike sends and edits, wacli has no delegate path for a revoke: the
+ * command opens the store itself, which the account's `sync --follow` holds
+ * locked. So the sync is paused for the few seconds this takes and started
+ * again straight after; the next catch-up pass picks up anything that arrived
+ * in between. `--lock-wait` covers the moment the old process's lock clears.
+ */
+export async function revokeMessage(
+  account: string,
+  jid: string,
+  messageId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { withSyncPaused } = await import('./whatsapp-sync');
+  return withSyncPaused(account, async () => {
+    try {
+      await run<unknown>(
+        ['--lock-wait', '15s', '--timeout', '45s', 'messages', 'revoke', '--chat', jid, '--id', messageId],
+        60_000,
+        account,
+      );
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'wacli messages revoke failed' };
+    }
+  });
+}
+
+/**
+ * Who sent a message, from wacli's own store. The mirror only started keeping
+ * sender ids with reactions; older messages are looked up here when a group
+ * reaction needs one. Read-only, so it never contends for the store lock.
+ */
+export async function getMessageSender(account: string, jid: string, messageId: string): Promise<string | null> {
+  try {
+    const data = await run<Record<string, unknown> | null>(
+      ['--read-only', 'messages', 'show', '--chat', jid, '--id', messageId],
+      15_000,
+      account,
+    );
+    const nested = (data?.message ?? data?.Message) as Record<string, unknown> | undefined;
+    const sender = data?.SenderJID ?? nested?.SenderJID;
+    return typeof sender === 'string' && sender ? sender : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The JID of the WhatsApp account itself (`254712345678@s.whatsapp.net`), or null when not linked. */
+export async function linkedJid(account: string): Promise<string | null> {
+  const status = await getStatus(account);
+  // wacli may report the device-qualified form (`…:12@s.whatsapp.net`).
+  return status.linkedJid ? status.linkedJid.replace(/:\d+@/, '@') : null;
+}
+
+// ---- Contacts ----
+
+export interface NumberCheck {
+  /** The number as asked, and as WhatsApp normalised it. */
+  query: string;
+  phone: string;
+  /** Present for a registered number. */
+  jid: string | null;
+  registered: boolean;
+  /** False when WhatsApp gave no answer for this number; `registered` then means nothing. */
+  responded: boolean;
+}
+
+interface RawNumberCheck {
+  query?: string;
+  phone?: string;
+  jid?: string;
+  registered?: boolean;
+  responded?: boolean;
+}
+
+/**
+ * Ask WhatsApp live which of these numbers have an account. Needs a connected
+ * session, which wacli borrows from the running sync. Numbers are passed as
+ * arguments, never through a shell.
+ */
+export async function checkNumbers(
+  account: string,
+  numbers: string[],
+): Promise<{ ok: true; results: NumberCheck[] } | { ok: false; error: string }> {
+  const cleaned = numbers.map((n) => n.replace(/[^\d+]/g, '')).filter((n) => /^\+?\d{7,15}$/.test(n));
+  if (cleaned.length === 0) return { ok: false, error: 'No valid phone numbers to check.' };
+  try {
+    const rows = await run<RawNumberCheck[] | null>(['--timeout', '20s', 'contacts', 'check', ...cleaned], 30_000, account);
+    return {
+      ok: true,
+      results: (rows ?? []).map((r) => ({
+        query: r.query ?? '',
+        phone: r.phone ?? '',
+        jid: r.jid || null,
+        registered: Boolean(r.registered),
+        responded: Boolean(r.responded),
+      })),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'wacli contacts check failed' };
+  }
 }
 
 /** "254712345678@s.whatsapp.net" -> "254712345678"; group JIDs are returned as-is. */

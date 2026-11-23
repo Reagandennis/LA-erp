@@ -57,10 +57,29 @@ export class DriveError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Google's machine-readable reason (e.g. `insufficientPermissions`, `accessNotConfigured`), when it sent one. */
+    readonly reason: string | null = null,
   ) {
     super(message);
     this.name = 'DriveError';
   }
+}
+
+/**
+ * Whether a rejected request means the *token* is unusable — expired, revoked,
+ * or granted without the Drive scope — as opposed to a problem with the project
+ * (API switched off) or a specific file. Only the former is cured by reconnecting.
+ */
+export function isTokenRejection(error: DriveError): boolean {
+  if (error.status === 401) return true;
+  if (error.status !== 403) return false;
+  const reason = (error.reason ?? '').toLowerCase();
+  return (
+    reason === 'insufficientpermissions' ||
+    reason === 'access_token_scope_insufficient' ||
+    reason === 'autherror' ||
+    /insufficient (authentication )?scope/i.test(error.message)
+  );
 }
 
 /**
@@ -104,11 +123,22 @@ async function driveFetch(
   if (!response.ok) {
     // Drive reports the useful part in a JSON error envelope; fall back to the
     // status text when it doesn't.
-    const detail = await response
-      .json()
-      .then((body: { error?: { message?: string } }) => body?.error?.message)
-      .catch(() => null);
-    throw new DriveError(detail || response.statusText || 'Google Drive request failed', response.status);
+    type ErrorEnvelope = {
+      error?: {
+        message?: string;
+        status?: string;
+        errors?: Array<{ reason?: string }>;
+        details?: Array<{ reason?: string }>;
+      };
+    };
+    const envelope = await response.json().then((body: ErrorEnvelope) => body?.error).catch(() => null);
+    const reason =
+      envelope?.errors?.[0]?.reason ?? envelope?.details?.find((d) => d.reason)?.reason ?? envelope?.status ?? null;
+    throw new DriveError(
+      envelope?.message || response.statusText || 'Google Drive request failed',
+      response.status,
+      reason,
+    );
   }
   return response;
 }

@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   // wacli doesn't echo our own sends to the webhook; mirror it now so the
   // thread shows it on the reload that follows this response.
   if (result.messageId) {
-    await recordOutgoing(ctx.account.id, ctx.userId, { chatId: id, messageId: result.messageId, text: message });
+    await recordOutgoing(ctx.account.id, ctx.account.userId, { chatId: id, messageId: result.messageId, text: message });
   }
   return NextResponse.json({ ok: true });
 }

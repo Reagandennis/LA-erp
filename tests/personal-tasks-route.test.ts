@@ -7,6 +7,8 @@ const { requireRequestAuth, personalTodoFindMany, personalTodoCreate } = vi.hois
   personalTodoCreate: vi.fn(),
 }));
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('../lib/request-auth', () => ({
   requireRequestAuth,
   // Module access has its own tests (request-auth-module); these cover the route itself.

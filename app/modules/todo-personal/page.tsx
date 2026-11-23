@@ -9,6 +9,7 @@ import { useLiveRefresh } from '@/app/ui/use-live-refresh';
 import { MODULE_SOURCES } from '@/lib/live-sources';
 import { dateKeyFromIso, dayFromIso, isoFromDateKey } from '@/lib/date-grid';
 import KanbanBoard from './kanban-board';
+import TaskGroupShare from './group-share';
 
 
 const DEFAULT_KANBAN_COLUMNS = ['Backlog', 'In progress', 'In review'];
@@ -1652,6 +1653,7 @@ export default function TodoPersonalPage({
                     );
                   })}
                 </div>
+                {editedTask.dbId ? <TaskGroupShare taskId={editedTask.dbId} /> : null}
               </div>
 
               {/* Timeline Date */}

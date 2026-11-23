@@ -43,6 +43,13 @@ interface SyncProcess {
 declare global {
   var whatsappSyncGlobal: Map<string, SyncProcess> | undefined;
   var whatsappSyncTimersGlobal: Map<string, NodeJS.Timeout> | undefined;
+  /** Accounts whose sync is deliberately paused (see `withSyncPaused`), by account → the pause in progress. */
+  var whatsappSyncPausesGlobal: Map<string, Promise<unknown>> | undefined;
+}
+
+function pauses(): Map<string, Promise<unknown>> {
+  globalThis.whatsappSyncPausesGlobal ??= new Map();
+  return globalThis.whatsappSyncPausesGlobal;
 }
 
 function processes(): Map<string, SyncProcess> {
@@ -90,6 +97,8 @@ export function startSync(account: string, accountId?: number, restarts = 0): vo
   if (!account) return;
   const existing = processes().get(account);
   if (existing && !existing.child.killed) return;
+  // A paused account is restarted by the pause itself once its work is done.
+  if (pauses().has(account)) return;
 
   // `--refresh-contacts` imports saved contact names from the session store
   // at startup (a local read, no network), so chats are named rather than
@@ -257,6 +266,72 @@ export function stopSync(account: string): void {
   proc.stopping = true;
   terminateWacli(proc.child, proc.args);
   processes().delete(account);
+}
+
+/** How long to wait for a stopped sync to actually exit before going ahead anyway. */
+const PAUSE_EXIT_TIMEOUT_MS = 8_000;
+/** The lock file clears a moment after the process does. */
+const PAUSE_LOCK_GRACE_MS = 1_000;
+
+/**
+ * Stop one account's sync, run `task`, then start the sync again.
+ *
+ * For the few wacli commands that have no delegate path and must open the
+ * store themselves (a revoke). Pauses for the same account queue up behind
+ * one another, so the sync is only ever stopped once at a time; while paused,
+ * nothing else (a reconcile, a link) can start it early. The task runs even
+ * if the sync wasn't running, in which case there is nothing to pause.
+ */
+export async function withSyncPaused<T>(account: string, task: () => Promise<T>): Promise<T> {
+  const previous = pauses().get(account) ?? Promise.resolve();
+  const run: Promise<T> = previous
+    .catch(() => {})
+    .then(async () => {
+      const proc = processes().get(account);
+      if (proc) {
+        // Remember how to start it again; a pause queued behind this one
+        // finds no process and relies on this.
+        pausedAccountIds().set(account, proc.accountId);
+        const exited = new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, PAUSE_EXIT_TIMEOUT_MS);
+          timer.unref?.();
+          proc.child.once('close', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+        stopSync(account);
+        await exited;
+        await new Promise((resolve) => setTimeout(resolve, PAUSE_LOCK_GRACE_MS));
+      }
+      try {
+        return await task();
+      } finally {
+        // The last pause in the queue starts the sync again; an earlier one
+        // leaves it stopped for the next. The entry must be gone first, or
+        // startSync treats the account as still paused.
+        if (pauses().get(account) === run) {
+          pauses().delete(account);
+          if (pausedAccountIds().has(account)) {
+            const accountId = pausedAccountIds().get(account);
+            pausedAccountIds().delete(account);
+            startSync(account, accountId);
+          }
+        }
+      }
+    });
+  pauses().set(account, run);
+  return run;
+}
+
+declare global {
+  /** account → MessagingAccount id of a sync stopped by `withSyncPaused`, until it is started again. */
+  var whatsappSyncPausedIdsGlobal: Map<string, number | undefined> | undefined;
+}
+
+function pausedAccountIds(): Map<string, number | undefined> {
+  globalThis.whatsappSyncPausedIdsGlobal ??= new Map();
+  return globalThis.whatsappSyncPausedIdsGlobal;
 }
 
 /**

@@ -63,14 +63,15 @@ export default function TripLogPanel({
   tripId,
   description,
   notes,
-  currentUserId,
+  teamIds,
   isAdmin,
   onCountChange,
 }: {
   tripId: number;
   description: string | null;
   notes: string | null;
-  currentUserId: number;
+  /** The user and their group-mates: they may remove each other's entries. */
+  teamIds: number[];
   isAdmin: boolean;
   onCountChange: (count: number) => void;
 }) {
@@ -282,7 +283,7 @@ export default function TripLogPanel({
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">{group.label}</p>
             <ol className="overflow-hidden rounded-xl border border-gray-100 bg-white">
               {group.entries.map((entry) => {
-                const canRemove = isAdmin || entry.createdBy?.id === currentUserId;
+                const canRemove = isAdmin || (entry.createdBy != null && teamIds.includes(entry.createdBy.id));
                 return (
                   <li
                     key={entry.id}

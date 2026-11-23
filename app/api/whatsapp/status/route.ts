@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { listAccounts, phoneFromJid, setAccountLabel } from '@/lib/messaging-accounts';
+import { listUsableAccounts, phoneFromJid, setAccountLabel } from '@/lib/messaging-accounts';
 import { counts, unreadChatCounts } from '@/lib/messaging-repo';
 import { resolveMessagingRequest } from '@/lib/messaging-routes';
 import { getStatus } from '@/lib/wacli';
@@ -17,9 +17,10 @@ export async function GET(request: NextRequest) {
   const { ctx, response } = await resolveMessagingRequest(request, 'whatsapp');
   if (response || !ctx) return response;
 
-  const linked = await listAccounts(ctx.userId, 'whatsapp');
+  // Their own numbers, then any shared with one of their groups.
+  const linked = await listUsableAccounts(ctx.userId, 'whatsapp');
   const unread = await unreadChatCounts(linked.map((a) => a.id));
-  const accounts = linked.map((a) => ({ id: a.id, label: a.label, unread: unread.get(a.id) ?? 0 }));
+  const accounts = linked.map((a) => ({ id: a.id, label: a.label, unread: unread.get(a.id) ?? 0, shared: a.shared, ownerName: a.ownerName }));
 
   // Not linked yet: report that cleanly rather than probing a store that
   // doesn't exist, so the UI can show the QR panel.
@@ -51,6 +52,9 @@ export async function GET(request: NextRequest) {
     ...status,
     counts: { ...status.counts, chats: mirrored.chats, messages: mirrored.messages },
     accountId: ctx.account.id,
+    /** The open number belongs to someone else and is shared with the caller's group. */
+    shared: ctx.account.shared,
+    ownerName: ctx.account.ownerName,
     accounts,
   });
 }

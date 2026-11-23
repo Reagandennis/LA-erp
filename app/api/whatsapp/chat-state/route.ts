@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 502 });
   }
 
-  const chat = await mirrorChatState(ctx.account.id, id, patchFor(action, duration), ctx.userId);
+  const chat = await mirrorChatState(ctx.account.id, id, patchFor(action, duration), ctx.account.userId);
   return NextResponse.json({ ok: true, chat });
 }
 

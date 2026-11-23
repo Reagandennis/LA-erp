@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 
 import { CODE_STYLE, Card, MonthStatusPill, Pill, formatDay, formatHours, formatMonth, ghostButton } from '@/app/modules/_components/shift-ui';
 import { useLiveRefresh } from '@/app/ui/use-live-refresh';
-import { TRIGGER_LABEL } from '@/lib/shift-rules';
+import { AWAY_CODES, POSITION_LABEL, SOURCE_LABEL, TRIGGER_LABEL } from '@/lib/shift-rules';
 import { type Dashboard, type DashboardLine, SHIFT_SOURCES } from '@/lib/shift-types';
 
 import { getJson, message } from './api';
@@ -83,7 +83,11 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
   const max = rules.maxHours7d;
   const covered = reliability.slots - reliability.unconfirmed;
   const share = (n: number) => (reliability.slots ? `${Math.round((n / reliability.slots) * 100)}%` : '—');
-  const unused = lines.reduce((sum, l) => sum + Math.max(0, l.capacityAvailable - l.capacityUsed), 0);
+  // Capacity inside the 48-hour target is the TRCs': the desk and the drivers have fixed weeks.
+  const trc = lines.filter((l) => l.position === 'trc');
+  const drivers = lines.filter((l) => l.position === 'driver');
+  const unused = trc.reduce((sum, l) => sum + Math.max(0, l.capacityAvailable - l.capacityUsed), 0);
+  const awayPeople = lines.filter((l) => AWAY_CODES.some((code) => l.awayMonth[code] > 0));
   const unconfirmed = lines.reduce((sum, l) => sum + l.payroll.unconfirmed, 0);
 
   if (lines.length === 0) {
@@ -93,7 +97,7 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
   return (
     <div className="space-y-4">
       {/* Now */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {now.consoles.map((shift) => {
           const short = shift.people.length === 0;
           return (
@@ -110,7 +114,32 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
         <Card className={`border p-4 ${CODE_STYLE.OC.soft}`}>
           <p className="text-[11px] font-semibold uppercase tracking-widest opacity-70">On call today</p>
           <p className="mt-1 truncate text-lg font-semibold">{now.onCall.length ? now.onCall.join(', ') : 'Nobody'}</p>
-          <p className="text-xs opacity-70">held in reserve</p>
+          <p className="text-xs opacity-70">
+            {now.onCall.length ? 'held in reserve' : now.fallback.length ? `fallback: ${now.fallback.join(', ')}` : 'and no fallback'}
+          </p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Project Coordinators at their desk</p>
+          <p className="mt-1 truncate text-lg font-semibold text-gray-900">{now.fallback.length ? now.fallback.join(', ') : 'Nobody today'}</p>
+          <p className="text-xs text-gray-400">the weekday fallback, and second in the cover order</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Drivers today</p>
+          {now.drivers.length === 0 ? (
+            <p className="mt-1 text-lg font-semibold text-gray-900">None rostered</p>
+          ) : (
+            <ul className="mt-1 space-y-0.5">
+              {now.drivers.map((driver) => (
+                <li key={driver.name} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate font-semibold text-gray-900">{driver.name}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                    {driver.code} · {driver.start}–{driver.end}
+                    {driver.active && <span className="ml-1.5 rounded bg-[#03458f] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">On now</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
         <Card className="p-4">
           <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Next handover</p>
@@ -120,7 +149,7 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Section title="Coverage, next 14 days" hint="Any date with a gap, a double, or nobody on call.">
+        <Section title="Coverage, next 14 days" hint="Console gaps and doubles, dates with no TRC on call (and whether a Project Coordinator is the fallback), and driver gaps.">
           {coverage.issues.length === 0 ? (
             <p className="text-sm text-emerald-700">Every generated day is covered.</p>
           ) : (
@@ -164,7 +193,7 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
         </Section>
       </div>
 
-      <Section title="Hours and rest" hint={`Rolling seven days per person. Amber from ${rules.targetHours7d} hours, red above ${max}. The limit is a line, never capacity.`}>
+      <Section title="Hours and rest" hint={`Rolling seven days per person. Amber from ${rules.targetHours7d} hours for a TRC, red above ${max} or on seven work days running, for anyone. The limit is a line, never capacity.`}>
         <div className="space-y-2.5">
           {lines.map((line) => {
             const scale = max * 1.25;
@@ -176,15 +205,15 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
                 </div>
                 <div className="relative h-5 rounded-full bg-gray-100">
                   <div
-                    className={`h-full rounded-full ${line.last7 > max ? 'bg-rose-500' : line.last7 >= rules.targetHours7d ? 'bg-amber-400' : 'bg-[#03458f]'}`}
+                    className={`h-full rounded-full ${line.tone === 'danger' ? 'bg-rose-500' : line.tone === 'warn' ? 'bg-amber-400' : 'bg-[#03458f]'}`}
                     style={{ width: `${Math.min(100, (line.last7 / scale) * 100)}%` }}
                   />
                   <span className="absolute inset-y-0 w-px bg-amber-500" style={{ left: `${(rules.targetHours7d / scale) * 100}%` }} title={`Target ${rules.targetHours7d} h`} />
                   <span className="absolute inset-y-0 w-0.5 bg-rose-500" style={{ left: `${(max / scale) * 100}%` }} title={`Limit ${max} h`} />
                 </div>
                 <div className="flex items-center gap-2 text-xs tabular-nums text-gray-600">
-                  <span className="w-28 text-right">{formatHours(line.last7)} h · next peak {formatHours(line.next7)}</span>
-                  <Pill tone={line.tone}>{line.tone === 'danger' ? 'over limit' : line.tone === 'warn' ? 'at target' : 'ok'}</Pill>
+                  <span className="w-44 text-right">{formatHours(line.last7)} h · {line.workDays7} work day{line.workDays7 === 1 ? '' : 's'} · next peak {formatHours(line.next7)}</span>
+                  <Pill tone={line.tone}>{line.tone === 'danger' ? (line.workDays7 >= 7 ? '7 days running' : 'over limit') : line.tone === 'warn' ? 'at target' : 'ok'}</Pill>
                 </div>
               </div>
             );
@@ -199,18 +228,19 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Section
-          title="Call-ins this cycle"
-          hint={`${formatDay(data.cycle.from)} – ${formatDay(data.cycle.to)}. Above one per person per cycle for two months is a hiring signal.`}
-          aside={<Pill tone={data.callInRate !== null && data.callInRate > 1 ? 'danger' : 'info'}>{data.callInRate ?? 0} per person</Pill>}
+          title="Call-ins and covers this cycle"
+          hint={`${formatDay(data.cycle.from)} – ${formatDay(data.cycle.to)}. Each shows which step of the cover order was used. Above one call-in per TRC per cycle for two months is a hiring signal.`}
+          aside={<Pill tone={data.callInRate !== null && data.callInRate > 1 ? 'danger' : 'info'}>{data.callInRate ?? 0} per TRC</Pill>}
         >
           {data.callIns.length === 0 ? (
-            <p className="text-sm text-gray-400">No call-ins in this cycle.</p>
+            <p className="text-sm text-gray-400">No call-ins or covers in this cycle.</p>
           ) : (
             <ul className="space-y-2">
               {data.callIns.map((c) => (
                 <li key={`${c.lineCode}-${c.date}`} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                   <span className="text-gray-800">
                     <span className="font-semibold">{c.lineCode}</span> · {formatDay(c.date)} · {rules.codes[c.code].name} · {TRIGGER_LABEL[c.trigger]}
+                    {c.source && <span className="text-gray-400"> · {SOURCE_LABEL[c.source]}</span>}
                   </span>
                   {c.responseMinutes === null ? (
                     <Pill tone="muted">arrival not recorded</Pill>
@@ -221,14 +251,19 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
               ))}
             </ul>
           )}
-          {lines.some((l) => l.callInsThisCycle >= 2) && (
+          {trc.some((l) => l.callInsThisCycle >= 2) && (
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Second call-in this cycle for {lines.filter((l) => l.callInsThisCycle >= 2).map((l) => l.code).join(', ')}.
+              Second call-in this cycle for {trc.filter((l) => l.callInsThisCycle >= 2).map((l) => l.code).join(', ')}.
+            </p>
+          )}
+          {data.fallbackLoad.covers > 2 && (
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Project Coordinators have covered the console {data.fallbackLoad.covers} times this month, costing {data.fallbackLoad.deskDaysLost} desk days.
             </p>
           )}
         </Section>
 
-        <Section title={`Fairness, ${formatDay(data.quarter.from, { month: 'short' })} – ${formatDay(data.quarter.to, { month: 'short', year: 'numeric' })}`} hint="Nights, weekends and public holidays on the roster this quarter. A spread above two shifts is flagged.">
+        <Section title={`Fairness, ${formatDay(data.quarter.from, { month: 'short' })} – ${formatDay(data.quarter.to, { month: 'short', year: 'numeric' })}`} hint="TRCs only. Nights, weekends and public holidays on the roster this quarter, and call-ins this cycle. A spread above two shifts is flagged.">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -236,20 +271,22 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
                 <th className={th}>Nights</th>
                 <th className={th}>Weekend shifts</th>
                 <th className={th}>Holiday shifts</th>
+                <th className={th}>Call-ins</th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((line) => (
+              {trc.map((line) => (
                 <tr key={line.lineId} className="border-b border-gray-50 last:border-0">
                   <Person line={line} />
                   <td className={td}>{line.nights}</td>
                   <td className={td}>{line.weekendShifts}</td>
                   <td className={td}>{line.holidayShifts}</td>
+                  <td className={td}>{line.callInsThisCycle}</td>
                 </tr>
               ))}
               <tr>
                 <td className="px-3 pt-3 text-xs font-medium text-gray-400">Spread</td>
-                {[data.fairness.nights, data.fairness.weekends, data.fairness.holidays].map((spread, i) => (
+                {[data.fairness.nights, data.fairness.weekends, data.fairness.holidays, data.fairness.callIns].map((spread, i) => (
                   <td key={i} className="px-3 pt-3">
                     <Pill tone={spread > 2 ? 'warn' : 'ok'}>{spread}</Pill>
                   </td>
@@ -257,19 +294,25 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
               </tr>
             </tbody>
           </table>
+          {drivers.length > 1 && (
+            <p className="mt-3 text-xs text-gray-500">
+              Drivers’ nights this quarter: {drivers.map((d) => `${d.code} ${d.nights}`).join(' · ')}
+              {data.fairness.driverNights > 5 && <span className="ml-2"><Pill tone="warn">uneven</Pill></span>}
+            </p>
+          )}
         </Section>
       </div>
 
       <Section
         title={`Planned and worked, ${formatMonth(data.month)}`}
-        hint="Worked means a shift someone confirmed, or a call-in. Premium hours are flags for payroll; nothing here blocks."
+        hint="By position. Worked means a shift someone confirmed, a call-in, or a Project Coordinator’s cover. A driver’s hours are paid hours, after the unpaid break. Premium hours are flags for payroll; nothing here blocks."
         aside={unconfirmed > 0 ? <Pill tone="warn">{unconfirmed} past shift{unconfirmed === 1 ? '' : 's'} not confirmed</Pill> : undefined}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Person', 'Planned h', 'Worked h', 'Variance', 'Sick days', 'No-shows', 'Call-in h', 'Overtime 1.5x', 'Holiday 2x', 'Rest day 2x', 'Leave balance'].map((h) => (
+                {['Person', 'Position', 'Planned h', 'Worked h', 'Variance', 'Sick days', 'No-shows', 'Call-in h', 'Cover h', 'Overtime 1.5x', 'Holiday 2x', 'Rest day worked', 'Unpaid days', 'Leave balance'].map((h) => (
                   <th key={h} className={th}>{h}</th>
                 ))}
               </tr>
@@ -281,15 +324,18 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
                 return (
                   <tr key={line.lineId} className="border-b border-gray-50 last:border-0">
                     <Person line={line} />
+                    <td className={`${td} whitespace-nowrap`}>{POSITION_LABEL[line.position]}</td>
                     <td className={td}>{formatHours(p.plannedHours)}</td>
                     <td className={td}>{formatHours(p.workedHours)}</td>
                     <td className="px-3 py-2">{line.variance === null ? <span className="text-gray-300">—</span> : <Pill tone={off ? 'warn' : 'ok'}>{percent(line.variance)}</Pill>}</td>
                     <td className={td}>{p.sickDays}{line.sickEpisodes >= 3 && <span className="ml-1.5 text-xs text-rose-600">{line.sickEpisodes} episodes this quarter</span>}</td>
                     <td className={td}>{p.noShows}</td>
                     <td className={td}>{formatHours(p.callInHours)}</td>
+                    <td className={td}>{formatHours(p.coverHours)}</td>
                     <td className={td}>{formatHours(p.overtimeHours)}</td>
                     <td className={td}>{formatHours(p.holidayHours)}</td>
                     <td className={td}>{formatHours(p.restDayHours)}</td>
+                    <td className={td}>{p.unpaidDays}</td>
                     <td className="px-3 py-2">
                       <span className="mr-2 tabular-nums text-gray-600">{formatHours(line.leave.balance)} d</span>
                       {line.leave.balance > rules.leaveCapDays && <Pill tone="warn">above cap</Pill>}
@@ -306,13 +352,69 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
         <Tile
           label="Utilization, month to date"
           value={percent(data.utilization)}
-          hint={`Worked hours as a share of the ${rules.targetHours7d}-hour target.`}
+          hint={`TRC hours worked as a share of the ${rules.targetHours7d}-hour target. The pattern alone is about 70%.`}
           tone={data.utilization !== null && (data.utilization < 0.6 || data.utilization > 0.9) ? 'warn' : 'ok'}
         />
-        <Tile label="Unused capacity this month" value={`${formatHours(Math.round(unused))} h`} hint="Hours people could still work inside the target, less call-in hours used." />
+        <Tile label="Unused capacity this month" value={`${formatHours(Math.round(unused))} h`} hint="Hours TRCs could still work inside the target, less call-in hours used." />
         <Tile label="Gaps this month" value={String(reliability.gaps)} hint="Console shifts nobody covered." tone={reliability.gaps > 0 ? 'danger' : 'ok'} />
         <Tile label="Compliance" value={String(data.compliance.length)} hint="Blocking rules approved through recently." tone={data.compliance.length > 0 ? 'warn' : 'ok'} />
+        <Tile
+          label="Driver coverage, month to date"
+          value={data.driverCoverage.total ? `${data.driverCoverage.met} of ${data.driverCoverage.total}` : '—'}
+          hint="Working days with one driver on days and one on nights."
+          tone={data.driverCoverage.met < data.driverCoverage.total ? 'danger' : 'ok'}
+        />
+        <Tile
+          label="Fallback load this month"
+          value={`${data.fallbackLoad.fallbackDays} day${data.fallbackLoad.fallbackDays === 1 ? '' : 's'}`}
+          hint={`Weekdays a Project Coordinator is the fallback because no TRC is on call. ${data.fallbackLoad.covers} cover${data.fallbackLoad.covers === 1 ? '' : 's'} worked, ${data.fallbackLoad.deskDaysLost} desk day${data.fallbackLoad.deskDaysLost === 1 ? '' : 's'} lost.`}
+          tone={data.fallbackLoad.covers > 2 ? 'warn' : 'ok'}
+        />
+        <Tile
+          label="Hiring signal"
+          value={data.hiring.signal ? 'Yes' : 'No'}
+          hint={`Call-ins per TRC per cycle: ${data.hiring.months.map((m) => `${formatMonth(m.month).split(' ')[0]} ${m.rate ?? '—'}`).join(' · ')}. Above 1.0 two months running.`}
+          tone={data.hiring.signal ? 'danger' : 'ok'}
+        />
       </div>
+
+      <Section title={`Days away, ${formatMonth(data.month)}`} hint="Calendar days on the roster under each code, with the year’s sick days and the compensatory-time balance. HR applies the entitlement rule.">
+        {awayPeople.length === 0 && lines.every((l) => l.leave.cto.balance === 0) ? (
+          <p className="text-sm text-gray-400">Nobody is away this month.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  {['Person', ...AWAY_CODES, 'Sick, 12 months', 'CTO balance'].map((h) => (
+                    <th key={h} className={th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lines
+                  .filter((l) => awayPeople.includes(l) || l.leave.cto.balance !== 0)
+                  .map((line) => (
+                    <tr key={line.lineId} className="border-b border-gray-50 last:border-0">
+                      <Person line={line} />
+                      {AWAY_CODES.map((code) => (
+                        <td key={code} className={td}>{line.awayMonth[code] || <span className="text-gray-300">0</span>}</td>
+                      ))}
+                      <td className="px-3 py-2">
+                        <span className="mr-2 tabular-nums text-gray-600">{line.leave.sick12m}</span>
+                        {line.leave.sick12m >= rules.sickFullDays + rules.sickHalfDays ? <Pill tone="danger">allowance used</Pill> : line.leave.sick12m >= rules.sickFullDays ? <Pill tone="warn">full pay used</Pill> : null}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="mr-2 tabular-nums text-gray-600">{formatHours(line.leave.cto.balance)}</span>
+                        {line.leave.cto.expiringSoon > 0 && line.leave.cto.nextExpiry && <Pill tone="warn">lapses {formatDay(line.leave.cto.nextExpiry)}</Pill>}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Section title="Coverage reliability" hint={`How ${formatMonth(data.month)} has actually been delivered so far, across ${reliability.slots} console shifts.`}>
@@ -323,12 +425,16 @@ export function DashboardView({ data, onOpenLeave }: { data: Dashboard; onOpenLe
               <div className="flex h-4 overflow-hidden rounded-full bg-gray-100">
                 <div className="bg-emerald-500" style={{ width: share(reliability.asPlanned) }} />
                 <div className="bg-[#03458f]" style={{ width: share(reliability.callIn) }} />
+                <div className="bg-violet-500" style={{ width: share(reliability.cover) }} />
+                <div className="bg-amber-500" style={{ width: share(reliability.overtime) }} />
                 <div className="bg-rose-500" style={{ width: share(reliability.gaps) }} />
               </div>
-              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
                 {[
                   ['Worked as planned', reliability.asPlanned, 'bg-emerald-500'],
-                  ['Covered by call-in', reliability.callIn, 'bg-[#03458f]'],
+                  ['By call-in', reliability.callIn, 'bg-[#03458f]'],
+                  ['By Project Coordinator', reliability.cover, 'bg-violet-500'],
+                  ['By overtime', reliability.overtime, 'bg-amber-500'],
                   ['Gaps', reliability.gaps, 'bg-rose-500'],
                   ['Not confirmed', reliability.unconfirmed, 'bg-gray-300'],
                 ].map(([label, count, dot]) => (

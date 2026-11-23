@@ -18,6 +18,7 @@ import {
   SHIFT_CODES,
   type CellLookup,
   type ExtraCode,
+  type Position,
   type RosterCell,
   type RosterLine,
   type ShiftCode,
@@ -26,17 +27,17 @@ import {
   baseOf,
   codeDef,
   extraOf,
-  generatedCode,
+  generatedWritten,
   isCodeLike,
   isDateKey,
   isShiftCode,
-  isWorking,
   lineOnRoster,
   monthDates,
   monthEnd,
   monthOf,
   monthStart,
   newViolations,
+  tagOf,
   validateRoster,
 } from './shift-rules';
 import type { MonthStatus } from './shift-types';
@@ -431,7 +432,7 @@ export function withNewCodes(
   const adding = codes
     .filter((entry): entry is ImportCodeView & { as: ShiftCode } => entry.as !== 'skip')
     .slice(0, room)
-    .map((entry): ExtraCode => ({ code: entry.code, name: entry.code, as: entry.as, start: null, end: null, hours: null }));
+    .map((entry): ExtraCode => ({ code: entry.code, name: entry.code, as: entry.as, start: null, end: null, hours: null, tag: null, breakHours: null }));
   return { rules: adding.length > 0 ? { ...rules, extra: [...rules.extra, ...adding] } : rules, codes };
 }
 
@@ -641,6 +642,9 @@ export interface PlannedPerson {
   lineName: string | null;
   /** The line it matched has been made inactive. */
   inactive: boolean;
+  /** For a new person: the position their row reads as, and their place in its pattern. */
+  position?: Position;
+  cycleOffset?: number | null;
   shifts: PlannedShift[];
   /** Days already rostered as the file has them. */
   unchanged: number;
@@ -670,6 +674,79 @@ function codeName(rules: ShiftRules, written: string): string {
   return base ? codeDef(rules, base, written).name : written;
 }
 
+/**
+ * The position a new row reads as, and where it sits in that position's
+ * pattern. A row with driver shifts is a driver; one with desk days is a
+ * Project Coordinator; anything else is a Travel Risk Coordinator. The place
+ * in the pattern is the one that reproduces most of the row: leave and other
+ * days away are not counted against it, and a row that follows no pattern
+ * (a TRC outside the rotation) gets none.
+ */
+export function readPosition(
+  rules: ShiftRules,
+  names: string[],
+  shifts: ReadonlyArray<{ date: string; code: string }>,
+  holidays?: ReadonlySet<string>,
+  /** What the workbook says the position is, when it lists its billets (see `readBilletPositions`). */
+  stated?: Position | null,
+): { position: Position; cycleOffset: number | null } {
+  const tags = shifts.map((shift) => tagOf(rules, shift.code));
+  const position: Position =
+    stated ??
+    (tags.some((tag) => tag === 'driver_day' || tag === 'driver_night') || names.some((name) => /^(drv|driver)\b/i.test(name.trim()))
+      ? 'driver'
+      : tags.some((tag) => tag === 'pc')
+        ? 'pc'
+        : 'trc');
+  if (position === 'pc') return { position, cycleOffset: null };
+
+  // Days the person was simply away say nothing about their pattern.
+  const present = shifts.filter((shift) => baseOf(rules, shift.code) !== 'LV');
+  const offsets = position === 'driver' ? 2 : rules.pattern.length;
+  let best = { offset: 0, matches: -1 };
+  for (let offset = 0; offset < offsets; offset += 1) {
+    const stand: RosterLine = { id: 0, code: '', position, cycleOffset: offset, startDate: null, endDate: null, active: true };
+    const matches = present.filter((shift) => generatedWritten(rules, stand, shift.date, holidays) === shift.code).length;
+    if (matches > best.matches) best = { offset, matches };
+  }
+  if (position === 'driver') return { position, cycleOffset: best.offset };
+  const follows = present.length >= 7 && best.matches >= present.length * 0.6;
+  return { position, cycleOffset: follows ? best.offset : null };
+}
+
+/** A position as a workbook writes it: "Travel Risk Coordinator", "Project Coordinator", "Driver", "TRC", "PC". */
+function positionNamed(text: string): Position | null {
+  const key = squash(text);
+  if (!key) return null;
+  if (key === 'pc' || key.includes('projectcoordinator')) return 'pc';
+  if (key === 'drv' || key.includes('driver')) return 'driver';
+  if (key === 'trc' || key.includes('travelrisk')) return 'trc';
+  return null;
+}
+
+/**
+ * The position of each billet, where the workbook lists them: any sheet with a
+ * "billet" (or "code") column and a "position" column, such as the template's
+ * Data tab. Keyed by the billet in lower case with punctuation removed. This
+ * is what tells a Project Coordinator who is away all month from a TRC.
+ */
+export function readBilletPositions(sheets: NamedSheet[]): Map<string, Position> {
+  const out = new Map<string, Position>();
+  for (const sheet of sheets) {
+    const headingRow = sheet.rows.findIndex((row) => row.some((cell) => squash(cell) === 'position') && row.some((cell) => ['billet', 'code', 'line'].includes(squash(cell))));
+    if (headingRow < 0) continue;
+    const heading = (sheet.rows[headingRow] as string[]).map(squash);
+    const billetColumn = heading.findIndex((cell) => ['billet', 'code', 'line'].includes(cell));
+    const positionColumn = heading.indexOf('position');
+    for (const row of sheet.rows.slice(headingRow + 1)) {
+      const billet = squash(row[billetColumn] ?? '');
+      const position = positionNamed(row[positionColumn] ?? '');
+      if (billet && position && !out.has(billet)) out.set(billet, position);
+    }
+  }
+  return out;
+}
+
 export function planRosterImport(input: {
   month: string;
   rules: ShiftRules;
@@ -677,9 +754,13 @@ export function planRosterImport(input: {
   lines: ImportLine[];
   /** Saved records of the month, by `${lineId}|${date}`. */
   existing: ReadonlyMap<string, ExistingCell>;
+  /** Public holidays, for what the roster generates for desk and driver positions. */
+  holidays?: ReadonlySet<string>;
+  /** Positions the workbook states for its billets (see `readBilletPositions`). */
+  positions?: ReadonlyMap<string, Position>;
   options: ImportOptions;
 }): ImportPlan {
-  const { rules, reading, lines, existing, options } = input;
+  const { rules, reading, lines, existing, options, holidays } = input;
   const lineById = new Map(lines.map((line) => [line.id, line]));
   const notes: string[] = [
     ...reading.ignored.map((row) => `The row “${row.label}” was not read: its cells (${row.samples.map((sample) => `“${sample}”`).join(', ')}) are not shift codes.`),
@@ -757,13 +838,22 @@ export function planRosterImport(input: {
           date: cell.date,
           code,
           recordId: saved?.id ?? null,
-          generated: saved?.generated ?? (line.cycleOffset !== null ? generatedCode(rules, line.cycleOffset, cell.date) : code),
+          generated: saved?.generated ?? generatedWritten(rules, line, cell.date, holidays) ?? code,
         });
       }
       taken.add(key);
     }
     if (planned.outside > 0 && line) {
       notes.push(`${person.label}: ${planned.outside} day${planned.outside === 1 ? ' is' : 's are'} before ${line.code}'s start date or after their end date, and ${planned.outside === 1 ? 'was' : 'were'} skipped.`);
+    }
+    if (!line && planned.shifts.length > 0) {
+      // Someone new: their row says what they are, and what the roster would have generated for them.
+      const stated = person.names.map((name) => input.positions?.get(squash(name))).find((position) => position !== undefined) ?? null;
+      const read = readPosition(rules, person.names, planned.shifts, holidays, stated);
+      planned.position = read.position;
+      planned.cycleOffset = read.cycleOffset;
+      const stand: RosterLine = { id: 0, code: '', position: read.position, cycleOffset: read.cycleOffset, startDate: null, endDate: null, active: true };
+      for (const shift of planned.shifts) shift.generated = generatedWritten(rules, stand, shift.date, holidays) ?? shift.code;
     }
     return planned;
   });
@@ -799,6 +889,7 @@ export function checkImport(input: {
   generatedMonths: string[];
   /** `${lineId}|${date}` of rostered shifts that approved leave will turn into Leave. */
   onLeave?: ReadonlySet<string>;
+  holidays?: ReadonlySet<string>;
 }): ImportChecks {
   const { month, rules, plan, lines, lookup } = input;
   const from = monthStart(month);
@@ -815,14 +906,14 @@ export function checkImport(input: {
     if (person.target === 'new') {
       stand -= 1;
       lineId = stand;
-      everyone.push({ id: lineId, code: person.label, cycleOffset: null, startDate: null, endDate: null, active: true });
+      everyone.push({ id: lineId, code: person.label, position: person.position ?? 'trc', cycleOffset: person.cycleOffset ?? null, startDate: null, endDate: null, active: true });
     } else {
       lineId = person.target;
     }
     for (const shift of person.shifts) {
       const key = `${lineId}|${shift.date}`;
       const base = baseOf(rules, shift.code) ?? 'X';
-      const onLeave = Boolean(input.onLeave?.has(key)) && isWorking(base);
+      const onLeave = Boolean(input.onLeave?.has(key)) && base !== 'LV';
       const code = onLeave ? 'LV' : base;
       const saved = lookup(lineId, shift.date);
       overlay.set(key, {
@@ -838,8 +929,8 @@ export function checkImport(input: {
     }
   }
 
-  const was = validateRoster(rules, lines, lookup, from, to, (date) => before.has(monthOf(date)));
-  const now = validateRoster(rules, everyone, (lineId, date) => overlay.get(`${lineId}|${date}`) ?? lookup(lineId, date), from, to, (date) => after.has(monthOf(date)));
+  const was = validateRoster(rules, lines, lookup, from, to, (date) => before.has(monthOf(date)), input.holidays);
+  const now = validateRoster(rules, everyone, (lineId, date) => overlay.get(`${lineId}|${date}`) ?? lookup(lineId, date), from, to, (date) => after.has(monthOf(date)), input.holidays);
   return {
     blocks: now.filter((v) => v.severity === 'block'),
     warnings: now.filter((v) => v.severity === 'warn'),
@@ -860,6 +951,9 @@ export interface ImportPersonView {
   inactive: boolean;
   /** For a new person: the login account they will be linked to, when one has their name. */
   account: string | null;
+  /** For a new person: the position their row reads as, and their place in its pattern. */
+  position?: Position;
+  cycleOffset?: number | null;
   /** Shifts the upload will put on the roster. */
   set: number;
   unchanged: number;

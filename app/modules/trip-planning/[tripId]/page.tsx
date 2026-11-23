@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getServerAuth } from '@/lib/auth';
 import { tripForViewer } from '@/lib/trip-costs';
 import { listCrewOptions } from '@/lib/trip-crew';
-import { getTripForUser, listTravelerOptions } from '@/lib/trips';
+import { getTripForUser, listTravelerOptions, tripPeers } from '@/lib/trips';
 import { ADMIN_ROLE_NAME } from '@/lib/rbac';
 import { userHasModule, userHasRole } from '@/lib/user';
 
@@ -32,9 +32,10 @@ export default async function TripItineraryPage({
 
   const trip = await getTripForUser({ id: tripId, userId: auth.user.id, isAdmin });
   if (!trip) notFound();
-  const [crewOptions, clientTravelers] = await Promise.all([
+  const [crewOptions, clientTravelers, peers] = await Promise.all([
     listCrewOptions(trip.id),
     listTravelerOptions(trip.customer.id),
+    tripPeers(auth.user.id, isAdmin),
   ]);
 
   // `?event=<id>` (from the availability grid and elsewhere) opens the page on that event.
@@ -48,6 +49,7 @@ export default async function TripItineraryPage({
       clientTravelers={clientTravelers}
       currentUser={{ id: auth.user.id, name: auth.user.name, email: auth.user.email }}
       isAdmin={isAdmin}
+      teamIds={peers ? [...peers] : [auth.user.id]}
       focusItemId={Number.isInteger(eventId) && eventId > 0 ? eventId : null}
     />
   );

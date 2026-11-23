@@ -62,12 +62,14 @@ type View = 'log' | 'history';
 interface HandoverClientProps {
   currentUser: { id: number; name: string };
   isAdmin: boolean;
+  /** The user and their group-mates: they may edit and delete each other's handovers. */
+  teamIds: number[];
   initialData: HandoverData;
   /** Open on this entry (`?handover=<id>`, from the bell), when it exists. */
   focusId?: number | null;
 }
 
-export default function HandoverClient({ currentUser, isAdmin, initialData, focusId = null }: HandoverClientProps) {
+export default function HandoverClient({ currentUser, isAdmin, teamIds, initialData, focusId = null }: HandoverClientProps) {
   const [handovers, setHandovers] = useSyncedState<HandoverDetail[]>(initialData.handovers);
   const [selectedId, setSelectedId] = useState<number | null>(
     focusId !== null && initialData.handovers.some((h) => h.id === focusId) ? focusId : null,
@@ -408,6 +410,7 @@ export default function HandoverClient({ currentUser, isAdmin, initialData, focu
           handoverId={selectedId}
           currentUser={currentUser}
           isAdmin={isAdmin}
+          teamIds={teamIds}
           onClose={() => setSelectedId(null)}
           onChanged={(handover) => upsert(handover)}
           onDeleted={(id) => {

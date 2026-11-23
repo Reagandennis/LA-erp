@@ -7,6 +7,7 @@ import { contactVisibleTo } from '@/lib/contacts';
 import { buildAccessFilter as quoteAccessFilter } from '../quotes';
 import { ADMIN_ROLE_NAME } from '../rbac';
 import { buildAccessFilter as tripAccessFilter } from '../trips';
+import { todoVisibleTo } from '../user-groups';
 import { type AccessUser, userHasModule, userHasRole } from '../user';
 
 /**
@@ -139,7 +140,7 @@ const searchers: Searcher[] = [
       const rows = await prisma.personalTodo.findMany({
         where: {
           deletedAt: null,
-          OR: [{ userId }, { shares: { some: { userId } } }],
+          ...todoVisibleTo(userId),
           AND: [{ OR: [{ title: like(term) }, { description: like(term) }] }],
         },
         select: { id: true, title: true, description: true, status: true, priority: true, dueDate: true, completed: true },
@@ -565,11 +566,22 @@ const searchers: Searcher[] = [
 
 const SERVICE_NAMES: Record<string, string> = { whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal' };
 
-/** The person's own linked accounts — never anyone else's, admins included. */
+/**
+ * The person's own linked accounts, and WhatsApp numbers shared with one of
+ * their groups — never anyone else's, admins included.
+ */
 async function ownMessagingAccounts(ctx: Context) {
   const providers = ['whatsapp', 'telegram', 'signal'].filter((p) => ctx.can(p));
   const rows = await prisma.messagingAccount.findMany({
-    where: { userId: ctx.userId, provider: { in: providers } },
+    where: {
+      provider: { in: providers },
+      OR: [
+        { userId: ctx.userId },
+        ...(providers.includes('whatsapp')
+          ? [{ provider: 'whatsapp', groupShares: { some: { group: { members: { some: { userId: ctx.userId } } } } } }]
+          : []),
+      ],
+    },
     select: { id: true, provider: true, label: true },
   });
   return new Map(rows.map((a) => [a.id, { provider: a.provider, label: a.label, name: SERVICE_NAMES[a.provider] ?? a.provider }]));

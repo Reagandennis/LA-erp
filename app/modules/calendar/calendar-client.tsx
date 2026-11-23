@@ -444,7 +444,12 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
         setGoogleEvents([]);
         return;
       }
-      if (!res.ok) return;
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        setGoogleError(body?.error?.message ?? `Google Calendar request failed (${res.status}).`);
+        setGoogleEvents([]);
+        return;
+      }
       const data = (await res.json()) as {
         items?: Array<{
           id: string;
@@ -673,10 +678,17 @@ function CalendarInner({ initialEvents, extraEvents = [] }: Props) {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        setGoogleError(
+          body?.error?.message ?? `Google Calendar rejected the event (${res.status}); it was saved locally only.`,
+        );
+        return null;
+      }
       const data = (await res.json()) as { id?: string };
       return data.id ?? null;
     } catch {
+      setGoogleError('Could not reach Google Calendar; the event was saved locally only.');
       return null;
     }
   };

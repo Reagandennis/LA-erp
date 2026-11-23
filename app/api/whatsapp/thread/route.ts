@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   // Opening a thread clears its unread badge — here and, as WhatsApp Web
   // would, on the phone. A tab refreshing in the background passes `read=0`:
   // nobody is looking, so the message must stay unread.
-  if (!before && searchParams.get('read') !== '0' && (await markRead(ctx.account.id, id, ctx.userId))) {
+  if (!before && searchParams.get('read') !== '0' && (await markRead(ctx.account.id, id, ctx.account.userId))) {
     syncReadToPhone(ctx.account, id);
   }
   return NextResponse.json({ messages });

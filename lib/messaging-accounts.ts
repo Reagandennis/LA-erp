@@ -67,6 +67,102 @@ export async function findAccount(accountId: number): Promise<LinkedAccount | nu
   return row ? toLinked(row) : null;
 }
 
+// --- WhatsApp numbers shared with a group -------------------------------------
+
+/** An account the user may use: their own, or a WhatsApp number shared with one of their groups. */
+export interface UsableAccount extends LinkedAccount {
+  /** True when someone else owns it and shared it with the user's group. */
+  shared: boolean;
+  ownerName: string | null;
+}
+
+/** Group shares apply to WhatsApp only; Telegram and Signal stay personal. */
+function sharedWhere(userId: number, provider: MessagingProvider) {
+  return provider === 'whatsapp'
+    ? { provider, userId: { not: userId }, groupShares: { some: { group: { members: { some: { userId } } } } } }
+    : null;
+}
+
+/**
+ * The account a request acts on: one of the user's own, or (WhatsApp) a number
+ * shared with one of their groups. Without an id, their first own account,
+ * else the first shared with them. Null when the id is neither.
+ */
+export async function getUsableAccount(userId: number, provider: MessagingProvider, accountId?: number): Promise<UsableAccount | null> {
+  const own = await getAccount(userId, provider, accountId);
+  if (own) return { ...own, shared: false, ownerName: null };
+  const where = sharedWhere(userId, provider);
+  if (!where) return null;
+  const row = await prisma.messagingAccount.findFirst({
+    where: { ...where, ...(accountId === undefined ? {} : { id: accountId }) },
+    include: { user: { select: { name: true } } },
+    orderBy: { id: 'asc' },
+  });
+  if (!row) return null;
+  const { user, ...rest } = row;
+  return { ...toLinked(rest), shared: true, ownerName: user.name };
+}
+
+/** The user's own accounts, then the numbers shared with their groups. */
+export async function listUsableAccounts(userId: number, provider: MessagingProvider): Promise<UsableAccount[]> {
+  const own = (await listAccounts(userId, provider)).map((a) => ({ ...a, shared: false, ownerName: null }));
+  const where = sharedWhere(userId, provider);
+  if (!where) return own;
+  const rows = await prisma.messagingAccount.findMany({ where, include: { user: { select: { name: true } } }, orderBy: { id: 'asc' } });
+  return [...own, ...rows.map(({ user, ...rest }) => ({ ...toLinked(rest), shared: true, ownerName: user.name }))];
+}
+
+const VIEWER_TTL_MS = 15_000;
+const viewerCache = new Map<number, { at: number; ids: number[] }>();
+
+/**
+ * Everyone besides the owner who may see an account: the members of the
+ * groups it is shared with. Cached briefly, since live events ask on every
+ * message.
+ */
+export async function accountViewers(accountId: number): Promise<number[]> {
+  const hit = viewerCache.get(accountId);
+  if (hit && Date.now() - hit.at < VIEWER_TTL_MS) return hit.ids;
+  const rows = await prisma.userGroupMember.findMany({
+    where: { group: { messagingShares: { some: { accountId } } } },
+    select: { userId: true },
+  });
+  const ids = [...new Set(rows.map((r) => r.userId))];
+  viewerCache.set(accountId, { at: Date.now(), ids });
+  return ids;
+}
+
+/** The owner's groups, and which of them this account is shared with. */
+export async function accountGroupSharing(ownerId: number, accountId: number) {
+  const [groups, shares] = await Promise.all([
+    prisma.userGroup.findMany({
+      where: { members: { some: { userId: ownerId } } },
+      select: { id: true, name: true, _count: { select: { members: true } } },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.messagingAccountGroupShare.findMany({ where: { accountId }, select: { groupId: true } }),
+  ]);
+  return {
+    groups: groups.map((g) => ({ id: g.id, name: g.name, memberCount: g._count.members })),
+    sharedGroupIds: shares.map((s) => s.groupId),
+  };
+}
+
+/** Shares (or stops sharing) an owner's WhatsApp number with one of their groups. */
+export async function setAccountGroupShare(ownerId: number, accountId: number, groupId: number, shared: boolean): Promise<boolean> {
+  const account = await prisma.messagingAccount.findFirst({ where: { id: accountId, userId: ownerId, provider: 'whatsapp' }, select: { id: true } });
+  if (!account) return false;
+  if (shared) {
+    const group = await prisma.userGroup.findFirst({ where: { id: groupId, members: { some: { userId: ownerId } } }, select: { id: true } });
+    if (!group) return false;
+    await prisma.messagingAccountGroupShare.createMany({ data: [{ accountId, groupId }], skipDuplicates: true });
+  } else {
+    await prisma.messagingAccountGroupShare.deleteMany({ where: { accountId, groupId } });
+  }
+  viewerCache.delete(accountId);
+  return true;
+}
+
 /** All of one user's accounts for a provider, oldest first. */
 export async function listAccounts(userId: number, provider: MessagingProvider): Promise<LinkedAccount[]> {
   const rows = await prisma.messagingAccount.findMany({

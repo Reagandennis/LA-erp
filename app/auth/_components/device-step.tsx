@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react';
 import {
   DeviceCheckFailure,
   confirmThisDevice,
+  deviceCheckProblem,
+  reportDeviceCheckProblem,
   deviceCheckSupported,
   registerThisDevice,
   suggestDeviceLabel,
@@ -58,7 +60,9 @@ export function DeviceStep({
   // Read from the browser after mount so the first render matches the server's.
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSupported(deviceCheckSupported());
+      const ok = deviceCheckSupported();
+      setSupported(ok);
+      if (!ok) reportDeviceCheckProblem('login');
       setLabel((current) => current || suggestDeviceLabel());
     }, 0);
     return () => clearTimeout(timer);
@@ -108,7 +112,7 @@ export function DeviceStep({
 
       {!supported && (
         <div style={{ padding: '12px', backgroundColor: '#fee', border: '1px solid #fcc', color: '#c00', fontSize: '14px' }}>
-          This browser cannot do the device check. Use an up-to-date Chrome, Edge or Safari.
+          {deviceCheckProblem()}
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { prisma } from './prisma';
+import { isTeamTrip, tripPeers } from './trips';
 
 export interface TripLogEntryDto {
   id: number;
@@ -45,12 +46,12 @@ function serialize(row: {
 
 /**
  * The same rule as viewing the trip (lib/trips.ts getTripForUser): admins, the
- * creator and the owner. Anyone who can see a trip can add to its log.
+ * creator, the owner and their group-mates. Anyone who can see a trip can add to its log.
  */
 async function canAccessTrip(tripId: number, userId: number, isAdmin: boolean): Promise<boolean> {
   const trip = await prisma.trip.findUnique({ where: { id: tripId }, select: { createdById: true, ownerId: true } });
   if (!trip) return false;
-  return isAdmin || trip.createdById === userId || trip.ownerId === userId;
+  return isAdmin || isTeamTrip(trip, userId, await tripPeers(userId, isAdmin));
 }
 
 export async function listTripLog(params: {
@@ -101,7 +102,7 @@ export async function addTripLogEntry(params: {
   return serialize(row);
 }
 
-/** Authors may remove their own entries; admins any. Imported entries have no author. */
+/** Authors and their group-mates may remove an entry; admins any. Imported entries have no author. */
 export async function deleteTripLogEntry(params: {
   tripId: number;
   entryId: number;
@@ -114,7 +115,10 @@ export async function deleteTripLogEntry(params: {
   });
   if (!entry || entry.tripId !== params.tripId) return 'not-found';
   if (!(await canAccessTrip(params.tripId, params.userId, params.isAdmin))) return 'not-found';
-  if (!params.isAdmin && entry.createdById !== params.userId) return 'forbidden';
+  if (!params.isAdmin) {
+    const peers = await tripPeers(params.userId, false);
+    if (entry.createdById === null || !peers?.has(entry.createdById)) return 'forbidden';
+  }
   await prisma.tripLogEntry.delete({ where: { id: params.entryId } });
   return 'deleted';
 }

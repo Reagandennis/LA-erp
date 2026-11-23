@@ -10,6 +10,7 @@ interface HandoverDetailDrawerProps {
   handoverId: number;
   currentUser: { id: number; name: string };
   isAdmin: boolean;
+  teamIds: number[];
   onClose: () => void;
   onChanged: (handover: HandoverDetail) => void;
   onDeleted: (id: number) => void;
@@ -46,6 +47,7 @@ export default function HandoverDetailDrawer({
   handoverId,
   currentUser,
   isAdmin,
+  teamIds,
   onClose,
   onChanged,
   onDeleted,
@@ -125,7 +127,8 @@ export default function HandoverDetailDrawer({
   };
 
   const isAuthor = handover?.createdBy?.id === currentUser.id;
-  const canManage = Boolean(isAuthor || isAdmin);
+  const inTeam = handover?.createdBy != null && teamIds.includes(handover.createdBy.id);
+  const canManage = Boolean(isAuthor || inTeam || isAdmin);
   const canAcknowledge = Boolean(handover && !handover.acknowledgedBy && !isAuthor);
   const headerColor = handover ? HEADER_STYLES[handover.status] ?? HEADER_STYLES.Normal : HEADER_STYLES.Normal;
 

@@ -8,14 +8,25 @@ import {
 } from './messaging-accounts';
 import { MAX_CACHED_BYTES, prefetchMedia } from './messaging-media-cache';
 import {
+  applyMessageEdit,
+  applyMessageRevoke,
   applyProviderUnread,
+  applyReactions,
   existingMessageIds,
   ingestMessages,
   messageCountsByChat,
+  type ReactionEvent,
   upsertChats,
   type IngestMessage,
 } from './messaging-repo';
-import { type ChatKind, type MediaKind, MUTED_FOREVER, type StoredMedia, type StoredMessage } from './messaging-store';
+import {
+  type ChatKind,
+  type MediaKind,
+  MUTED_FOREVER,
+  REVOKED_TEXT,
+  type StoredMedia,
+  type StoredMessage,
+} from './messaging-store';
 import { getMedia, markChatRead } from './wacli';
 import { runWacli } from './wacli-runtime';
 
@@ -232,9 +243,17 @@ interface WacliRawMessage {
   ID?: string;
   SenderJID?: string;
   SenderName?: string;
+  /** Webhook only: the sender's WhatsApp profile name (`messages list` has SenderName instead). */
+  PushName?: string;
   Timestamp?: string;
   FromMe?: boolean;
   Text?: string;
+  /** Set on a reaction: the message reacted to, and the emoji (empty when the reaction was removed). */
+  ReactionToID?: string;
+  ReactionEmoji?: string;
+  /** The message's text was changed by its sender; `Text` is the new text. */
+  Edited?: boolean;
+  IsForwarded?: boolean;
   MediaType?: string;
   MediaCaption?: string;
   MimeType?: string;
@@ -267,6 +286,8 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
   if (!messageId || !chatId || raw.DeletedForMe) return null;
   // Status updates arrive as a pseudo-chat; they are not a conversation.
   if (chatId.endsWith('@broadcast')) return null;
+  // A reaction is a record about another message, not a message of its own.
+  if (raw.ReactionToID) return null;
 
   const kind = whatsappChatKind(chatId);
   const caption = raw.MediaCaption || raw.Media?.Caption || '';
@@ -296,7 +317,8 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
   const realName = chatName || chatLabel || senderLabel;
 
   // A channel post carries no sender of its own: it is the channel speaking.
-  const sender = kind === 'channel' ? realName || 'Channel' : raw.SenderName || raw.SenderJID || 'Unknown';
+  const sender =
+    kind === 'channel' ? realName || 'Channel' : raw.SenderName || raw.PushName || raw.SenderJID || 'Unknown';
 
   return {
     chatId,
@@ -305,11 +327,61 @@ export function wacliToIngest(raw: WacliRawMessage, chatName?: string): IngestMe
     chatKind: kind,
     messageId,
     senderName: raw.FromMe ? 'You' : sender,
+    senderJid: raw.SenderJID || null,
     fromMe: Boolean(raw.FromMe),
-    text: raw.Revoked ? 'This message was deleted' : text,
+    text: raw.Revoked ? REVOKED_TEXT : text,
     at: raw.Timestamp ? new Date(raw.Timestamp) : new Date(),
-    media,
+    media: raw.Revoked ? null : media,
+    edited: Boolean(raw.Edited),
+    revoked: Boolean(raw.Revoked),
+    forwarded: Boolean(raw.IsForwarded),
   };
+}
+
+/**
+ * A wacli record that is a reaction (someone reacted to `ReactionToID`), as
+ * the mirror applies it. Both the webhook and `messages list` shapes are
+ * accepted. Null for anything that isn't a reaction.
+ */
+export function wacliToReaction(raw: WacliRawMessage): ReactionEvent | null {
+  if (raw.EventType && raw.EventType !== 'message') return null;
+  const chatId = raw.ChatJID || raw.Chat;
+  if (!chatId || !raw.ReactionToID || chatId.endsWith('@broadcast')) return null;
+  return {
+    chatId,
+    targetId: raw.ReactionToID,
+    senderJid: raw.SenderJID || null,
+    senderName: raw.FromMe ? 'You' : raw.SenderName || raw.PushName || raw.SenderJID || 'Unknown',
+    emoji: raw.ReactionEmoji ?? '',
+    fromMe: Boolean(raw.FromMe),
+    at: raw.Timestamp ? new Date(raw.Timestamp) : new Date(),
+  };
+}
+
+/**
+ * Apply what a live batch says about messages the mirror already holds: an
+ * edit replaces the text, a revoke leaves the placeholder. `ingestMessages`
+ * skips an id it has seen, so without this the console would keep showing
+ * the old text. Ids in `justCreated` were written with their final state by
+ * that ingest and are left alone.
+ */
+export async function applyWacliMessageUpdates(
+  account: { id: number; userId: number },
+  raws: WacliRawMessage[],
+  justCreated: Set<string>,
+): Promise<void> {
+  for (const raw of raws) {
+    if (raw.EventType && raw.EventType !== 'message') continue;
+    const chatId = raw.ChatJID || raw.Chat;
+    const messageId = raw.MsgID || raw.ID;
+    if (!chatId || !messageId || justCreated.has(messageId) || raw.ReactionToID) continue;
+    if (raw.Revoked) {
+      await applyMessageRevoke(account.id, account.userId, chatId, messageId);
+    } else if (raw.Edited) {
+      const text = raw.Text || raw.MediaCaption || raw.Media?.Caption || '';
+      if (text) await applyMessageEdit(account.id, account.userId, chatId, messageId, text);
+    }
+  }
 }
 
 /** What a WhatsApp JID's server part says the chat is. Channels are `@newsletter`. */
@@ -425,6 +497,9 @@ async function reconcileWhatsAppChat(
   ignored: Set<string>,
 ): Promise<void> {
   const seen = new Set<string>();
+  // Reactions are applied once the walk is over: a reaction is newer than its
+  // message, so it turns up pages before the message it belongs to.
+  const reactions: ReactionEvent[] = [];
   let found = 0;
   let before: string | undefined;
 
@@ -444,7 +519,11 @@ async function reconcileWhatsAppChat(
       found++;
       const item = wacliToIngest(m);
       if (item) batch.push(item);
-      else ignored.add(m.MsgID!);
+      else {
+        ignored.add(m.MsgID!);
+        const reaction = wacliToReaction(m);
+        if (reaction) reactions.push(reaction);
+      }
     }
     const fresh = await ingestMessages(account.id, account.userId, batch, { history: true });
     cacheWhatsAppMedia(account, fresh);
@@ -458,6 +537,10 @@ async function reconcileWhatsAppChat(
     if (!Number.isFinite(oldest)) break;
     before = new Date(oldest + 1000).toISOString();
   }
+
+  // Oldest first, so a person's latest reaction is the one that stands.
+  reactions.sort((a, b) => a.at.getTime() - b.at.getTime());
+  if (reactions.length > 0) await applyReactions(account.id, account.userId, reactions, { quiet: true });
 }
 
 /** Media newer than this is downloaded as it arrives, while WhatsApp still serves it. */

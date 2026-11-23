@@ -5,7 +5,35 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from '@/lib/session-token';
 
 const protectedPrefixes = ['/dashboard', '/admin', '/modules'];
 
+/**
+ * Work-device passkeys only work on the one address in WEBAUTHN_ORIGIN, so
+ * pages opened on any other public name (e.g. the old erp.ladyaskari.app) are
+ * sent there. API routes are not matched by this proxy, so OAuth callbacks and
+ * webhooks on the old name keep working. Local probes (localhost, bare IPs) are
+ * left alone.
+ */
+function canonicalRedirect(request: NextRequest): NextResponse | null {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  const configured = process.env.WEBAUTHN_ORIGIN?.trim();
+  if (!configured) return null;
+  let canonical: URL;
+  try {
+    canonical = new URL(configured);
+  } catch {
+    return null;
+  }
+  const host = (request.headers.get('x-forwarded-host') || request.headers.get('host') || '').split(',')[0].trim();
+  const hostname = host.replace(/:\d+$/, '').toLowerCase();
+  if (!hostname || hostname === canonical.hostname) return null;
+  if (hostname === 'localhost' || /^[\d.]+$/.test(hostname) || hostname.startsWith('[')) return null;
+  const target = new URL(request.nextUrl.pathname + request.nextUrl.search, canonical.origin);
+  return NextResponse.redirect(target, 308);
+}
+
 export default function proxy(request: NextRequest) {
+  const redirect = canonicalRedirect(request);
+  if (redirect) return redirect;
+
   const pathname = request.nextUrl.pathname;
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   const session = token ? verifySessionToken(token) : null;

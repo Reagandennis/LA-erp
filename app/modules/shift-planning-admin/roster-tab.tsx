@@ -21,22 +21,26 @@ import {
 } from '@/app/modules/_components/shift-ui';
 import { useConfirm } from '@/app/ui/confirm-dialog';
 import {
+  ACTUAL_STATUSES,
   CALL_IN_TRIGGERS,
   CODE_KIND,
   CONSOLE_CODES,
   RULE_LABEL,
+  SOURCE_LABEL,
   TRIGGER_LABEL,
   type CallInTrigger,
   type RosterCell,
   type Severity,
   type Violation,
   codeDef,
+  generates,
   isConsole,
   isWorking,
   monthDates,
   monthOf,
   newViolations,
   rosterCodes,
+  tagOf,
   validateRoster,
 } from '@/lib/shift-rules';
 import { type AdminOverview, type LineView, type RecordView, type SaveResult, buildLookup, indexRecords, recordKey, writtenCode } from '@/lib/shift-types';
@@ -61,7 +65,7 @@ interface CellRef {
 
 type Notice = { tone: 'ok' | 'danger'; text: string } | null;
 
-const hasActuals = (record: RecordView) => Boolean(record.callIn) || ['worked', 'sick', 'no-show', 'call-in'].includes(record.status);
+const hasActuals = (record: RecordView) => Boolean(record.callIn) || ACTUAL_STATUSES.includes(record.status);
 
 export default function RosterTab({ data, reload, onOpenPeople, onImported, flash }: Props) {
   const { rules, lines, month, today, holidays } = data;
@@ -87,7 +91,9 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
     () => lines.filter((line) => line.active || dates.some((date) => index.has(recordKey(line.id, date)))),
     [lines, dates, index],
   );
-  const rotationLines = lines.filter((line) => line.active && line.cycleOffset !== null);
+  // Everyone the roster can generate for: the TRCs in the rotation, the Project Coordinators and the drivers.
+  const rotationLines = lines.filter((line) => line.active && generates(line));
+  const holidayDates = useMemo(() => new Set(holidays.map((holiday) => holiday.date)), [holidays]);
 
   // The same rules the server saves through, run live on the saved roster and on the draft.
   const { current, fresh } = useMemo(() => {
@@ -96,12 +102,12 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
     const to = dates[dates.length - 1] as string;
     const generated = new Set(data.generatedMonths);
     const isGenerated = (date: string) => generated.has(monthOf(date));
-    const saved = validateRoster(rules, lines, buildLookup(index), from, to, isGenerated);
+    const saved = validateRoster(rules, lines, buildLookup(index), from, to, isGenerated, holidayDates);
     if (draft.size === 0) return { current: saved, fresh: [] as Violation[] };
     const patches = new Map<string, Partial<RosterCell>>([...draft].map(([key, code]) => [key, draftPatch(rules, code)]));
-    const drafted = validateRoster(rules, lines, buildLookup(index, patches), from, to, isGenerated);
+    const drafted = validateRoster(rules, lines, buildLookup(index, patches), from, to, isGenerated, holidayDates);
     return { current: drafted, fresh: newViolations(saved, drafted) };
-  }, [month.status, dates, data.generatedMonths, rules, lines, index, draft]);
+  }, [month.status, dates, data.generatedMonths, rules, lines, index, draft, holidayDates]);
 
   const { flaggedDates, flaggedCells } = useMemo(() => {
     const byDate = new Map<string, Severity>();
@@ -420,7 +426,7 @@ export default function RosterTab({ data, reload, onOpenPeople, onImported, flas
         <Card className="px-6 py-16 text-center">
           <h3 className="text-base font-semibold text-gray-900">{formatMonth(month.month)} has not been generated</h3>
           <p className="mx-auto mt-2 max-w-lg text-sm text-gray-500">
-            Generating builds every shift from the rotation for {rotationLines.length} {rotationLines.length === 1 ? 'person' : 'people'}, carrying on from where the previous month ended. If the month is already planned in Excel, upload that instead. Nothing is visible to staff until you publish.
+            Generating builds the month for {rotationLines.length} {rotationLines.length === 1 ? 'person' : 'people'}: the TRC rotation carrying on from where the previous month ended, weekday desk days for Project Coordinators, and the drivers’ day and night weeks. If the month is already planned in Excel, upload that instead. Nothing is visible to staff until you publish.
           </p>
         </Card>
       ) : (
@@ -661,6 +667,9 @@ function CellMenu({
   const rostered = codeLook(rules, writtenCode(record));
   const plannedDef = codeDef(rules, record.plannedCode, record.label);
   const kind = CODE_KIND[record.plannedCode];
+  // A Project Coordinator covers the console in place of a weekday desk day.
+  const deskDay = line.position === 'pc' && tagOf(rules, record.label) === 'pc';
+  const canCover = line.position !== 'driver' && (kind === 'on_call' || kind === 'off' || deskDay);
   const [times, setTimes] = useState<{ actualStart: string; actualEnd: string } | null>(null);
   const section = 'border-t border-gray-100 px-4 py-3';
   const action = 'rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-40';
@@ -757,12 +766,13 @@ function CellMenu({
           </div>
         )}
 
-        {(kind === 'on_call' || kind === 'off') && (
+        {canCover && (
           <div className={section}>
             {record.callIn ? (
               <div>
                 <p className="text-xs text-gray-600">
-                  Called in to <span className="font-semibold">{record.workedCode ? rules.codes[record.workedCode].name : ''}</span> · {TRIGGER_LABEL[record.callIn.trigger]}
+                  {deskDay ? 'Covered' : 'Called in to'} <span className="font-semibold">{record.workedCode ? rules.codes[record.workedCode].name : ''}</span> · {TRIGGER_LABEL[record.callIn.trigger]}
+                  {record.callIn.source && ` · ${SOURCE_LABEL[record.callIn.source]}`}
                   {record.callIn.responseMinutes !== null && ` · arrived in ${record.callIn.responseMinutes} min`}
                 </p>
                 <div className="mt-2 flex gap-1.5">
@@ -776,7 +786,7 @@ function CellMenu({
               </div>
             ) : (
               <button type="button" disabled={Boolean(drafted)} className={`${primaryButton} w-full !py-1.5 text-xs`} onClick={onCallIn}>
-                {kind === 'off' ? 'Call in from rest day…' : 'Call in…'}
+                {deskDay ? 'Cover a console shift…' : kind === 'off' ? 'Call in from rest day…' : 'Call in…'}
               </button>
             )}
           </div>
@@ -880,6 +890,7 @@ function CallInDialog({
 }) {
   const { rules } = data;
   const fromRest = CODE_KIND[record.plannedCode] === 'off';
+  const deskDay = line.position === 'pc' && tagOf(rules, record.label) === 'pc';
   const existing = record.callIn;
   const [form, setForm] = useState(() => {
     const code = (record.workedCode && isConsole(record.workedCode) ? record.workedCode : CONSOLE_CODES.find((c) => rules.pattern.includes(c))) ?? 'D';
@@ -945,11 +956,18 @@ function CallInDialog({
       <form onSubmit={submit} className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
         <div className="border-b border-gray-100 px-6 py-4">
           <h3 className="text-base font-semibold text-gray-900">
-            {existing ? 'Edit call-in' : 'Call in'} · {line.code} · {formatDay(date)}
+            {existing ? (deskDay ? 'Edit cover' : 'Edit call-in') : deskDay ? 'Cover' : 'Call in'} · {line.code} · {formatDay(date)}
           </h3>
           <p className="mt-0.5 text-sm text-gray-500">
             {line.name !== line.code && `${line.name} is `}
-            {fromRest ? 'on a rest day. Calling in is an overtime escalation, paid at 2x.' : 'on call. The hours count as worked.'}
+            {deskDay
+              ? 'at their desk. The cover replaces the desk day; a Night cover makes the next day a rest day.'
+              : fromRest
+                ? 'on a rest day. Calling in is an overtime escalation: paid at 1.5x (2x on a public holiday), and it earns a compensatory day.'
+                : 'on call. The hours count as worked.'}
+          </p>
+          <p className="mt-1 text-xs text-gray-400">
+            Cover order: the TRC on their first on-call day, then a Project Coordinator on a weekday, then the TRC on their second on-call day, then an off-duty TRC at overtime.
           </p>
         </div>
 

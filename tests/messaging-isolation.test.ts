@@ -99,7 +99,9 @@ describe('resolveMessagingRequest', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.doMock('../lib/request-auth', () => ({ requireRequestAuth }));
-    vi.doMock('../lib/messaging-accounts', () => ({ getAccount }));
+    // The lookup the gate uses: the caller's own accounts, or a WhatsApp number
+    // shared with their group. Its own rules are tested in messaging-group-share.
+    vi.doMock('../lib/messaging-accounts', () => ({ getUsableAccount: getAccount }));
     vi.doMock('../lib/user', () => ({ userHasRole, userHasModule }));
     vi.doMock('../lib/rbac', () => ({ ADMIN_ROLE_NAME: 'admin' }));
     requireRequestAuth.mockReset();

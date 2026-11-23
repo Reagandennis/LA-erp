@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
+vi.mock('../lib/user-groups', async () => (await import('./support/user-groups-stub')).userGroupsStub);
 
 const { db, $queryRaw, requireModuleRequest } = vi.hoisted(() => ({
   db: {
@@ -65,7 +66,7 @@ const person = (modules: string[], opts: { admin?: boolean; id?: number } = {}):
   modules: modules.map((slug, i) => ({ id: i + 1, slug, name: slug, description: '', category: 'X', sortOrder: i })),
 });
 
-const own = { OR: [{ createdById: 7 }, { ownerId: 7 }] };
+const own = { OR: [{ createdById: 7 }, { ownerId: 7 }, { createdBy: { groupMemberships: { some: { group: { members: { some: { userId: 7 } } } } } } }, { owner: { groupMemberships: { some: { group: { members: { some: { userId: 7 } } } } } } }] };
 
 beforeEach(() => {
   for (const table of Object.values(db)) for (const fn of Object.values(table)) fn.mockReset();
@@ -302,7 +303,10 @@ describe('loadOpsDashboard', () => {
   });
 
   it("shows the viewer's own WhatsApp chats, with each one's latest message from one query", async () => {
-    db.messagingAccount.findMany.mockResolvedValue([{ id: 3, userId: 7, provider: 'whatsapp', handle: 'h', label: null, session: null }]);
+    // Their own number; none shared with their groups.
+    db.messagingAccount.findMany
+      .mockResolvedValueOnce([{ id: 3, userId: 7, provider: 'whatsapp', handle: 'h', label: null, session: null }])
+      .mockResolvedValueOnce([]);
     db.messagingChat.findMany.mockResolvedValue([
       { accountId: 3, chatId: 'a@s.whatsapp.net', kind: 'dm', name: 'Driver Peter', lastMessageAt: new Date('2026-10-27T08:00:00Z'), unreadCount: 2 },
       { accountId: 3, chatId: 'b@g.us', kind: 'group', name: 'Ops group', lastMessageAt: new Date('2026-10-27T07:00:00Z'), unreadCount: 0 },
@@ -313,6 +317,11 @@ describe('loadOpsDashboard', () => {
     const board = await loadOpsDashboard(person(['ops-dashboard', 'whatsapp']));
 
     expect(db.messagingAccount.findMany).toHaveBeenCalledWith({ where: { userId: 7, provider: 'whatsapp' }, orderBy: { id: 'asc' } });
+    expect(db.messagingAccount.findMany.mock.calls[1]![0].where).toEqual({
+      provider: 'whatsapp',
+      userId: { not: 7 },
+      groupShares: { some: { group: { members: { some: { userId: 7 } } } } },
+    });
     expect(db.messagingChat.findMany.mock.calls[0]![0].where).toEqual({ accountId: { in: [3] } });
     expect($queryRaw).toHaveBeenCalledTimes(1);
     expect(board.sections.whatsapp).toMatchObject({

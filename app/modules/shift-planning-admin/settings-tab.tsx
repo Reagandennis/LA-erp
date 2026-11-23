@@ -28,17 +28,31 @@ const COUNTS_AS: Record<ShiftCode, string> = {
 };
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-type Limit = 'targetHours7d' | 'maxHours7d' | 'maxHours14d' | 'minRestHours' | 'maxConsecutiveDuties' | 'responseMinutes' | 'leaveCapDays' | 'publishLeadDays';
+type Limit =
+  | 'targetHours7d'
+  | 'maxHours7d'
+  | 'maxHours14d'
+  | 'minRestHours'
+  | 'maxConsecutiveDuties'
+  | 'responseMinutes'
+  | 'leaveCapDays'
+  | 'publishLeadDays'
+  | 'sickFullDays'
+  | 'sickHalfDays'
+  | 'ctoExpiryDays';
 
 const LIMITS: Array<{ key: Limit; label: string; hint: string }> = [
-  { key: 'targetHours7d', label: 'Weekly target (hours)', hint: 'Warn when any 7 days go above this.' },
-  { key: 'maxHours7d', label: 'Weekly limit (hours)', hint: 'Block above this; hours beyond it are overtime at 1.5x.' },
+  { key: 'targetHours7d', label: 'Weekly target, TRC (hours)', hint: 'Warn when a TRC’s 7 days go above this. Drivers plan to 50 and are not warned.' },
+  { key: 'maxHours7d', label: 'Weekly limit (hours)', hint: 'Block anyone above this; hours beyond it are overtime at 1.5x.' },
   { key: 'maxHours14d', label: 'Two-week cap (hours)', hint: 'Warn when any 14 days go above this.' },
   { key: 'minRestHours', label: 'Rest between duties (hours)', hint: 'Block a duty that starts sooner.' },
   { key: 'maxConsecutiveDuties', label: 'Consecutive duties (days)', hint: 'Warn on more days running than this.' },
   { key: 'responseMinutes', label: 'Call-in response (minutes)', hint: 'A slower arrival is flagged.' },
   { key: 'leaveCapDays', label: 'Leave balance cap (days)', hint: 'A higher balance is flagged.' },
   { key: 'publishLeadDays', label: 'Publish ahead (days)', hint: 'A month is due this long before it starts.' },
+  { key: 'sickFullDays', label: 'Sick leave on full pay (days)', hint: 'In any 12 months.' },
+  { key: 'sickHalfDays', label: 'Sick leave on half pay (days)', hint: 'After the full-pay days, in the same 12 months.' },
+  { key: 'ctoExpiryDays', label: 'Compensatory day lapses after (days)', hint: 'Counted from the day it was earned.' },
 ];
 
 export default function SettingsTab({ data, reload }: Props) {
@@ -73,7 +87,7 @@ export default function SettingsTab({ data, reload }: Props) {
       }),
     });
   };
-  const addExtra = () => setRules({ ...rules, extra: [...rules.extra, { code: '', name: '', as: 'W', start: null, end: null, hours: null }] });
+  const addExtra = () => setRules({ ...rules, extra: [...rules.extra, { code: '', name: '', as: 'W', start: null, end: null, hours: null, tag: null, breakHours: null }] });
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -178,6 +192,20 @@ export default function SettingsTab({ data, reload }: Props) {
         </Card>
 
         <Card className="p-5">
+          <h2 className="text-sm font-semibold text-gray-900">Other positions</h2>
+          <p className="mt-0.5 text-sm text-gray-500">
+            Project Coordinators are at their desk (PC) Monday to Friday and off on weekends and public holidays. Drivers work two weeks of days, then two of nights, the two of them opposite each other: SD-D on a day, SD-D3 on a Friday; SD-N on a night, SD-N2 on a Tuesday and on Monday to Wednesday of the month’s last full week.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <Label>Driver blocks start on (a Monday)</Label>
+              <input type="date" required className={inputClass} value={rules.driverAnchor} onChange={(e) => setRules({ ...rules, driverAnchor: e.target.value })} />
+            </div>
+          </div>
+          <p className="mt-3 text-[11px] text-gray-400">A driver set to start on days is on days for the fortnight from this Monday, then on nights for the next, and so on without restarting.</p>
+        </Card>
+
+        <Card className="p-5">
           <h2 className="text-sm font-semibold text-gray-900">Shift times</h2>
           <p className="mt-0.5 text-sm text-gray-500">A finish at or before the start runs into the next day. A night shift is dated, and its hours booked, on the day it starts. W is a working day away from the console.</p>
           <div className="mt-4 space-y-3">
@@ -206,15 +234,17 @@ export default function SettingsTab({ data, reload }: Props) {
         </Card>
 
         <Card className="p-5">
-          <h2 className="text-sm font-semibold text-gray-900">Your own codes</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Other codes</h2>
           <p className="mt-0.5 text-sm text-gray-500">
-            Codes your roster uses beside the built-in ones, such as SOC-D or INT. Each shows on the roster as written and follows the rules of what it counts as. Leave the times empty to use the times of that shift.
+            The standard codes for the desk, the drivers and days away come first: their names, times and paid hours can be set, but what they mean is fixed. Below them are codes of your roster’s own, such as SOC-D or INT. Each shows on the roster as written and follows the rules of what it counts as. Leave the times empty to use the times of that shift.
           </p>
           <div className="mt-4 space-y-3">
             {rules.extra.length === 0 && <p className="text-sm text-gray-300">None yet. Uploading a roster adds the codes it uses.</p>}
             {rules.extra.map((extra, i) => {
               const saved = data.rules.extra.some((old) => old.code === extra.code);
               const working = isWorking(extra.as);
+              // A standard code: what it counts as is fixed, and it cannot be removed.
+              const standard = Boolean(extra.tag);
               return (
                 <div key={i} className="grid grid-cols-2 items-end gap-3 sm:grid-cols-[6rem_1fr_9.5rem_6.5rem_6.5rem_4.5rem_auto]">
                   <div>
@@ -231,7 +261,7 @@ export default function SettingsTab({ data, reload }: Props) {
                   </div>
                   <div>
                     <Label>Counts as</Label>
-                    <select aria-label={`What ${extra.code || 'the code'} counts as`} className={inputClass} value={extra.as} onChange={(e) => setExtra(i, { as: e.target.value as ShiftCode })}>
+                    <select aria-label={`What ${extra.code || 'the code'} counts as`} disabled={standard} className={inputClass} value={extra.as} onChange={(e) => setExtra(i, { as: e.target.value as ShiftCode })}>
                       {SHIFT_CODES.map((code) => (
                         <option key={code} value={code}>{COUNTS_AS[code]}</option>
                       ))}
@@ -256,13 +286,17 @@ export default function SettingsTab({ data, reload }: Props) {
                       disabled={!working}
                       className={inputClass}
                       value={extra.hours ?? ''}
-                      placeholder={working ? String(extra.start && extra.end ? spanHours(extra.start, extra.end) : rules.codes[extra.as].hours) : ''}
+                      placeholder={working ? String(extra.start && extra.end ? Math.max(0, spanHours(extra.start, extra.end) - (extra.breakHours ?? 0)) : rules.codes[extra.as].hours) : ''}
                       onChange={(e) => setExtra(i, { hours: e.target.value === '' ? null : Number(e.target.value) })}
                     />
                   </div>
-                  <button type="button" aria-label={`Remove ${extra.code || 'this code'}`} className="h-[2.375rem] rounded-lg px-2 text-xs font-semibold text-rose-600 hover:bg-rose-50" onClick={() => setRules({ ...rules, extra: rules.extra.filter((_, j) => j !== i) })}>
-                    Remove
-                  </button>
+                  {standard ? (
+                    <span className="flex h-[2.375rem] items-center px-2 text-[11px] font-semibold uppercase tracking-wide text-gray-300">Standard</span>
+                  ) : (
+                    <button type="button" aria-label={`Remove ${extra.code || 'this code'}`} className="h-[2.375rem] rounded-lg px-2 text-xs font-semibold text-rose-600 hover:bg-rose-50" onClick={() => setRules({ ...rules, extra: rules.extra.filter((_, j) => j !== i) })}>
+                      Remove
+                    </button>
+                  )}
                 </div>
               );
             })}

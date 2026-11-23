@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { prisma } from '@/lib/prisma';
+import { groupPeerIds } from '@/lib/user-groups';
 
 // --- Option sets -----------------------------------------------------------
 
@@ -204,9 +205,13 @@ export async function deleteHandover(id: number): Promise<boolean> {
   return true;
 }
 
-/** True when the user may edit/delete the handover (its author or an admin). */
+/**
+ * True when the user may edit/delete the handover as its author or one of the
+ * author's group-mates (Admin → Groups). Admins are allowed by the route.
+ */
 export async function canManageHandover(id: number, userId: number): Promise<boolean | null> {
   const row = await prisma.handoverEntry.findUnique({ where: { id }, select: { createdById: true } });
   if (!row) return null;
-  return row.createdById === userId;
+  if (row.createdById === userId) return true;
+  return (await groupPeerIds(userId)).has(row.createdById);
 }

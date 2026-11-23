@@ -12,7 +12,7 @@ import { listDevices } from '@/lib/work-devices';
 
 export const dynamic = 'force-dynamic';
 
-const TABS: AdminTab[] = ['overview', 'users', 'roles', 'sessions', 'devices', 'audit', 'settings'];
+const TABS: AdminTab[] = ['overview', 'users', 'roles', 'groups', 'sessions', 'devices', 'audit', 'settings'];
 
 export default async function AdminPage({
   searchParams,

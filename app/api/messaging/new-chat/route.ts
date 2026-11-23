@@ -4,6 +4,7 @@ import { isMessagingProvider } from '@/lib/messaging-accounts';
 import { resolveNewChatTarget } from '@/lib/messaging-new-chat';
 import { resolveMessagingRequest } from '@/lib/messaging-routes';
 import { upsertChats } from '@/lib/messaging-repo';
+import { checkNumbers } from '@/lib/wacli';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -33,6 +34,19 @@ export async function POST(request: NextRequest) {
   const resolved = resolveNewChatTarget(provider, String(body?.target ?? ''));
   if ('error' in resolved) {
     return NextResponse.json({ error: resolved.error }, { status: 400 });
+  }
+
+  // A WhatsApp chat with a number that has no account would sit in the list
+  // forever and every message to it would silently go nowhere, so ask
+  // WhatsApp first. The check is live and can fail (sync not up, no network);
+  // then the chat is created as before rather than blocking the person.
+  if (provider === 'whatsapp') {
+    const number = resolved.chatId.split('@')[0] ?? '';
+    const check = await checkNumbers(ctx.account.handle, [`+${number}`]);
+    const verdict = check.ok ? check.results.find((r) => r.phone === number || r.query === `+${number}`) : null;
+    if (verdict?.responded && !verdict.registered) {
+      return NextResponse.json({ error: `+${number} is not on WhatsApp.` }, { status: 404 });
+    }
   }
 
   await upsertChats(ctx.account.id, [

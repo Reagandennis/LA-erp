@@ -1,8 +1,30 @@
 import 'server-only';
 
-import { publish } from './chat-bus';
-import { type ChatKind, isMuted, type StoredChat, type StoredMedia, type StoredMessage } from './messaging-store';
+import { publish as publishToUser } from './chat-bus';
+import { accountViewers } from './messaging-accounts';
+import {
+  type ChatKind,
+  isMuted,
+  type MessageReaction,
+  REVOKED_TEXT,
+  type StoredChat,
+  type StoredMedia,
+  type StoredMessage,
+} from './messaging-store';
 import { prisma } from './prisma';
+
+/**
+ * Wakes the owner's open consoles, and those of anyone the number is shared
+ * with through a group (lib/messaging-accounts.ts accountViewers).
+ */
+function publish<T extends { accountId: number }>(ownerUserId: number, event: string, data: T): void {
+  publishToUser(ownerUserId, event, data);
+  void accountViewers(data.accountId)
+    .then((ids) => {
+      for (const id of ids) if (id !== ownerUserId) publishToUser(id, event, data);
+    })
+    .catch(() => undefined);
+}
 
 /**
  * Postgres-backed mirror of every linked account's conversations.
@@ -29,6 +51,11 @@ export interface IngestMessage {
   text: string;
   at: Date;
   media?: StoredMedia | null;
+  /** Provider-side sender id, when the provider reports one. */
+  senderJid?: string | null;
+  edited?: boolean;
+  revoked?: boolean;
+  forwarded?: boolean;
 }
 
 export interface IngestOptions {
@@ -56,7 +83,26 @@ export function countsTowardsUnread(now = new Date()) {
   return { archived: false, OR: [{ mutedUntil: null }, { mutedUntil: { lte: now } }] };
 }
 
-function toStoredMessage(row: {
+/** The `reactions` JSON column, which could hold anything, back to the typed list. */
+export function parseReactions(raw: unknown): MessageReaction[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MessageReaction[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.emoji !== 'string' || !r.emoji) continue;
+    out.push({
+      senderJid: typeof r.senderJid === 'string' ? r.senderJid : null,
+      senderName: typeof r.senderName === 'string' ? r.senderName : 'Unknown',
+      emoji: r.emoji,
+      fromMe: Boolean(r.fromMe),
+      at: typeof r.at === 'string' ? r.at : new Date(0).toISOString(),
+    });
+  }
+  return out;
+}
+
+interface MessageRow {
   messageId: string;
   chatId: string;
   senderName: string;
@@ -68,7 +114,14 @@ function toStoredMessage(row: {
   mediaMime: string | null;
   mediaName: string | null;
   mediaSize: number | null;
-}): StoredMessage {
+  senderJid?: string | null;
+  reactions?: unknown;
+  edited?: boolean;
+  revoked?: boolean;
+  forwarded?: boolean;
+}
+
+function toStoredMessage(row: MessageRow): StoredMessage {
   return {
     id: row.messageId,
     chatId: row.chatId,
@@ -76,6 +129,11 @@ function toStoredMessage(row: {
     fromMe: row.fromMe,
     text: row.text,
     timestamp: row.at.toISOString(),
+    senderJid: row.senderJid ?? null,
+    reactions: parseReactions(row.reactions),
+    edited: Boolean(row.edited),
+    revoked: Boolean(row.revoked),
+    forwarded: Boolean(row.forwarded),
     media: row.mediaKind
       ? {
           kind: row.mediaKind as StoredMedia['kind'],
@@ -122,6 +180,10 @@ export async function ingestMessages(
           fromMe: item.fromMe,
           text: item.text,
           at: item.at,
+          senderJid: item.senderJid ?? null,
+          edited: Boolean(item.edited),
+          revoked: Boolean(item.revoked),
+          forwarded: Boolean(item.forwarded),
           mediaKind: item.media?.kind ?? null,
           mediaRef: item.media?.ref ?? null,
           mediaMime: item.media?.mimeType ?? null,
@@ -245,7 +307,7 @@ function previewOf(
 export async function recordOutgoing(
   accountId: number,
   ownerUserId: number,
-  message: { chatId: string; messageId: string; text: string; media?: StoredMedia | null },
+  message: { chatId: string; messageId: string; text: string; media?: StoredMedia | null; forwarded?: boolean },
 ): Promise<void> {
   const chat = await prisma.messagingChat.findUnique({
     where: { accountId_chatId: { accountId, chatId: message.chatId } },
@@ -262,8 +324,135 @@ export async function recordOutgoing(
       text: message.text,
       at: new Date(),
       media: message.media ?? null,
+      forwarded: Boolean(message.forwarded),
     },
   ]);
+}
+
+/** One mirrored message, or null when the chat has no such message. */
+export async function getMessage(accountId: number, chatId: string, messageId: string): Promise<StoredMessage | null> {
+  const row = await prisma.messagingMessage.findUnique({
+    where: { accountId_chatId_messageId: { accountId, chatId, messageId } },
+  });
+  return row ? toStoredMessage(row) : null;
+}
+
+/** One chat's row as the console sees it, or null when the account has no such chat. */
+export async function getChat(accountId: number, chatId: string): Promise<StoredChat | null> {
+  const row = await prisma.messagingChat.findUnique({ where: { accountId_chatId: { accountId, chatId } } });
+  return row ? toStoredChat(row) : null;
+}
+
+/** Other tabs and the sidebar learn that a chat's messages changed, without an alert. */
+function publishQuiet(ownerUserId: number, accountId: number, chatIds: string[]): void {
+  publish(ownerUserId, 'messaging', { accountId, chatIds, count: 0, live: false, preview: null });
+}
+
+/** A reaction someone put on (or took off) a message. An empty emoji removes theirs. */
+export interface ReactionEvent {
+  chatId: string;
+  /** The message reacted to. */
+  targetId: string;
+  senderJid: string | null;
+  senderName: string;
+  emoji: string;
+  fromMe: boolean;
+  at: Date;
+}
+
+/** Both reactions come from the same person: us, the same provider id, or (failing an id) the same name. */
+function sameReactor(a: Pick<MessageReaction, 'senderJid' | 'senderName' | 'fromMe'>, b: ReactionEvent): boolean {
+  if (a.fromMe || b.fromMe) return a.fromMe && b.fromMe;
+  if (a.senderJid && b.senderJid) return a.senderJid === b.senderJid;
+  return a.senderName === b.senderName;
+}
+
+/**
+ * Record reactions on mirrored messages. A person has one reaction per
+ * message, so theirs is replaced; an empty emoji takes it away. Reactions to
+ * messages the mirror doesn't hold are dropped. Returns how many messages
+ * changed.
+ */
+export async function applyReactions(
+  accountId: number,
+  ownerUserId: number,
+  events: ReactionEvent[],
+  options: { quiet?: boolean } = {},
+): Promise<number> {
+  const changedChats = new Set<string>();
+  let changed = 0;
+  for (const event of events) {
+    const row = await prisma.messagingMessage.findUnique({
+      where: { accountId_chatId_messageId: { accountId, chatId: event.chatId, messageId: event.targetId } },
+      select: { reactions: true },
+    });
+    if (!row) continue;
+    const current = parseReactions(row.reactions);
+    const theirs = current.find((r) => sameReactor(r, event));
+    // Nothing to do: the same emoji again, or taking off a reaction they never gave.
+    if (theirs ? theirs.emoji === event.emoji : !event.emoji) continue;
+    const kept = current.filter((r) => r !== theirs);
+    if (event.emoji) {
+      kept.push({
+        senderJid: event.senderJid,
+        senderName: event.senderName,
+        emoji: event.emoji,
+        fromMe: event.fromMe,
+        at: event.at.toISOString(),
+      });
+    }
+    await prisma.messagingMessage.update({
+      where: { accountId_chatId_messageId: { accountId, chatId: event.chatId, messageId: event.targetId } },
+      // Plain objects: Prisma's JSON input type wants an index signature the interface lacks.
+      data: { reactions: kept.map((r) => ({ ...r })) },
+    });
+    changed++;
+    changedChats.add(event.chatId);
+  }
+  if (changed > 0 && !options.quiet) publishQuiet(ownerUserId, accountId, [...changedChats]);
+  return changed;
+}
+
+/** A message's text was changed by its sender (on WhatsApp, or from here). */
+export async function applyMessageEdit(
+  accountId: number,
+  ownerUserId: number,
+  chatId: string,
+  messageId: string,
+  text: string,
+): Promise<StoredMessage | null> {
+  const { count } = await prisma.messagingMessage.updateMany({
+    where: { accountId, chatId, messageId, revoked: false },
+    data: { text, edited: true },
+  });
+  if (count === 0) return null;
+  publishQuiet(ownerUserId, accountId, [chatId]);
+  return getMessage(accountId, chatId, messageId);
+}
+
+/** A message was deleted for everyone by its sender; only a placeholder remains. */
+export async function applyMessageRevoke(
+  accountId: number,
+  ownerUserId: number,
+  chatId: string,
+  messageId: string,
+): Promise<StoredMessage | null> {
+  const { count } = await prisma.messagingMessage.updateMany({
+    where: { accountId, chatId, messageId, revoked: false },
+    data: {
+      revoked: true,
+      text: REVOKED_TEXT,
+      mediaKind: null,
+      mediaRef: null,
+      mediaMime: null,
+      mediaName: null,
+      mediaSize: null,
+      reactions: [],
+    },
+  });
+  if (count === 0) return null;
+  publishQuiet(ownerUserId, accountId, [chatId]);
+  return getMessage(accountId, chatId, messageId);
 }
 
 /**
@@ -447,12 +636,12 @@ export async function applyProviderUnread(
   }
 }
 
-/** Chats with unread messages per linked account, for every provider the user has. */
+/** Chats with unread messages per linked account (and WhatsApp number shared with them), for every provider the user has. */
 export async function unreadByAccount(
   userId: number,
 ): Promise<Array<{ id: number; provider: string; unread: number }>> {
   const accounts = await prisma.messagingAccount.findMany({
-    where: { userId },
+    where: { OR: [{ userId }, { provider: 'whatsapp', groupShares: { some: { group: { members: { some: { userId } } } } } }] },
     select: { id: true, provider: true },
   });
   const unread = await unreadChatCounts(accounts.map((a) => a.id));

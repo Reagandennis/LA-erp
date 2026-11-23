@@ -91,7 +91,7 @@ function FileGlyph({ file }: { file: DriveFile }) {
 }
 
 function DriveManager() {
-  const { token, login, loading: authLoading, error: authError, gsiReady } = useGoogleAuth();
+  const { token, login, logout, loading: authLoading, error: authError, gsiReady } = useGoogleAuth();
   const banner = useBanner();
 
   const [connected, setConnected] = useState(false);
@@ -115,13 +115,17 @@ function DriveManager() {
         headers: { ...(init?.headers ?? {}), 'x-silent-banner': '1' },
       });
       if (response.status === 428) {
-        // The Google grant lapsed — drop back to the connect screen.
+        // The Google grant lapsed — drop back to the connect screen. Forget the
+        // browser token too: otherwise the token effect below would hand the
+        // same dead token straight back to the server and the two effects
+        // would loop, hammering the API until the tab is closed.
+        logout();
         setConnected(false);
         return null;
       }
       return response;
     },
-    [],
+    [logout],
   );
 
   const loadQuota = useCallback(async () => {

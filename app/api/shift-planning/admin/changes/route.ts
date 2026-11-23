@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { applyChanges } from '@/lib/shift-planning';
-import { readJson, requireManager, respond } from '@/lib/shift-planning-route';
+import { readJson, requireManager, respond, notifyStaff } from '@/lib/shift-planning-route';
 import type { ChangeInput } from '@/lib/shift-types';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
   return respond(async () => {
     const { ctx, response } = await requireManager(request);
     if (response) return response;
+    notifyStaff(request);
     const body = await readJson(request);
     const result = await applyChanges(ctx.actor, (Array.isArray(body.changes) ? body.changes : []) as ChangeInput[], {
       reason: typeof body.reason === 'string' ? body.reason : null,

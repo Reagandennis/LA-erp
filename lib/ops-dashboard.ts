@@ -19,14 +19,15 @@ import { type CrewRole, crewGaps } from './crew-gaps';
 import { listFleetVehicles, listMaintenance, listVehicleOdometers } from './fleet-server';
 import { getMapWorkspace } from './map-store';
 import type { MapCategoryDto, MapDeviceTagDto, MapGeofenceDto, TrackedDevice } from './map-types';
-import { listAccounts } from './messaging-accounts';
+import { listUsableAccounts } from './messaging-accounts';
 import { countsTowardsUnread, toChatKind } from './messaging-repo';
 import { OPS_PANELS, type OpsPanelKey, PANEL_MODULE } from './ops-panels';
 import { getOrganizationSettings } from './organization';
 import { prisma } from './prisma';
 import { ADMIN_ROLE_NAME } from './rbac';
 import { type TrackedDevices, listTrackedDevices } from './tracked-devices';
-import { buildAccessFilter, canEditTrip } from './trips';
+import { buildAccessFilter, canEditTrip, tripPeers } from './trips';
+import { todoVisibleTo } from './user-groups';
 import { type AccessUser, userHasModule, userHasRole } from './user';
 
 /**
@@ -369,6 +370,7 @@ function liveTrips(user: AccessUser, isAdmin: boolean): Prisma.TripWhereInput {
 // --- Trips -------------------------------------------------------------------
 
 async function loadTrips(user: AccessUser, isAdmin: boolean): Promise<OpsTrips> {
+  const peers = await tripPeers(user.id, isAdmin);
   const today = startOfToday();
   const windowEnd = new Date(Date.now() + MOVEMENTS_AHEAD_MS);
   const inTwoDays = new Date(today.getTime() + 2 * DAY);
@@ -476,7 +478,7 @@ async function loadTrips(user: AccessUser, isAdmin: boolean): Promise<OpsTrips> 
         vehicle: t.assignments[0]?.vehicle?.registration ?? null,
         controller: t.owner?.name ?? t.createdBy.name,
         mine: t.ownerId === user.id || t.createdById === user.id,
-        canEdit: canEditTrip(t, user.id, isAdmin),
+        canEdit: canEditTrip(t, user.id, isAdmin, peers),
         events: t.items.map((it) => ({
           id: it.id,
           category: it.category,
@@ -509,6 +511,7 @@ async function loadTrips(user: AccessUser, isAdmin: boolean): Promise<OpsTrips> 
 // --- Movements ---------------------------------------------------------------
 
 async function loadMovements(user: AccessUser, isAdmin: boolean): Promise<OpsMovement[]> {
+  const peers = await tripPeers(user.id, isAdmin);
   const rows = await prisma.tripItineraryItem.findMany({
     where: {
       scheduledAt: { gte: startOfToday(), lt: new Date(Date.now() + MOVEMENTS_AHEAD_MS) },
@@ -549,13 +552,14 @@ async function loadMovements(user: AccessUser, isAdmin: boolean): Promise<OpsMov
     crewGaps: crewGaps(r),
     flightNumber: r.category === 'flight' ? text(r.details, 'flightNumber') : null,
     completed: r.completedAt !== null,
-    canEdit: canEditTrip(r.trip, user.id, isAdmin),
+    canEdit: canEditTrip(r.trip, user.id, isAdmin, peers),
   }));
 }
 
 // --- Flights -----------------------------------------------------------------
 
 async function loadFlights(user: AccessUser, isAdmin: boolean): Promise<OpsFlight[]> {
+  const peers = await tripPeers(user.id, isAdmin);
   const now = Date.now();
   const rows = await prisma.tripItineraryItem.findMany({
     where: {
@@ -606,7 +610,7 @@ async function loadFlights(user: AccessUser, isAdmin: boolean): Promise<OpsFligh
     timezone: text(r.details, 'timezone'),
     airportZones: { depart: airportTimeZone(text(r.details, 'departAirport')), arrive: airportTimeZone(text(r.details, 'arriveAirport')) },
     completed: r.completedAt !== null,
-    canEdit: canEditTrip(r.trip, user.id, isAdmin),
+    canEdit: canEditTrip(r.trip, user.id, isAdmin, peers),
   }));
 }
 
@@ -621,9 +625,9 @@ type PreviewRow = {
   mediaKind: string | null;
 };
 
-/** The viewer's own WhatsApp accounts only, as in the WhatsApp module. */
+/** The viewer's own WhatsApp accounts and those shared with their groups, as in the WhatsApp module. */
 async function loadWhatsapp(user: AccessUser): Promise<OpsWhatsapp> {
-  const accounts = await listAccounts(user.id, 'whatsapp');
+  const accounts = await listUsableAccounts(user.id, 'whatsapp');
   if (accounts.length === 0) return { linked: false, unreadChats: 0, chats: [] };
   const accountIds = accounts.map((a) => a.id);
 
@@ -731,7 +735,7 @@ async function loadTasks(user: AccessUser): Promise<OpsTasks> {
   const where: Prisma.PersonalTodoWhereInput = {
     completed: false,
     deletedAt: null,
-    OR: [{ userId: user.id }, { shares: { some: { userId: user.id } } }],
+    ...todoVisibleTo(user.id),
   };
   const [rows, open, overdue] = await Promise.all([
     prisma.personalTodo.findMany({

@@ -5,15 +5,20 @@ import { Prisma } from '@prisma/client';
 import { APP_LOCALE } from './locale';
 import { prisma } from './prisma';
 import {
+  ACTUAL_STATUSES,
+  AWAY_CODES,
   CALL_IN_TRIGGERS,
   CODE_KIND,
+  COVER_SOURCES,
   DEFAULT_RULES,
+  LEAVE_CODE,
   LEAVE_TYPES,
-  LINE_ROLES,
+  type AwayCode,
   type CallInTrigger,
+  type CoverSource,
   type GeneratedCheck,
   type LeaveType,
-  type LineRole,
+  type Position,
   type RecordStatus,
   type RosterCell,
   type ShiftCode,
@@ -23,28 +28,32 @@ import {
   addMonths,
   baseOf,
   codeDef,
+  ctoBalance,
   datesBetween,
   emptyTotals,
   extraOf,
-  generatedCode,
+  generatedWritten,
+  generates,
   isConsole,
   isDateKey,
   isMonthKey,
+  isPosition,
   isRecordStatus,
   isRosterCode,
   isShiftCode,
   isTimeOfDay,
   isWorking,
   leaveAccrued,
+  leaveTypeOf,
   lineOnRoster,
   lineTotals,
   monthEnd,
   monthOf,
   monthStart,
   newViolations,
-  resolveCell,
   sanitizeRules,
   spanHours,
+  tagOf,
   validateRoster,
   writtenCodes,
   zonedNow,
@@ -60,6 +69,7 @@ import {
   newLineCodes,
   personName,
   planRosterImport,
+  readBilletPositions,
   readRosterWorkbook,
   rosterTemplate,
   withNewCodes,
@@ -69,6 +79,7 @@ import {
   type AuditView,
   type CallInView,
   type ChangeInput,
+  type CtoEntryView,
   type HolidayView,
   type LeaveBalance,
   type LeaveStatus,
@@ -80,6 +91,7 @@ import {
   type SaveResult,
   type TeamRoster,
   type UserOption,
+  EMPTY_LEAVE_BALANCE,
   buildLookup,
   cellOfRecord,
   indexRecords,
@@ -241,7 +253,7 @@ function lineView(row: LineRow): LineView {
     name: row.user?.name ?? row.displayName ?? row.code,
     email: row.user?.email ?? null,
     displayName: row.displayName,
-    role: (LINE_ROLES as readonly string[]).includes(row.role) ? (row.role as LineRole) : 'line',
+    position: isPosition(row.position) ? row.position : 'trc',
     cycleOffset: row.cycleOffset,
     startDate: row.startDate,
     endDate: row.endDate,
@@ -276,7 +288,7 @@ export interface LineInput {
   code?: unknown;
   userId?: unknown;
   displayName?: unknown;
-  role?: unknown;
+  position?: unknown;
   cycleOffset?: unknown;
   startDate?: unknown;
   endDate?: unknown;
@@ -299,8 +311,8 @@ function numberBetween(value: unknown, min: number, max: number, label: string):
   return n;
 }
 
-/** Turns a form into column values; only the keys present are returned. */
-async function lineData(input: LineInput, rules: ShiftRules, selfId: number | null) {
+/** Turns a form into column values; only the keys present are returned. `position` is the line's own when the form does not change it. */
+async function lineData(input: LineInput, rules: ShiftRules, selfId: number | null, current: Position = 'trc') {
   const data: Prisma.ShiftLineUncheckedUpdateInput = {};
 
   if ('code' in input) {
@@ -323,20 +335,28 @@ async function lineData(input: LineInput, rules: ShiftRules, selfId: number | nu
     }
   }
   if ('displayName' in input) data.displayName = String(input.displayName ?? '').trim().slice(0, 80) || null;
-  if ('role' in input) {
-    if (!(LINE_ROLES as readonly unknown[]).includes(input.role)) throw new RosterError('Unknown role.');
-    data.role = input.role as LineRole;
+  if ('position' in input) {
+    if (!isPosition(input.position)) throw new RosterError('Pick the position: Travel Risk Coordinator, Project Coordinator or Driver.');
+    data.position = input.position;
   }
-  if ('cycleOffset' in input) {
+  const position = (data.position as Position | undefined) ?? current;
+  if (position === 'pc') {
+    // A Project Coordinator keeps a weekday desk: there is no place in a rotation to hold.
+    if ('cycleOffset' in input || 'position' in input) data.cycleOffset = null;
+  } else if ('cycleOffset' in input) {
     if (input.cycleOffset === null || input.cycleOffset === '' || input.cycleOffset === undefined) {
-      data.cycleOffset = null;
+      // A driver is always in a block: without a choice they start on days.
+      data.cycleOffset = position === 'driver' ? 0 : null;
     } else {
       const offset = Number(input.cycleOffset);
-      if (!Number.isInteger(offset) || offset < 0 || offset >= rules.pattern.length) {
-        throw new RosterError(`The starting cycle day must be between 1 and ${rules.pattern.length}.`);
+      const limit = position === 'driver' ? 2 : rules.pattern.length;
+      if (!Number.isInteger(offset) || offset < 0 || offset >= limit) {
+        throw new RosterError(position === 'driver' ? 'Say whether the driver starts on days or on nights.' : `The starting cycle day must be between 1 and ${rules.pattern.length}.`);
       }
       data.cycleOffset = offset;
     }
+  } else if ('position' in input && position === 'driver') {
+    data.cycleOffset = 0;
   }
   if ('startDate' in input) data.startDate = optionalDate(input.startDate, 'Start date');
   if ('endDate' in input) data.endDate = optionalDate(input.endDate, 'End date');
@@ -370,7 +390,7 @@ export async function updateLine(actor: Actor, id: number, input: LineInput): Pr
   const existing = await prisma.shiftLine.findUnique({ where: { id } });
   if (!existing) return null;
   const rules = await getRules();
-  const data = await lineData(input, rules, id);
+  const data = await lineData(input, rules, id, isPosition(existing.position) ? existing.position : 'trc');
   const start = 'startDate' in data ? (data.startDate as string | null) : existing.startDate;
   const end = 'endDate' in data ? (data.endDate as string | null) : existing.endDate;
   if (start && end && end < start) throw new RosterError('The end date is before the start date.');
@@ -406,6 +426,12 @@ export async function listHolidays(from?: string, to?: string): Promise<HolidayV
     select: { id: true, date: true, name: true, country: true },
   });
   return rows;
+}
+
+/** Every public holiday as a set of dates, for the rules. */
+export async function holidayDates(db: Db = prisma): Promise<Set<string>> {
+  const rows = await db.publicHoliday.findMany({ select: { date: true } });
+  return new Set(rows.map((row) => row.date));
 }
 
 export async function addHoliday(actor: Actor, input: { date?: unknown; name?: unknown; country?: unknown }): Promise<HolidayView> {
@@ -445,6 +471,7 @@ function callInView(row: NonNullable<RecordRow['callIn']>): CallInView {
   return {
     id: row.id,
     trigger: (CALL_IN_TRIGGERS as readonly string[]).includes(row.trigger) ? (row.trigger as CallInTrigger) : 'absence',
+    source: (COVER_SOURCES as readonly unknown[]).includes(row.source) ? (row.source as CoverSource) : null,
     calledAt: row.calledAt.toISOString(),
     acknowledgedAt: row.acknowledgedAt?.toISOString() ?? null,
     arrivedAt: row.arrivedAt?.toISOString() ?? null,
@@ -557,17 +584,18 @@ function assertMonth(month: unknown): asserts month is string {
 export async function generateMonth(actor: Actor, month: string, options: { reset?: boolean } = {}): Promise<MonthView> {
   assertMonth(month);
   const rules = await getRules();
-  const lines = (await listLines()).filter((line) => line.active && line.cycleOffset !== null);
-  if (lines.length === 0) throw new RosterError('Add people to the rotation before generating a month.');
+  const lines = (await listLines()).filter((line) => line.active && generates(line));
+  if (lines.length === 0) throw new RosterError('Add people to the roster before generating a month.');
   const from = monthStart(month);
   const to = monthEnd(month);
+  const holidays = await holidayDates();
 
   const row = await prisma.$transaction(async (tx) => {
     const existing = await tx.shiftMonth.findUnique({ where: { month } });
     if (options.reset) {
       if (existing?.status === 'published') throw new RosterError('Unpublish the month before resetting it.');
       const actuals = await tx.shiftRecord.count({
-        where: { date: { gte: from, lte: to }, status: { in: ['worked', 'sick', 'no-show', 'call-in'] } },
+        where: { date: { gte: from, lte: to }, status: { in: [...ACTUAL_STATUSES] } },
       });
       if (actuals > 0) throw new RosterError('This month has recorded actuals, so it cannot be reset.');
       await tx.shiftRecord.deleteMany({ where: { date: { gte: from, lte: to } } });
@@ -577,9 +605,9 @@ export async function generateMonth(actor: Actor, month: string, options: { rese
     for (const line of lines) {
       for (const date of datesBetween(from, to)) {
         if (!lineOnRoster(line, date)) continue;
-        const cell = resolveCell(rules, line, date, () => null);
-        if (!cell) continue;
-        data.push({ lineId: line.id, date, generatedCode: cell.generated, plannedCode: cell.planned, ...plannedTimes(rules, cell.planned) });
+        const written = generatedWritten(rules, line, date, holidays);
+        if (written === null) continue;
+        data.push({ lineId: line.id, date, generatedCode: written, plannedCode: written, ...plannedTimes(rules, written) });
       }
     }
     const created = await tx.shiftRecord.createMany({ data, skipDuplicates: true });
@@ -618,12 +646,13 @@ export async function publishMonth(
 
   const from = monthStart(month);
   const to = monthEnd(month);
-  const [lines, records, months] = await Promise.all([
+  const [lines, records, months, holidays] = await Promise.all([
     listLines(),
     loadRecords(prisma, addDays(from, -14), to),
     generatedMonths(prisma, addDays(from, -14), to),
+    holidayDates(),
   ]);
-  const violations = validateRoster(rules, lines, buildLookup(indexRecords(records)), from, to, generatedCheck(months));
+  const violations = validateRoster(rules, lines, buildLookup(indexRecords(records)), from, to, generatedCheck(months), holidays);
   const blocks = violations.filter((v) => v.severity === 'block');
   const warnings = violations.filter((v) => v.severity === 'warn');
   const reason = options.forceReason?.trim() ?? '';
@@ -681,12 +710,13 @@ function checkChange(
   dates: string[],
   options: { confirmWarnings?: boolean; forceReason?: string | null },
   generated: GeneratedCheck,
+  holidays: ReadonlySet<string>,
 ): Checked {
   const sorted = [...dates].sort();
   const from = sorted[0] as string;
   const to = addDays(sorted[sorted.length - 1] as string, 13);
-  const before = validateRoster(rules, lines, buildLookup(records), from, to, generated);
-  const after = validateRoster(rules, lines, buildLookup(records, patches), from, to, generated);
+  const before = validateRoster(rules, lines, buildLookup(records), from, to, generated, holidays);
+  const after = validateRoster(rules, lines, buildLookup(records, patches), from, to, generated, holidays);
   const fresh = newViolations(before, after);
   const blocks = fresh.filter((v) => v.severity === 'block');
   const warnings = fresh.filter((v) => v.severity === 'warn');
@@ -699,13 +729,14 @@ async function loadWindow(dates: string[]) {
   const sorted = [...dates].sort();
   const from = addDays(sorted[0] as string, -14);
   const to = addDays(sorted[sorted.length - 1] as string, 14);
-  const [rules, lines, records, months] = await Promise.all([
+  const [rules, lines, records, months, holidays] = await Promise.all([
     getRules(),
     listLines(),
     loadRecords(prisma, from, to),
     generatedMonths(prisma, from, to),
+    holidayDates(),
   ]);
-  return { rules, lines, records: indexRecords(records), generated: generatedCheck(months) };
+  return { rules, lines, records: indexRecords(records), generated: generatedCheck(months), holidays };
 }
 
 // --- Overrides and swaps -----------------------------------------------------
@@ -735,7 +766,7 @@ export async function applyChanges(actor: Actor, input: ChangeInput[], options: 
     seen.add(key);
   }
 
-  const { rules, lines, records, generated } = await loadWindow(input.map((c) => c.date));
+  const { rules, lines, records, generated, holidays } = await loadWindow(input.map((c) => c.date));
   const lineById = new Map(lines.map((l) => [l.id, l]));
   /** `code` is as written; `base` is the built-in code it counts as. */
   const effective: Array<{ record: RecordView; code: string; base: ShiftCode; line: LineView }> = [];
@@ -754,10 +785,10 @@ export async function applyChanges(actor: Actor, input: ChangeInput[], options: 
         throw new RosterError(`${line.code} is not on the roster on ${dayLabel(change.date)}. Check their start and end dates, and that they are active.`);
       }
       // What the rotation would have given is kept beside it, as for every other day.
-      filling.push({ date: change.date, code: change.code, base, line, generated: line.cycleOffset !== null ? generatedCode(rules, line.cycleOffset, change.date) : change.code });
+      filling.push({ date: change.date, code: change.code, base, line, generated: generatedWritten(rules, line, change.date, holidays) ?? change.code });
       continue;
     }
-    if (record.callIn || ['worked', 'sick', 'no-show', 'call-in'].includes(record.status)) {
+    if (record.callIn || ACTUAL_STATUSES.includes(record.status)) {
       throw new RosterError(`${line.code} on ${dayLabel(change.date)} has recorded actuals. Clear them before changing the plan.`);
     }
     if (writtenCode(record) !== change.code) effective.push({ record, code: change.code, base, line });
@@ -776,7 +807,7 @@ export async function applyChanges(actor: Actor, input: ChangeInput[], options: 
       label: extraOf(rules, fill.code)?.code ?? null,
     });
   }
-  const check = checkChange(rules, lines, records, patches, [...effective.map((e) => e.record.date), ...filling.map((f) => f.date)], options, generated);
+  const check = checkChange(rules, lines, records, patches, [...effective.map((e) => e.record.date), ...filling.map((f) => f.date)], options, generated, holidays);
   if (!check.allowed) return { saved: false, blocks: check.blocks, warnings: check.warnings };
 
   const kind = options.kind === 'swap' ? 'swap' : 'override';
@@ -882,7 +913,8 @@ export async function recordActual(actor: Actor, input: ActualInput): Promise<Re
         status: input.status,
         actualStart: worked ? start : null,
         actualEnd: worked ? end : null,
-        hoursWorked: worked && start && end ? spanHours(start, end) : null,
+        // A driver's unpaid break comes off the span on site.
+        hoursWorked: worked && start && end ? Math.max(0, spanHours(start, end) - (codeDef(rules, planned, row.plannedCode).breakHours ?? 0)) : null,
         note: input.note?.trim().slice(0, 300) || null,
         updatedById: actor.id,
       },
@@ -952,9 +984,27 @@ function optionalInstant(value: unknown, label: string): Date | null {
   return date;
 }
 
+const NIGHT_REST_REASON = 'Rest after a night cover';
+
+/** The step of the cover order a call-in is, from what the person was rostered for. */
+function coverSource(rules: ShiftRules, line: LineView, record: RecordView, records: Map<string, RecordView>): CoverSource {
+  if (tagOf(rules, record.label) === 'pc') return 'pc';
+  if (CODE_KIND[record.plannedCode] === 'off') return 'overtime';
+  // The second day of an on-call pair follows a day that was also on call.
+  const yesterday = records.get(recordKey(line.id, addDays(record.date, -1)));
+  return yesterday?.plannedCode === 'OC' ? 'second_oc' : 'first_oc';
+}
+
 /**
- * Brings an on-call (or resting) person in. Converts the day to the shift
- * actually covered; the hours count as worked. Saving again edits the call-in.
+ * Brings someone in to a console shift. The cover order is the TRC on their
+ * first on-call day, a Project Coordinator on a weekday desk day, the TRC on
+ * their second on-call day, then an off-duty TRC at overtime; which step this
+ * was is recorded with it. The day becomes the shift actually covered and its
+ * hours count as worked. Saving again edits the call-in.
+ *
+ * A Project Coordinator's cover replaces the desk day, and a Night cover makes
+ * the next day a rest day. A TRC brought in from a rest day or on a public
+ * holiday earns a compensatory day.
  */
 export async function saveCallIn(actor: Actor, input: CallInInput): Promise<SaveResult> {
   if (!isDateKey(input.date) || !Number.isInteger(input.lineId)) throw new RosterError('Pick the person and date.');
@@ -965,30 +1015,44 @@ export async function saveCallIn(actor: Actor, input: CallInInput): Promise<Save
   if ((start && !isTimeOfDay(start)) || (end && !isTimeOfDay(end))) throw new RosterError('Times must be HH:MM.');
   if (Boolean(start) !== Boolean(end)) throw new RosterError('Give both the start and finish, or neither.');
 
-  const { rules, lines, records, generated } = await loadWindow([input.date]);
+  const { rules, lines, records, generated, holidays } = await loadWindow([input.date]);
   const key = recordKey(input.lineId, input.date);
   const record = records.get(key);
   const line = lines.find((l) => l.id === input.lineId);
   if (!record || !line) throw new RosterError('Nothing is rostered there. Generate the month first.');
+  if (line.position === 'driver') throw new RosterError('A driver cannot cover the console.');
   const kind = CODE_KIND[record.plannedCode];
-  if (kind !== 'on_call' && kind !== 'off') {
-    throw new RosterError('Only someone on call or on a rest day can be called in.');
+  const deskDay = line.position === 'pc' && tagOf(rules, record.label) === 'pc';
+  if (kind !== 'on_call' && kind !== 'off' && !deskDay) {
+    throw new RosterError(
+      line.position === 'pc'
+        ? 'A Project Coordinator covers the console in place of a weekday desk day.'
+        : 'Only someone on call or on a rest day can be called in.',
+    );
   }
   if (kind === 'off' && !input.escalationApproved) {
     throw new RosterError('Calling someone in from a rest day is an overtime escalation and needs approval.');
   }
+  const source = coverSource(rules, line, record, records);
+  const status: RecordStatus = deskDay ? 'cover' : 'call-in';
 
   const hours = start && end ? spanHours(start, end) : rules.codes[input.code].hours;
   const patches = new Map<string, Partial<RosterCell>>([
-    [key, { worked: input.code, status: 'call-in', start, end, hours: start && end ? hours : null }],
+    [key, { worked: input.code, status, start, end, hours: start && end ? hours : null }],
   ]);
-  const check = checkChange(rules, lines, records, patches, [input.date], input, generated);
+  // A Night ends at 07:00, an hour before the desk opens: the next desk day becomes a rest day.
+  const nextDate = addDays(input.date, 1);
+  const next = records.get(recordKey(line.id, nextDate));
+  const restNext = deskDay && input.code === 'N' && next && tagOf(rules, next.label) === 'pc' && !next.callIn && !ACTUAL_STATUSES.includes(next.status) ? next : null;
+  if (restNext) patches.set(recordKey(line.id, nextDate), { planned: 'X', label: null });
+  const check = checkChange(rules, lines, records, patches, [input.date], input, generated, holidays);
   if (!check.allowed) return { saved: false, blocks: check.blocks, warnings: check.warnings };
 
   const calledAt = optionalInstant(input.calledAt, 'Called at') ?? new Date();
   const arrivedAt = optionalInstant(input.arrivedAt, 'Arrived at');
   const times = {
     trigger: input.trigger,
+    source,
     calledAt,
     acknowledgedAt: optionalInstant(input.acknowledgedAt, 'Acknowledged at'),
     arrivedAt,
@@ -997,6 +1061,9 @@ export async function saveCallIn(actor: Actor, input: CallInInput): Promise<Save
     escalationApprovedById: kind === 'off' ? actor.id : null,
     note: input.note?.trim().slice(0, 300) || null,
   };
+  // Working a rest day or a public holiday earns a TRC a day in lieu.
+  const onHoliday = holidays.has(input.date);
+  const earns = line.position === 'trc' && (kind === 'off' || onHoliday);
 
   const saved = await prisma.$transaction(async (tx) => {
     await tx.shiftCallIn.upsert({
@@ -1004,33 +1071,60 @@ export async function saveCallIn(actor: Actor, input: CallInInput): Promise<Save
       create: { recordId: record.id, calledById: actor.id, ...times },
       update: times,
     });
-    const row = await tx.shiftRecord.update({
-      where: { id: record.id },
-      data: { workedCode: input.code, status: 'call-in', actualStart: start, actualEnd: end, hoursWorked: hours, updatedById: actor.id },
-      include: RECORD_INCLUDE,
-    });
+    const rows = [
+      await tx.shiftRecord.update({
+        where: { id: record.id },
+        data: { workedCode: input.code, status, actualStart: start, actualEnd: end, hoursWorked: hours, updatedById: actor.id },
+        include: RECORD_INCLUDE,
+      }),
+    ];
+    if (restNext) {
+      rows.push(
+        await tx.shiftRecord.update({
+          where: { id: restNext.id },
+          data: { plannedCode: 'X', status: 'planned', plannedStart: null, plannedEnd: null, reasonCode: NIGHT_REST_REASON, approvedById: actor.id, updatedById: actor.id },
+          include: RECORD_INCLUDE,
+        }),
+      );
+    }
+    if (earns) {
+      const entry = {
+        lineId: line.id,
+        date: input.date,
+        days: 1,
+        source: onHoliday ? 'holiday_callin' : 'overtime_callin',
+        expiresOn: addDays(input.date, rules.ctoExpiryDays),
+        approvedById: actor.id,
+      };
+      await tx.shiftCto.upsert({ where: { recordId: record.id }, create: { recordId: record.id, ...entry }, update: entry });
+    } else {
+      await tx.shiftCto.deleteMany({ where: { recordId: record.id } });
+    }
     await audit(tx, actor, {
       action: 'call_in',
       month: monthOf(input.date),
       date: input.date,
       lineCode: line.code,
-      summary: `${record.callIn ? 'Updated call-in' : 'Called in'} ${line.code} on ${dayLabel(input.date)}: ${record.plannedCode}→${input.code} (${input.trigger.replace('_', ' ')})`,
+      summary: `${record.callIn ? 'Updated' : deskDay ? 'Cover by' : 'Called in'} ${line.code} on ${dayLabel(input.date)}: ${writtenCode(record)}→${input.code} (${input.trigger.replace('_', ' ')}; ${source.replace('_', ' ')})${restNext ? `; ${dayLabel(nextDate)} made a rest day` : ''}${earns ? '; earns a compensatory day' : ''}`,
       detail: {
-        planned: record.plannedCode,
+        planned: writtenCode(record),
         worked: input.code,
         trigger: input.trigger,
+        source,
         hours,
         responseMinutes: times.responseMinutes,
         escalation: kind === 'off',
+        restDayAfter: restNext ? nextDate : null,
+        ctoEarned: earns,
         warnings: check.warnings.map((v) => v.message),
         blocks: check.blocks.map((v) => v.message),
         forceReason: input.forceReason?.trim() || null,
       },
       blockOverridden: check.blocks.length > 0,
     });
-    return row;
+    return rows;
   });
-  return { saved: true, blocks: check.blocks, warnings: check.warnings, records: [recordView(rules, saved)] };
+  return { saved: true, blocks: check.blocks, warnings: check.warnings, records: saved.map((row) => recordView(rules, row)) };
 }
 
 export async function cancelCallIn(actor: Actor, lineId: number, date: string): Promise<RecordView | null> {
@@ -1039,13 +1133,23 @@ export async function cancelCallIn(actor: Actor, lineId: number, date: string): 
     include: { ...RECORD_INCLUDE, line: { select: { code: true } } },
   });
   if (!row?.callIn) return null;
+  const rules = await getRules();
   const saved = await prisma.$transaction(async (tx) => {
     await tx.shiftCallIn.delete({ where: { recordId: row.id } });
+    await tx.shiftCto.deleteMany({ where: { recordId: row.id } });
     const updated = await tx.shiftRecord.update({
       where: { id: row.id },
       data: { workedCode: null, status: 'planned', actualStart: null, actualEnd: null, hoursWorked: null, updatedById: actor.id },
       include: RECORD_INCLUDE,
     });
+    // The rest day a Night cover put on the next day goes back to what it was.
+    const rest = await tx.shiftRecord.findUnique({ where: { lineId_date: { lineId, date: addDays(date, 1) } } });
+    if (rest && rest.reasonCode === NIGHT_REST_REASON && rest.plannedCode === 'X' && rest.status === 'planned' && isRosterCode(rules, rest.generatedCode)) {
+      await tx.shiftRecord.update({
+        where: { id: rest.id },
+        data: { plannedCode: rest.generatedCode, reasonCode: null, ...plannedTimes(rules, rest.generatedCode), updatedById: actor.id },
+      });
+    }
     await audit(tx, actor, {
       action: 'call_in',
       month: monthOf(date),
@@ -1055,7 +1159,7 @@ export async function cancelCallIn(actor: Actor, lineId: number, date: string): 
     });
     return updated;
   });
-  return recordView(await getRules(), saved);
+  return recordView(rules, saved);
 }
 
 // --- Leave -------------------------------------------------------------------
@@ -1066,22 +1170,26 @@ async function leaveViews(rows: LeaveRow[]): Promise<LeaveView[]> {
   const ids = [...new Set(rows.flatMap((r) => [r.requestedById, r.decidedById]).filter((id): id is number => id !== null))];
   const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
   const names = new Map(users.map((u) => [u.id, u.name]));
-  return rows.map((row) => ({
-    id: row.id,
-    lineId: row.lineId,
-    lineCode: row.line.code,
-    personName: row.line.user?.name ?? row.line.displayName ?? row.line.code,
-    type: (LEAVE_TYPES as readonly string[]).includes(row.type) ? (row.type as LeaveType) : 'other',
-    startDate: row.startDate,
-    endDate: row.endDate,
-    status: row.status as LeaveStatus,
-    shiftsCharged: row.shiftsCharged,
-    note: row.note,
-    requestedByName: row.requestedById ? (names.get(row.requestedById) ?? null) : null,
-    decidedByName: row.decidedById ? (names.get(row.decidedById) ?? null) : null,
-    decidedAt: row.decidedAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-  }));
+  return rows.map((row) => {
+    const type = leaveTypeOf(row.type);
+    return {
+      id: row.id,
+      lineId: row.lineId,
+      lineCode: row.line.code,
+      personName: row.line.user?.name ?? row.line.displayName ?? row.line.code,
+      type,
+      code: LEAVE_CODE[type],
+      startDate: row.startDate,
+      endDate: row.endDate,
+      status: row.status as LeaveStatus,
+      days: row.shiftsCharged,
+      note: row.note,
+      requestedByName: row.requestedById ? (names.get(row.requestedById) ?? null) : null,
+      decidedByName: row.decidedById ? (names.get(row.decidedById) ?? null) : null,
+      decidedAt: row.decidedAt?.toISOString() ?? null,
+      createdAt: row.createdAt.toISOString(),
+    };
+  });
 }
 
 const LEAVE_INCLUDE = { line: { include: LINE_INCLUDE } } as const;
@@ -1097,46 +1205,42 @@ export async function listLeaves(filter: { lineId?: number; from?: string } = {}
 }
 
 /**
- * Rostered console shifts inside a leave range: what the leave is charged.
- * On-call and rest days are never charged. Uses saved records where a month
- * exists and the rotation where it does not yet.
+ * The days a leave period records: every calendar day of it the person is on
+ * the roster, rest and on-call days included. How those days count against an
+ * entitlement is HR's rule, applied downstream; the roster records days away.
  */
-export async function chargeableDates(db: Db, rules: ShiftRules, line: LineView, start: string, end: string, leaveId: number | null): Promise<string[]> {
-  const records = indexRecords(await loadRecords(db, start, end, line.id, rules));
-  const out: string[] = [];
-  for (const date of datesBetween(start, end)) {
-    const record = records.get(recordKey(line.id, date));
-    if (record) {
-      const chargedHere = leaveId !== null && record.leaveId === leaveId;
-      if (chargedHere || (isWorking(record.plannedCode) && !record.callIn && ['planned', 'swapped'].includes(record.status))) out.push(date);
-    } else if (line.cycleOffset !== null && lineOnRoster(line, date)) {
-      const cell = resolveCell(rules, line, date, () => null);
-      if (cell && isConsole(cell.planned)) out.push(date);
-    }
-  }
-  return out;
+export function leaveDates(line: LineView, start: string, end: string): string[] {
+  return datesBetween(start, end).filter((date) => lineOnRoster({ ...line, active: true }, date));
 }
 
-/** Puts LV on the rostered shifts of an approved leave and recounts what it is charged. */
-async function applyLeave(tx: Prisma.TransactionClient, rules: ShiftRules, leave: { id: number; lineId: number; startDate: string; endDate: string }): Promise<void> {
+/** The leave codes as the roster writes them: LV, SL, CTO, UL and any other code that counts as leave. */
+function leaveCodes(rules: ShiftRules): string[] {
+  return writtenCodes(rules, (base) => base === 'LV');
+}
+
+/**
+ * Puts the leave's code on every day of an approved leave that has a record,
+ * and recounts the days it records. Days with recorded actuals, and days
+ * already written as leave by hand, are left as they are.
+ */
+async function applyLeave(tx: Prisma.TransactionClient, rules: ShiftRules, leave: { id: number; lineId: number; type: string; startDate: string; endDate: string }): Promise<void> {
   const lineRow = await tx.shiftLine.findUnique({ where: { id: leave.lineId }, include: LINE_INCLUDE });
   if (!lineRow) return;
-  const line = lineView(lineRow);
-  const charged = await chargeableDates(tx, rules, line, leave.startDate, leave.endDate, leave.id);
+  const dates = leaveDates(lineView(lineRow), leave.startDate, leave.endDate);
   await tx.shiftRecord.updateMany({
     where: {
       lineId: leave.lineId,
-      date: { in: charged },
+      date: { in: dates },
       leaveId: null,
-      plannedCode: { in: writtenCodes(rules, isWorking) },
+      plannedCode: { notIn: leaveCodes(rules) },
       status: { in: ['planned', 'swapped'] },
     },
-    data: { plannedCode: 'LV', status: 'leave', leaveId: leave.id, plannedStart: null, plannedEnd: null },
+    data: { plannedCode: LEAVE_CODE[leaveTypeOf(leave.type)], status: 'leave', leaveId: leave.id, plannedStart: null, plannedEnd: null },
   });
-  await tx.shiftLeave.update({ where: { id: leave.id }, data: { shiftsCharged: charged.length } });
+  await tx.shiftLeave.update({ where: { id: leave.id }, data: { shiftsCharged: dates.length } });
 }
 
-/** Hands back the shifts a leave had taken, restoring what the rotation produced. */
+/** Hands back the days a leave had taken, restoring what the roster generated. */
 async function revertLeave(tx: Prisma.TransactionClient, rules: ShiftRules, leaveId: number): Promise<void> {
   const rows = await tx.shiftRecord.findMany({ where: { leaveId } });
   for (const row of rows) {
@@ -1160,7 +1264,7 @@ export async function requestLeave(actor: Actor, lineId: number, input: LeaveInp
   if (!isDateKey(input.startDate) || !isDateKey(input.endDate)) throw new RosterError('Pick the first and last day of leave.');
   if (input.endDate < input.startDate) throw new RosterError('The last day is before the first.');
   if (datesBetween(input.startDate, input.endDate).length > 92) throw new RosterError('A single request can cover at most three months.');
-  const type = (LEAVE_TYPES as readonly unknown[]).includes(input.type) ? (input.type as LeaveType) : 'annual';
+  const type: LeaveType = (LEAVE_TYPES as readonly unknown[]).includes(input.type) ? (input.type as LeaveType) : 'annual';
   const lineRow = await prisma.shiftLine.findUnique({ where: { id: lineId }, include: LINE_INCLUDE });
   if (!lineRow) throw new RosterError('That person is not on the roster.');
   const overlap = await prisma.shiftLeave.findFirst({
@@ -1169,8 +1273,7 @@ export async function requestLeave(actor: Actor, lineId: number, input: LeaveInp
   });
   if (overlap) throw new RosterError('There is already leave requested or approved over those dates.');
 
-  const rules = await getRules();
-  const charged = await chargeableDates(prisma, rules, lineView(lineRow), input.startDate, input.endDate, null);
+  const days = leaveDates(lineView(lineRow), input.startDate, input.endDate).length;
   const row = await prisma.$transaction(async (tx) => {
     const created = await tx.shiftLeave.create({
       data: {
@@ -1178,7 +1281,7 @@ export async function requestLeave(actor: Actor, lineId: number, input: LeaveInp
         type,
         startDate: input.startDate as string,
         endDate: input.endDate as string,
-        shiftsCharged: charged.length,
+        shiftsCharged: days,
         note: String(input.note ?? '').trim().slice(0, 300) || null,
         requestedById: actor.id,
       },
@@ -1189,7 +1292,7 @@ export async function requestLeave(actor: Actor, lineId: number, input: LeaveInp
       lineCode: lineRow.code,
       date: created.startDate,
       month: monthOf(created.startDate),
-      summary: `Leave requested for ${lineRow.code}: ${dayLabel(created.startDate)} to ${dayLabel(created.endDate)} (${charged.length} shift${charged.length === 1 ? '' : 's'})`,
+      summary: `${LEAVE_CODE[type]} requested for ${lineRow.code}: ${dayLabel(created.startDate)} to ${dayLabel(created.endDate)} (${days} day${days === 1 ? '' : 's'})`,
     });
     return created;
   });
@@ -1197,9 +1300,9 @@ export async function requestLeave(actor: Actor, lineId: number, input: LeaveInp
 }
 
 /**
- * Approves, declines or cancels leave. Approving puts LV on the rostered
- * shifts, which opens coverage gaps by design: the result lists them so the
- * scheduler can assign cover on the roster.
+ * Approves, declines or cancels leave. Approving puts the leave code on every
+ * day of the period, which opens coverage gaps by design: the result lists
+ * them so the scheduler can assign cover on the roster.
  */
 export async function decideLeave(
   actor: Actor,
@@ -1227,18 +1330,18 @@ export async function decideLeave(
       lineCode: existing.line.code,
       date: existing.startDate,
       month: monthOf(existing.startDate),
-      summary: `Leave ${status} for ${existing.line.code}: ${dayLabel(existing.startDate)} to ${dayLabel(existing.endDate)}`,
-      detail: { from: existing.status, to: status, shiftsCharged: updated.shiftsCharged },
+      summary: `${LEAVE_CODE[leaveTypeOf(existing.type)]} ${status} for ${existing.line.code}: ${dayLabel(existing.startDate)} to ${dayLabel(existing.endDate)}`,
+      detail: { from: existing.status, to: status, days: updated.shiftsCharged },
     });
     return updated;
   });
 
   let needsCover: Violation[] = [];
   if (decision === 'approve') {
-    const [lines, records] = await Promise.all([listLines(), loadRecords(prisma, existing.startDate, existing.endDate)]);
+    const [lines, records, holidays] = await Promise.all([listLines(), loadRecords(prisma, existing.startDate, existing.endDate), holidayDates()]);
     const months = await generatedMonths(prisma, addDays(existing.startDate, -14), existing.endDate);
-    needsCover = validateRoster(rules, lines, buildLookup(indexRecords(records)), existing.startDate, existing.endDate, generatedCheck(months)).filter(
-      (v) => v.rule === 'coverage_gap' && records.some((r) => r.date === v.date),
+    needsCover = validateRoster(rules, lines, buildLookup(indexRecords(records)), existing.startDate, existing.endDate, generatedCheck(months), holidays).filter(
+      (v) => (v.rule === 'coverage_gap' || v.rule === 'driver_coverage') && records.some((r) => r.date === v.date),
     );
   }
   return { leave: (await leaveViews([row]))[0] as LeaveView, needsCover };
@@ -1262,29 +1365,144 @@ export async function withdrawLeave(actor: Actor, id: number, lineId: number): P
   return true;
 }
 
-/** Accrual and balance for the calendar year of `today`. */
+/**
+ * What the roster records about each person's time away, for the calendar
+ * year of `today`: days under each leave code, sick days in the last 12
+ * months, and the compensatory-time balance.
+ */
 export async function leaveBalances(lines: LineView[], today: string): Promise<Record<number, LeaveBalance>> {
   const year = today.slice(0, 4);
-  const rows = await prisma.shiftLeave.groupBy({
-    by: ['lineId', 'status'],
-    where: { type: 'annual', status: { in: ['approved', 'pending'] }, startDate: { gte: `${year}-01-01`, lte: `${year}-12-31` } },
-    _sum: { shiftsCharged: true },
-  });
+  const ids = lines.map((line) => line.id);
+  const sickFrom = addDays(today, -364);
+  const [requests, coded, sickCoded, sickStatus, ctoRows, ctoTaken] = await Promise.all([
+    prisma.shiftLeave.groupBy({
+      by: ['lineId', 'status'],
+      where: { type: 'annual', status: { in: ['approved', 'pending'] }, startDate: { gte: `${year}-01-01`, lte: `${year}-12-31` } },
+      _sum: { shiftsCharged: true },
+    }),
+    prisma.shiftRecord.groupBy({
+      by: ['lineId', 'plannedCode'],
+      where: { lineId: { in: ids }, date: { gte: `${year}-01-01`, lte: `${year}-12-31` }, plannedCode: { in: [...AWAY_CODES] } },
+      _count: { _all: true },
+    }),
+    prisma.shiftRecord.groupBy({
+      by: ['lineId'],
+      where: { lineId: { in: ids }, date: { gte: sickFrom, lte: today }, plannedCode: 'SL' },
+      _count: { _all: true },
+    }),
+    prisma.shiftRecord.groupBy({
+      by: ['lineId'],
+      where: { lineId: { in: ids }, date: { gte: sickFrom, lte: today }, status: 'sick' },
+      _count: { _all: true },
+    }),
+    prisma.shiftCto.findMany({ where: { lineId: { in: ids } }, select: { lineId: true, date: true, days: true, expiresOn: true } }),
+    prisma.shiftRecord.findMany({ where: { lineId: { in: ids }, plannedCode: 'CTO' }, select: { lineId: true, date: true } }),
+  ]);
   const out: Record<number, LeaveBalance> = {};
   for (const line of lines) {
-    const sum = (status: string) => rows.find((r) => r.lineId === line.id && r.status === status)?._sum.shiftsCharged ?? 0;
+    const sum = (status: string) => requests.find((r) => r.lineId === line.id && r.status === status)?._sum.shiftsCharged ?? 0;
+    const count = (rows: Array<{ lineId: number; _count: { _all: number } }>) => rows.find((r) => r.lineId === line.id)?._count._all ?? 0;
+    const away = { ...EMPTY_LEAVE_BALANCE.away };
+    for (const row of coded) if (row.lineId === line.id) away[row.plannedCode as AwayCode] = row._count._all;
     const accrued = leaveAccrued(line.leaveEntitlementDays, line.startDate, today);
-    const taken = sum('approved');
     out[line.id] = {
       entitlement: line.leaveEntitlementDays,
       opening: line.leaveOpeningBalance,
       accrued,
-      taken,
+      // Annual leave is what stands on the roster as LV, whether it came from a request or was written there.
+      taken: away.LV,
       pending: sum('pending'),
-      balance: Math.round((line.leaveOpeningBalance + accrued - taken) * 100) / 100,
+      balance: Math.round((line.leaveOpeningBalance + accrued - away.LV) * 100) / 100,
+      away,
+      sick12m: count(sickCoded) + count(sickStatus),
+      cto: ctoBalance(
+        ctoRows.filter((row) => row.lineId === line.id),
+        ctoTaken.filter((row) => row.lineId === line.id).map((row) => row.date),
+        today,
+      ),
     };
   }
   return out;
+}
+
+// --- Compensatory time off ---------------------------------------------------
+
+const CTO_INCLUDE = { line: { include: LINE_INCLUDE } } as const;
+type CtoRow = Prisma.ShiftCtoGetPayload<{ include: typeof CTO_INCLUDE }>;
+
+function ctoView(row: CtoRow): CtoEntryView {
+  return {
+    id: row.id,
+    lineId: row.lineId,
+    lineCode: row.line.code,
+    personName: row.line.user?.name ?? row.line.displayName ?? row.line.code,
+    date: row.date,
+    days: row.days,
+    source: row.source === 'holiday_callin' || row.source === 'overtime_callin' ? row.source : 'manual',
+    expiresOn: row.expiresOn,
+    note: row.note,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/** The ledger of compensatory days earned, newest first. Days taken are the CTO days on the roster. */
+export async function listCto(): Promise<CtoEntryView[]> {
+  const rows = await prisma.shiftCto.findMany({ include: CTO_INCLUDE, orderBy: [{ date: 'desc' }, { id: 'desc' }], take: 300 });
+  return rows.map(ctoView);
+}
+
+/** A compensatory day entered by hand: one the roster could not earn by itself, or a correction. */
+export async function addCto(actor: Actor, input: { lineId?: unknown; date?: unknown; days?: unknown; note?: unknown }): Promise<CtoEntryView> {
+  const lineId = Number(input.lineId);
+  const line = Number.isInteger(lineId) ? await prisma.shiftLine.findUnique({ where: { id: lineId }, select: { code: true } }) : null;
+  if (!line) throw new RosterError('Pick the person.');
+  if (!isDateKey(input.date)) throw new RosterError('Pick the date the day was earned.');
+  const days = Number(input.days ?? 1);
+  if (!Number.isFinite(days) || days === 0 || Math.abs(days) > 30) throw new RosterError('Days must be between -30 and 30, and not zero.');
+  const rules = await getRules();
+  const date = input.date;
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.shiftCto.create({
+      data: {
+        lineId,
+        date,
+        days,
+        source: 'manual',
+        expiresOn: days > 0 ? addDays(date, rules.ctoExpiryDays) : null,
+        note: String(input.note ?? '').trim().slice(0, 200) || null,
+        approvedById: actor.id,
+      },
+      include: CTO_INCLUDE,
+    });
+    await audit(tx, actor, {
+      action: 'cto',
+      lineCode: line.code,
+      date,
+      month: monthOf(date),
+      summary: `${days > 0 ? 'Added' : 'Deducted'} ${Math.abs(days)} compensatory day${Math.abs(days) === 1 ? '' : 's'} for ${line.code} (${dayLabel(date)})`,
+      detail: { days, note: created.note },
+    });
+    return created;
+  });
+  return ctoView(row);
+}
+
+/** Removes a ledger entry made by hand. One earned by a call-in goes when the call-in is cancelled. */
+export async function removeCto(actor: Actor, id: number): Promise<boolean> {
+  const existing = await prisma.shiftCto.findUnique({ where: { id }, include: { line: { select: { code: true } } } });
+  if (!existing) return false;
+  if (existing.recordId !== null) throw new RosterError('This day was earned by a call-in. Cancel the call-in to remove it.');
+  await prisma.$transaction(async (tx) => {
+    await tx.shiftCto.delete({ where: { id } });
+    await audit(tx, actor, {
+      action: 'cto',
+      lineCode: existing.line.code,
+      date: existing.date,
+      month: monthOf(existing.date),
+      summary: `Removed a compensatory-time entry of ${existing.days} day${Math.abs(existing.days) === 1 ? '' : 's'} for ${existing.line.code} (${dayLabel(existing.date)})`,
+    });
+  });
+  return true;
 }
 
 // --- Uploading a roster --------------------------------------------------------
@@ -1309,7 +1527,7 @@ export interface RosterImportInput {
 
 const IMPORT_REASON = 'Roster upload';
 const MAX_SHOWN_VIOLATIONS = 40;
-const LOCKED_STATUSES = ['worked', 'sick', 'no-show', 'call-in'];
+const LOCKED_STATUSES: string[] = [...ACTUAL_STATUSES];
 
 /**
  * Fills a month from an uploaded roster: one row per person, one column per
@@ -1327,7 +1545,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
   assertMonth(month);
   const from = monthStart(month);
   const to = monthEnd(month);
-  const [saved, lines, monthRow, records, months, users, leaves] = await Promise.all([
+  const [saved, lines, monthRow, records, months, users, leaves, holidays] = await Promise.all([
     getRules(),
     listLines(),
     prisma.shiftMonth.findUnique({ where: { month } }),
@@ -1335,6 +1553,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
     generatedMonths(prisma, addDays(from, -14), addDays(to, 14)),
     listUserOptions(),
     prisma.shiftLeave.findMany({ where: { status: 'approved', startDate: { lte: to }, endDate: { gte: from } } }),
+    holidayDates(),
   ]);
 
   // Read once to meet the file's own codes ("SOC-D", "WT"), then again with them
@@ -1372,7 +1591,16 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
   for (const [key, target] of Object.entries(input.mapping ?? {})) {
     if (target === 'new' || target === 'skip' || (Number.isInteger(target) && lines.some((line) => line.id === target))) mapping[key] = target;
   }
-  const plan = planRosterImport({ month, rules, reading, lines, existing, options: { blankAsOff: Boolean(input.blankAsOff), mapping } });
+  const plan = planRosterImport({
+    month,
+    rules,
+    reading,
+    lines,
+    existing,
+    holidays,
+    positions: readBilletPositions(input.sheets),
+    options: { blankAsOff: Boolean(input.blankAsOff), mapping },
+  });
 
   // In a month that is only now being created, approved leave lands on it as it does when generating.
   const onLeave = new Set<string>();
@@ -1383,12 +1611,12 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
         if (leave.lineId !== person.target) continue;
         for (const shift of person.shifts) {
           const base = baseOf(rules, shift.code);
-          if (base && isWorking(base) && shift.date >= leave.startDate && shift.date <= leave.endDate) onLeave.add(recordKey(leave.lineId, shift.date));
+          if (base && base !== 'LV' && shift.date >= leave.startDate && shift.date <= leave.endDate) onLeave.add(recordKey(leave.lineId, shift.date));
         }
       }
     }
   }
-  const checks = checkImport({ month, rules, plan, lines, lookup: buildLookup(index), generatedMonths: months, onLeave });
+  const checks = checkImport({ month, rules, plan, lines, lookup: buildLookup(index), generatedMonths: months, onLeave, holidays });
 
   // People the file adds: a login account with exactly their name becomes theirs.
   const free = users.filter((user) => user.lineId === null);
@@ -1429,7 +1657,7 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
     people: plan.people.map(({ shifts, ...person }) => ({ ...person, set: shifts.length, account: accountOf.get(person.key)?.name ?? null })),
     totals,
     notInFile: lines
-      .filter((line) => line.active && !inFile.has(line.id) && (monthRow ? [...existing.keys()].some((key) => key.startsWith(`${line.id}|`)) : line.cycleOffset !== null))
+      .filter((line) => line.active && !inFile.has(line.id) && (monthRow ? [...existing.keys()].some((key) => key.startsWith(`${line.id}|`)) : generates(line)))
       .map((line) => (line.name === line.code ? line.code : `${line.code} · ${line.name}`)),
     onLeave: onLeave.size,
     newCodes: learned.codes,
@@ -1459,9 +1687,11 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
         const created = await tx.shiftLine.create({
           data: {
             code: codes[i] as string,
-            displayName: personName(entry.names) || entry.person.label.slice(0, 80),
+            // A row named only by its billet ("TRC-1") has no name to show beside it.
+            displayName: (personName(entry.names) || entry.person.label.slice(0, 80)) === codes[i] ? null : personName(entry.names) || entry.person.label.slice(0, 80),
             userId: entry.account?.id ?? null,
-            cycleOffset: null,
+            position: entry.person.position ?? 'trc',
+            cycleOffset: entry.person.cycleOffset ?? null,
             sortOrder: last + i + 1,
           },
           select: { id: true },
@@ -1554,11 +1784,12 @@ export async function importRoster(actor: Actor, input: RosterImportInput): Prom
  */
 export async function rosterTemplateRows(month: string): Promise<string[][]> {
   assertMonth(month);
-  const [rules, lines, monthRow, records] = await Promise.all([
+  const [rules, lines, monthRow, records, holidays] = await Promise.all([
     getRules(),
     listLines(),
     prisma.shiftMonth.findUnique({ where: { month }, select: { month: true } }),
     loadRecords(prisma, monthStart(month), monthEnd(month)),
+    holidayDates(),
   ]);
   const index = indexRecords(records);
   return rosterTemplate({
@@ -1568,8 +1799,8 @@ export async function rosterTemplateRows(month: string): Promise<string[][]> {
       const record = index.get(recordKey(lineId, date));
       if (record) return writtenCode(record);
       const line = lines.find((l) => l.id === lineId);
-      if (monthRow || !line || line.cycleOffset === null || !lineOnRoster(line, date)) return null;
-      return resolveCell(rules, line, date, () => null)?.planned ?? null;
+      if (monthRow || !line || !lineOnRoster(line, date)) return null;
+      return generatedWritten(rules, line, date, holidays);
     },
   });
 }
@@ -1583,7 +1814,7 @@ export async function adminOverview(month: string): Promise<AdminOverview> {
   const today = zonedNow(rules.timeZone, Date.now()).date;
   const from = addDays(monthStart(month), -14);
   const to = addDays(monthEnd(month), 14);
-  const [lines, monthRow, records, holidays, leaves, users, months] = await Promise.all([
+  const [lines, monthRow, records, holidays, leaves, users, months, cto] = await Promise.all([
     listLines(),
     prisma.shiftMonth.findUnique({ where: { month } }),
     loadRecords(prisma, from, to),
@@ -1591,6 +1822,7 @@ export async function adminOverview(month: string): Promise<AdminOverview> {
     listLeaves(),
     listUserOptions(),
     generatedMonths(prisma, from, to),
+    listCto(),
   ]);
   return {
     today,
@@ -1602,6 +1834,7 @@ export async function adminOverview(month: string): Promise<AdminOverview> {
     holidays,
     leaves,
     balances: await leaveBalances(lines, today),
+    cto,
     users,
   };
 }

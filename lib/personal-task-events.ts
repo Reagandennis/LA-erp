@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { prisma } from '@/lib/prisma';
+import { sharedTodoIds } from './user-groups';
 
 /** A task with a due date, shaped for the Calendar module's `extraEvents`. */
 export interface TaskCalendarEvent {
@@ -18,8 +19,7 @@ export interface TaskCalendarEvent {
  * tagged so it reads as someone else's ask.
  */
 export async function listTaskCalendarEvents(userId: number, from: Date, to: Date): Promise<TaskCalendarEvent[]> {
-  const shared = await prisma.personalTodoShare.findMany({ where: { userId }, select: { todoId: true } });
-  const sharedIds = shared.map((s) => s.todoId);
+  const sharedIds = await sharedTodoIds(userId);
 
   const tasks = await prisma.personalTodo.findMany({
     where: {

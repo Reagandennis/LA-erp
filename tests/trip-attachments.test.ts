@@ -24,6 +24,8 @@ vi.mock('../lib/trips', () => ({
   getTripForUser,
   canEditTrip: (trip: { status: string; createdById: number; ownerId: number | null }, userId: number) =>
     trip.status !== 'Cancelled' && (trip.createdById === userId || trip.ownerId === userId),
+  isTeamTrip: (trip: { createdById: number; ownerId: number | null }, userId: number) => trip.createdById === userId || trip.ownerId === userId,
+  tripPeers: async () => undefined,
 }));
 
 import { resolveAttachmentType } from '../lib/attachment-types';

@@ -24,7 +24,7 @@ export const POST = createSendMediaPOST({
       mimeType: file.mimeType,
       fileName: file.fileName,
     });
-    await recordOutgoing(ctx.account.id, ctx.userId, {
+    await recordOutgoing(ctx.account.id, ctx.account.userId, {
       chatId,
       messageId: result.messageId,
       text: caption,

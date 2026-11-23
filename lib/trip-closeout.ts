@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { prisma } from './prisma';
+import { groupPeerIds } from './user-groups';
 import { ADMIN_ROLE_NAME } from './rbac';
 import { CLOSEOUT_CHECK_KEYS, type CloseoutCheckKey, allChecksConfirmed } from './trip-closeout-checks';
 import { type AccessUser, userHasModule, userHasRole } from './user';
@@ -89,6 +90,8 @@ export async function countPendingCloseouts(): Promise<number> {
 export async function listCloseoutTrips(user: AccessUser): Promise<CloseoutTripDto[]> {
   const isAdmin = userHasRole(user, ADMIN_ROLE_NAME);
   const canPlan = isAdmin || userHasModule(user, 'trip-planning');
+  // The viewer and their group-mates (lib/user-groups.ts): whose trips they may open.
+  const peers = await groupPeerIds(user.id);
   const rows = await prisma.trip.findMany({
     where: { OR: [{ status: 'Completed' }, { closeout: { closedAt: { not: null } } }] },
     orderBy: [{ endDate: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
@@ -124,7 +127,7 @@ export async function listCloseoutTrips(user: AccessUser): Promise<CloseoutTripD
     owner: row.owner,
     itemCount: row._count.items,
     logCount: row._count.logEntries,
-    canOpen: canPlan && (isAdmin || row.createdById === user.id || row.owner?.id === user.id),
+    canOpen: canPlan && (isAdmin || peers.has(row.createdById) || (row.owner !== null && peers.has(row.owner.id))),
     closeout: row.closeout ? serializeCloseout(row.closeout) : null,
   }));
 }

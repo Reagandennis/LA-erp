@@ -49,11 +49,19 @@ export function isWorking(code: ShiftCode): boolean {
   return CODE_KIND[code] === 'console' || CODE_KIND[code] === 'duty';
 }
 
-export const RECORD_STATUSES = ['planned', 'worked', 'sick', 'leave', 'swapped', 'call-in', 'no-show'] as const;
+export const RECORD_STATUSES = ['planned', 'worked', 'sick', 'leave', 'swapped', 'call-in', 'cover', 'no-show'] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];
 
 export function isRecordStatus(value: unknown): value is RecordStatus {
   return typeof value === 'string' && (RECORD_STATUSES as readonly string[]).includes(value);
+}
+
+/** What happened is on record: the plan for that day is history and is left alone. */
+export const ACTUAL_STATUSES: readonly RecordStatus[] = ['worked', 'sick', 'no-show', 'call-in', 'cover'];
+
+/** Confirmed as worked: to plan, by a call-in, or by a Project Coordinator covering the console. */
+export function isWorkedStatus(status: RecordStatus): boolean {
+  return status === 'worked' || status === 'call-in' || status === 'cover';
 }
 
 /** Rostered but not there: the plan stands, the shift was not worked. */
@@ -61,7 +69,7 @@ export function isAbsent(status: RecordStatus): boolean {
   return status === 'sick' || status === 'no-show';
 }
 
-export const CALL_IN_TRIGGERS = ['absence', 'task_load', 'incident', 'event'] as const;
+export const CALL_IN_TRIGGERS = ['absence', 'task_load', 'incident', 'event', 'leave_cover'] as const;
 export type CallInTrigger = (typeof CALL_IN_TRIGGERS)[number];
 
 export const TRIGGER_LABEL: Record<CallInTrigger, string> = {
@@ -69,13 +77,65 @@ export const TRIGGER_LABEL: Record<CallInTrigger, string> = {
   task_load: 'Task load',
   incident: 'Incident',
   event: 'Event',
+  leave_cover: 'Leave cover',
 };
 
-export const LEAVE_TYPES = ['annual', 'sick', 'other'] as const;
+/**
+ * Which step of the cover order filled a vacant shift: the TRC on their first
+ * on-call day, then a Project Coordinator (weekdays), then the TRC on their
+ * second on-call day, then an off-duty TRC at overtime.
+ */
+export const COVER_SOURCES = ['first_oc', 'pc', 'second_oc', 'overtime'] as const;
+export type CoverSource = (typeof COVER_SOURCES)[number];
+
+export const SOURCE_LABEL: Record<CoverSource, string> = {
+  first_oc: 'First on-call day',
+  pc: 'Project Coordinator',
+  second_oc: 'Second on-call day',
+  overtime: 'Off-duty, overtime',
+};
+
+/** Leave is recorded by the code it puts on the roster; the entitlement arithmetic is HR's. */
+export const LEAVE_TYPES = ['annual', 'sick', 'cto', 'unpaid'] as const;
 export type LeaveType = (typeof LEAVE_TYPES)[number];
 
-export const LINE_ROLES = ['line', 'hybrid', 'fallback'] as const;
-export type LineRole = (typeof LINE_ROLES)[number];
+export const LEAVE_CODE: Record<LeaveType, string> = { annual: 'LV', sick: 'SL', cto: 'CTO', unpaid: 'UL' };
+
+export const LEAVE_LABEL: Record<LeaveType, string> = {
+  annual: 'Annual leave',
+  sick: 'Sick leave',
+  cto: 'Compensatory time off',
+  unpaid: 'Unpaid leave',
+};
+
+/** The codes HR counts days away by. */
+export const AWAY_CODES = ['LV', 'SL', 'CTO', 'UL'] as const;
+export type AwayCode = (typeof AWAY_CODES)[number];
+
+export function leaveTypeOf(value: unknown): LeaveType {
+  if ((LEAVE_TYPES as readonly unknown[]).includes(value)) return value as LeaveType;
+  // Leave saved before the types followed the roster codes.
+  return value === 'other' ? 'unpaid' : 'annual';
+}
+
+/**
+ * The three positions on the roster. Travel Risk Coordinators run the 24/7
+ * console rotation; Project Coordinators keep a weekday desk and are the
+ * fallback and the second step of the cover order; drivers alternate two weeks
+ * of days with two weeks of nights.
+ */
+export const POSITIONS = ['trc', 'pc', 'driver'] as const;
+export type Position = (typeof POSITIONS)[number];
+
+export const POSITION_LABEL: Record<Position, string> = {
+  trc: 'Travel Risk Coordinator',
+  pc: 'Project Coordinator',
+  driver: 'Driver',
+};
+
+export function isPosition(value: unknown): value is Position {
+  return typeof value === 'string' && (POSITIONS as readonly string[]).includes(value);
+}
 
 // --- Configuration -----------------------------------------------------------
 
@@ -84,8 +144,19 @@ export interface ShiftCodeDef {
   /** 'HH:MM', console codes only. An end at or before the start is the next day. */
   start: string | null;
   end: string | null;
+  /** Paid hours. */
   hours: number;
+  /** Unpaid break inside the span, taken off when actual times are recorded. */
+  breakHours?: number;
 }
+
+/**
+ * What a code of the roster's own means to the rules beyond the built-in code
+ * it counts as: the Project Coordinator's desk day, a driver's day or night,
+ * and the kinds of day away HR counts.
+ */
+export const CODE_TAGS = ['pc', 'driver_day', 'driver_night', 'sick', 'cto', 'unpaid', 'deployed'] as const;
+export type CodeTag = (typeof CODE_TAGS)[number];
 
 /**
  * A code of the roster's own, written on it as-is ("SOC-D", "INT"). The rules
@@ -101,9 +172,30 @@ export interface ExtraCode {
   start: string | null;
   end: string | null;
   hours: number | null;
+  /** Set on the standard codes below; null on a code a roster made up for itself. */
+  tag?: CodeTag | null;
+  /** Unpaid break inside the span, in hours. */
+  breakHours?: number | null;
 }
 
-export const MAX_EXTRA_CODES = 30;
+/**
+ * The codes every roster has beside the built-in ones (platform template
+ * v0.3). Their names, times and hours are configuration; what they count as
+ * and what they mean to the rules is fixed.
+ */
+export const STANDARD_CODES: readonly ExtraCode[] = [
+  { code: 'PC', name: 'Project Coordinator desk day', as: 'W', start: '08:00', end: '17:00', hours: 8, tag: 'pc', breakHours: null },
+  { code: 'SD-D', name: 'Driver day, Mon–Thu', as: 'W', start: '08:00', end: '19:00', hours: 10, tag: 'driver_day', breakHours: 1 },
+  { code: 'SD-D3', name: 'Driver day, Friday', as: 'W', start: '09:00', end: '20:00', hours: 10, tag: 'driver_day', breakHours: 1 },
+  { code: 'SD-N', name: 'Driver night', as: 'W', start: '20:00', end: '06:00', hours: 9, tag: 'driver_night', breakHours: 1 },
+  { code: 'SD-N2', name: 'Driver night, late finish', as: 'W', start: '20:00', end: '07:30', hours: 10.5, tag: 'driver_night', breakHours: 1 },
+  { code: 'SL', name: 'Sick leave', as: 'LV', start: null, end: null, hours: null, tag: 'sick', breakHours: null },
+  { code: 'CTO', name: 'Compensatory time off', as: 'LV', start: null, end: null, hours: null, tag: 'cto', breakHours: null },
+  { code: 'UL', name: 'Unpaid leave', as: 'LV', start: null, end: null, hours: null, tag: 'unpaid', breakHours: null },
+  { code: 'ETH', name: 'Ethiopia relief', as: 'LV', start: null, end: null, hours: null, tag: 'deployed', breakHours: null },
+];
+
+export const MAX_EXTRA_CODES = 40;
 export const EXTRA_CODE_LENGTH = 8;
 
 /** What a roster's own code may look like: a short word, e.g. "SOC-D", "WT", "A/L". */
@@ -129,6 +221,16 @@ export interface ShiftRules {
   publishLeadDays: number;
   /** ISO weekday the payroll week starts on: 1 = Monday … 7 = Sunday. */
   weekStart: number;
+  /**
+   * A Monday on which the drivers' two-week blocks start: a driver with offset
+   * 0 is on days for the fortnight from here, on nights for the next, and so on.
+   */
+  driverAnchor: string;
+  /** Sick leave in any 12 months: days on full pay, then days on half pay. */
+  sickFullDays: number;
+  sickHalfDays: number;
+  /** A compensatory day lapses this many days after it is earned. */
+  ctoExpiryDays: number;
 }
 
 /** The December 2026 framework sample: 8-hour shifts on a 10-day rotation. */
@@ -143,9 +245,9 @@ export const DEFAULT_RULES: ShiftRules = {
     W: { name: 'Duty', start: '08:00', end: '17:00', hours: 8 },
     OC: { name: 'On call', start: null, end: null, hours: 0 },
     X: { name: 'Off', start: null, end: null, hours: 0 },
-    LV: { name: 'Leave', start: null, end: null, hours: 0 },
+    LV: { name: 'Annual leave', start: null, end: null, hours: 0 },
   },
-  extra: [],
+  extra: [...STANDARD_CODES],
   targetHours7d: 48,
   maxHours7d: 52,
   maxHours14d: 116,
@@ -155,6 +257,10 @@ export const DEFAULT_RULES: ShiftRules = {
   responseMinutes: 60,
   publishLeadDays: 14,
   weekStart: 1,
+  driverAnchor: '2026-11-30',
+  sickFullDays: 7,
+  sickHalfDays: 7,
+  ctoExpiryDays: 90,
 };
 
 // --- The roster's own codes --------------------------------------------------
@@ -163,6 +269,22 @@ export const DEFAULT_RULES: ShiftRules = {
 export function extraOf(rules: ShiftRules, written: string | null | undefined): ExtraCode | null {
   if (!written) return null;
   return rules.extra.find((extra) => extra.code === written) ?? null;
+}
+
+/** What a written code means to the rules beyond its built-in code; null for most. */
+export function tagOf(rules: ShiftRules, written: string | null | undefined): CodeTag | null {
+  return extraOf(rules, written)?.tag ?? null;
+}
+
+/** The code HR counts a day away under, for a cell planned as leave; null for ETH and the like. */
+export function awayCodeOf(rules: ShiftRules, planned: ShiftCode, label: string | null | undefined): AwayCode | null {
+  if (planned !== 'LV') return null;
+  const tag = tagOf(rules, label);
+  if (tag === 'sick') return 'SL';
+  if (tag === 'cto') return 'CTO';
+  if (tag === 'unpaid') return 'UL';
+  // A leave code a roster made up for itself ("A/L") is annual leave.
+  return tag === null ? 'LV' : null;
 }
 
 /** The built-in code a written code counts as; null when the roster does not know it. */
@@ -188,7 +310,19 @@ export function codeDef(rules: ShiftRules, code: ShiftCode, label?: string | nul
   if (!isWorking(code)) return { name: extra.name, start: null, end: null, hours: 0 };
   const start = extra.start ?? base.start;
   const end = extra.end ?? base.end;
-  return { name: extra.name, start, end, hours: extra.hours ?? (extra.start && extra.end ? spanHours(extra.start, extra.end) : base.hours) };
+  const breakHours = extra.breakHours ?? 0;
+  return {
+    name: extra.name,
+    start,
+    end,
+    hours: extra.hours ?? (extra.start && extra.end ? Math.max(0, spanHours(extra.start, extra.end) - breakHours) : base.hours),
+    ...(breakHours > 0 ? { breakHours } : {}),
+  };
+}
+
+/** The codes a roster made up for itself, without the standard ones every roster has. */
+export function ownCodes(rules: ShiftRules): ExtraCode[] {
+  return rules.extra.filter((extra) => !extra.tag);
 }
 
 /** Every code that can be written on the roster, built-in first. */
@@ -383,8 +517,15 @@ export function cycleRange(rules: ShiftRules, date: string): { from: string; to:
 
 export interface RosterLine {
   id: number;
+  /** The billet: "TRC-1", "DRV-2". */
   code: string;
-  /** Null keeps the line out of the generated rotation. */
+  /** Absent on rosters read before positions existed: a Travel Risk Coordinator. */
+  position?: Position;
+  /**
+   * A TRC's zero-based cycle day at the rotation start; null keeps them out of
+   * the rotation. A driver's block offset: 0 starts the anchor fortnight on
+   * days, 1 on nights. Not used for a Project Coordinator.
+   */
   cycleOffset: number | null;
   startDate: string | null;
   endDate: string | null;
@@ -421,6 +562,84 @@ export function patternCell(rules: ShiftRules, offset: number, date: string): Ro
   return { generated: code, planned: code, worked: null, status: 'planned', hours: null, start: null, end: null };
 }
 
+export function positionOf(line: Pick<RosterLine, 'position'>): Position {
+  return line.position ?? 'trc';
+}
+
+/** Monday to Friday and not a public holiday. */
+export function isWorkday(date: string, holidays?: ReadonlySet<string>): boolean {
+  return isoWeekday(date) <= 5 && !holidays?.has(date);
+}
+
+/**
+ * The last Monday-to-Friday week that lies wholly inside the month of `date`:
+ * the drivers' late-finish week (21–25 December in 2026).
+ */
+export function lastFullWorkWeek(month: string): { from: string; to: string } {
+  const end = monthEnd(month);
+  // The last Friday of the month, then back to its Monday.
+  const friday = addDays(end, -mod(isoWeekday(end) - 5, 7));
+  return { from: addDays(friday, -4), to: friday };
+}
+
+/** The standard code carrying `tag`, as this roster writes it; null when it has been removed. */
+function codeTagged(rules: ShiftRules, tag: CodeTag, prefer?: string): string | null {
+  const tagged = rules.extra.filter((extra) => extra.tag === tag);
+  return (tagged.find((extra) => extra.code === prefer) ?? tagged[0])?.code ?? null;
+}
+
+/**
+ * A driver's code on a date. Blocks of 14 days run from the anchor Monday; a
+ * driver is on days in the even blocks (offset 0) or the odd ones (offset 1),
+ * and on nights in the others. Weekends and public holidays are off.
+ * Day: SD-D, or SD-D3 on a Friday. Night: SD-N, or SD-N2 on a Tuesday and on
+ * Monday to Wednesday of the month's last full week.
+ */
+export function driverCode(rules: ShiftRules, offset: number, date: string, holidays?: ReadonlySet<string>): string {
+  if (!isWorkday(date, holidays)) return 'X';
+  const block = Math.floor(diffDays(date, rules.driverAnchor) / 14) + offset;
+  const weekday = isoWeekday(date);
+  if (mod(block, 2) === 0) return codeTagged(rules, 'driver_day', weekday === 5 ? 'SD-D3' : 'SD-D') ?? 'W';
+  const lastWeek = lastFullWorkWeek(monthOf(date));
+  const late = weekday === 2 || (weekday <= 3 && date >= lastWeek.from && date <= lastWeek.to);
+  return codeTagged(rules, 'driver_night', late ? 'SD-N2' : 'SD-N') ?? 'W';
+}
+
+/**
+ * What the roster generates for a line on a date, as written ("D", "PC",
+ * "SD-N2"); null for someone the roster does not generate for (a TRC outside
+ * the rotation).
+ *   TRC: the rotation pattern.
+ *   Project Coordinator: PC on a weekday that is not a public holiday, else X.
+ *   Driver: see `driverCode`.
+ */
+export function generatedWritten(rules: ShiftRules, line: RosterLine, date: string, holidays?: ReadonlySet<string>): string | null {
+  const position = positionOf(line);
+  if (position === 'pc') return isWorkday(date, holidays) ? (codeTagged(rules, 'pc', 'PC') ?? 'W') : 'X';
+  if (position === 'driver') return driverCode(rules, line.cycleOffset ?? 0, date, holidays);
+  return line.cycleOffset === null ? null : generatedCode(rules, line.cycleOffset, date);
+}
+
+/** True when the roster can generate this line's days: everyone but a TRC outside the rotation. */
+export function generates(line: RosterLine): boolean {
+  return positionOf(line) !== 'trc' || line.cycleOffset !== null;
+}
+
+/** A written code as an unsaved cell. */
+export function cellOfWritten(rules: ShiftRules, written: string): RosterCell {
+  const base = baseOf(rules, written) ?? 'X';
+  return {
+    generated: base,
+    planned: base,
+    worked: null,
+    status: base === 'LV' ? 'leave' : 'planned',
+    hours: null,
+    start: null,
+    end: null,
+    label: extraOf(rules, written)?.code ?? null,
+  };
+}
+
 /** True for dates inside a month whose records exist; see `resolveCell`. */
 export type GeneratedCheck = (date: string) => boolean;
 
@@ -436,12 +655,14 @@ export function resolveCell(
   date: string,
   lookup: CellLookup,
   generated?: GeneratedCheck,
+  holidays?: ReadonlySet<string>,
 ): RosterCell | null {
   const saved = lookup(line.id, date);
   if (saved) return saved;
   if (generated?.(date)) return null;
-  if (line.cycleOffset === null || !lineOnRoster(line, date)) return null;
-  return patternCell(rules, line.cycleOffset, date);
+  if (!lineOnRoster(line, date)) return null;
+  const written = generatedWritten(rules, line, date, holidays);
+  return written === null ? null : cellOfWritten(rules, written);
 }
 
 // --- Duties ------------------------------------------------------------------
@@ -469,7 +690,8 @@ export function dutyOf(rules: ShiftRules, cell: RosterCell | null, date: string)
   let endMinutes = minutesOf(endTime);
   if (endMinutes <= startMinutes) endMinutes += 24 * 60;
   const base = dayNumber(date) * 24 * 60;
-  const hours = cell.hours ?? (cell.start && cell.end ? spanHours(cell.start, cell.end) : def.hours);
+  // Recorded times are the span on site; a driver's unpaid break comes off it.
+  const hours = cell.hours ?? (cell.start && cell.end ? Math.max(0, spanHours(cell.start, cell.end) - (def.breakHours ?? 0)) : def.hours);
   return {
     code,
     date,
@@ -494,25 +716,37 @@ export type RuleId =
   | 'coverage_gap'
   | 'coverage_double'
   | 'no_on_call'
+  | 'no_fallback'
+  | 'driver_coverage'
+  | 'off_day_code'
+  | 'position_code'
+  | 'pc_cover'
   | 'rest'
   | 'weekly_max'
   | 'weekly_target'
   | 'fortnight'
   | 'weekly_rest'
-  | 'consecutive';
+  | 'consecutive'
+  | 'rest_day_worked';
 
 export type Severity = 'block' | 'warn';
 
 export const RULE_LABEL: Record<RuleId, string> = {
   coverage_gap: 'Coverage gap',
   coverage_double: 'Double cover',
-  no_on_call: 'No one on call',
+  no_on_call: 'No TRC on call',
+  no_fallback: 'No on call, no fallback',
+  driver_coverage: 'Driver coverage',
+  off_day_code: 'Weekend or holiday',
+  position_code: 'Code for another position',
+  pc_cover: 'Project Coordinator cover',
   rest: 'Rest between duties',
   weekly_max: 'Weekly hours limit',
   weekly_target: 'Weekly hours target',
   fortnight: 'Two-week hours',
   weekly_rest: 'Weekly rest day',
   consecutive: 'Consecutive duties',
+  rest_day_worked: 'Rest day worked',
 };
 
 export interface Violation {
@@ -539,9 +773,22 @@ function formatHours(hours: number): string {
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
 }
 
+/** True while the cell stands as planned: not absent, and not turned into another shift by a call-in. */
+function standsAs(cell: RosterCell, tag: CodeTag, rules: ShiftRules): boolean {
+  return !isAbsent(cell.status) && cell.worked === null && tagOf(rules, cell.label) === tag;
+}
+
 /**
  * Every rule, for dates `from`..`to` inclusive. Windows reach back before
- * `from` through `lookup` (and the rotation, where nothing is saved yet).
+ * `from` through `lookup` (and what the roster generates, where nothing is
+ * saved yet). `holidays` are the public holidays: without them the weekday
+ * rules treat every Monday to Friday as a working day.
+ *
+ * Blocks: a console shift nobody is on; less than the minimum rest; no day off
+ * in seven; over the weekly limit; drivers not one on days and one on nights;
+ * a desk or driver code on a weekend or holiday; a code that belongs to
+ * another position; a Project Coordinator covering the console on a weekend or
+ * holiday. Everything else warns.
  */
 export function validateRoster(
   rules: ShiftRules,
@@ -550,56 +797,96 @@ export function validateRoster(
   from: string,
   to: string,
   generated?: GeneratedCheck,
+  holidays?: ReadonlySet<string>,
 ): Violation[] {
   const out: Violation[] = [];
   const dates = datesBetween(from, to);
   const needed = CONSOLE_CODES.filter((code) => rules.pattern.includes(code));
   const expectsOnCall = rules.pattern.includes('OC');
+  const resolve = (line: RosterLine, date: string) => resolveCell(rules, line, date, lookup, generated, holidays);
+  const general = (rule: RuleId, severity: Severity, date: string, message: string, suffix = '') =>
+    out.push({ key: `${rule}|${date}${suffix}`, rule, severity, date, lineId: null, lineCode: null, message });
+  const personal = (rule: RuleId, severity: Severity, line: RosterLine, date: string, message: string) =>
+    out.push({ key: `${rule}|${line.id}|${date}`, rule, severity, date, lineId: line.id, lineCode: line.code, message });
 
-  // Coverage: exactly one person on each console shift, and someone on call.
   for (const date of dates) {
-    const cells = lines
-      .map((line) => resolveCell(rules, line, date, lookup, generated))
-      .filter((cell): cell is RosterCell => cell !== null);
-    if (cells.length === 0) continue;
+    const day = lines
+      .map((line) => ({ line, position: positionOf(line), cell: resolve(line, date) }))
+      .filter((entry): entry is { line: RosterLine; position: Position; cell: RosterCell } => entry.cell !== null);
+    if (day.length === 0) continue;
+    const workday = isWorkday(date, holidays);
+    const offDay = holidays?.has(date) ? 'a public holiday' : 'a weekend';
 
-    for (const code of needed) {
-      const planned = cells.filter((c) => c.planned === code && !isAbsent(c.status)).length;
-      const calledIn = cells.filter((c) => c.worked === code && c.planned !== code).length;
-      const name = `${rules.codes[code].name} (${code})`;
-      if (planned + calledIn === 0) {
-        out.push({
-          key: `coverage_gap|${date}|${code}`,
-          rule: 'coverage_gap',
-          severity: 'block',
-          date,
-          lineId: null,
-          lineCode: null,
-          message: `No one on ${name} on ${shortDate(date)}.`,
-        });
-      } else if (planned >= 2) {
-        out.push({
-          key: `coverage_double|${date}|${code}`,
-          rule: 'coverage_double',
-          severity: 'block',
-          date,
-          lineId: null,
-          lineCode: null,
-          message: `${planned} people on ${name} on ${shortDate(date)}; there should be one.`,
-        });
+    // The console: exactly one person on each shift, from the TRCs and the Project Coordinators.
+    const console = day.filter((entry) => entry.position !== 'driver').map((entry) => entry.cell);
+    if (console.length > 0) {
+      for (const code of needed) {
+        const planned = console.filter((c) => c.planned === code && !isAbsent(c.status)).length;
+        const calledIn = console.filter((c) => c.worked === code && c.planned !== code).length;
+        const name = `${rules.codes[code].name} (${code})`;
+        if (planned + calledIn === 0) {
+          general('coverage_gap', 'block', date, `No one on ${name} on ${shortDate(date)}.`, `|${code}`);
+        } else if (planned + calledIn >= 2) {
+          // Allowed, and shown as a double: worth a look, never a reason to stop.
+          general('coverage_double', 'warn', date, `${planned + calledIn} people on ${name} on ${shortDate(date)}; there should be one.`, `|${code}`);
+        }
       }
     }
 
-    if (expectsOnCall && !cells.some((c) => c.planned === 'OC')) {
-      out.push({
-        key: `no_on_call|${date}`,
-        rule: 'no_on_call',
-        severity: 'warn',
-        date,
-        lineId: null,
-        lineCode: null,
-        message: `No one on call on ${shortDate(date)}.`,
-      });
+    // On call: a TRC in reserve; on a weekday a Project Coordinator at their desk is the fallback.
+    const trcs = day.filter((entry) => entry.position === 'trc');
+    if (expectsOnCall && trcs.length > 0 && !trcs.some((entry) => entry.cell.planned === 'OC')) {
+      const fallback = workday && day.some((entry) => entry.position === 'pc' && standsAs(entry.cell, 'pc', rules));
+      if (fallback) general('no_on_call', 'warn', date, `No TRC on call on ${shortDate(date)}; a Project Coordinator is the fallback.`);
+      else general('no_fallback', 'warn', date, `No TRC on call and no fallback on ${shortDate(date)}.`);
+    }
+
+    // Drivers: one on days and one on nights each working day.
+    const drivers = day.filter((entry) => entry.position === 'driver');
+    if (drivers.length > 0 && workday) {
+      const days = drivers.filter((entry) => standsAs(entry.cell, 'driver_day', rules)).length;
+      const nights = drivers.filter((entry) => standsAs(entry.cell, 'driver_night', rules)).length;
+      if (days !== 1 || nights !== 1) {
+        const have = (count: number, what: string) => (count === 0 ? `no ${what} driver` : count === 1 ? `one ${what} driver` : `${count} ${what} drivers`);
+        general('driver_coverage', 'block', date, `${shortDate(date)} has ${have(days, 'day')} and ${have(nights, 'night')}; it needs one of each.`);
+      }
+    }
+
+    for (const { line, position, cell } of day) {
+      if (isAbsent(cell.status)) continue;
+      const tag = cell.worked === null ? tagOf(rules, cell.label) : null;
+      const code = cell.worked ?? cell.planned;
+      const written = cell.label ?? cell.planned;
+
+      // A code belongs to its position.
+      if (tag === 'pc' && position !== 'pc') {
+        personal('position_code', 'block', line, date, `${line.code} has ${written} on ${shortDate(date)}; the desk day is for Project Coordinators.`);
+      } else if ((tag === 'driver_day' || tag === 'driver_night') && position !== 'driver') {
+        personal('position_code', 'block', line, date, `${line.code} has ${written} on ${shortDate(date)}; that is a driver's shift.`);
+      } else if (position === 'driver' && (isConsole(code) || code === 'OC')) {
+        personal('position_code', 'block', line, date, `${line.code} is a driver and cannot be on ${rules.codes[code].name} on ${shortDate(date)}.`);
+      }
+
+      // Desk days and driver shifts are weekday work: off on weekends and public holidays.
+      if (!workday && (tag === 'pc' || tag === 'driver_day' || tag === 'driver_night')) {
+        personal('off_day_code', 'block', line, date, `${line.code} has ${written} on ${shortDate(date)}, ${offDay}; it must be Off or leave.`);
+      }
+
+      // A Project Coordinator covers the console in place of a weekday desk day.
+      if (position === 'pc' && isConsole(code) && !workday) {
+        personal('pc_cover', 'block', line, date, `${line.code} is on ${rules.codes[code].name} on ${shortDate(date)}, ${offDay}; a Project Coordinator covers weekdays only, unless agreed.`);
+      }
+
+      // A TRC's rest day is protected: working it is overtime and earns a day in lieu.
+      if (position === 'trc' && cell.generated === 'X' && cell.worked === null && isWorking(cell.planned)) {
+        personal(
+          'rest_day_worked',
+          'warn',
+          line,
+          date,
+          `${line.code} is rostered to work a rest day on ${shortDate(date)}: paid as overtime (1.5x, 2x on a public holiday) and earns a compensatory day.`,
+        );
+      }
     }
   }
 
@@ -613,11 +900,13 @@ export function validateRoster(
     const duties: Array<Duty | null> = [];
     for (let i = 0; i < span; i += 1) {
       const date = dateOfDay(firstDay + i);
-      const cell = resolveCell(rules, line, date, lookup, generated);
+      const cell = resolve(line, date);
       cells.push(cell);
       duties.push(dutyOf(rules, cell, date));
     }
     if (!duties.some(Boolean) && !cells.some(Boolean)) continue;
+    // The 48-hour target is the TRCs'; a driver's day week is planned at 50.
+    const hasTarget = positionOf(line) === 'trc';
 
     const hoursOver = (endIndex: number, days: number) => {
       let total = 0;
@@ -634,18 +923,18 @@ export function validateRoster(
       run = duty ? run + 1 : 0;
 
       if (duty) {
+        const cell = cells[i] as RosterCell;
+        // A desk day after a cover starts late rather than early: a Swing ending 23:00 puts the
+        // next desk day at 10:00. It only fails when no desk day is left (after a Night).
+        if (previous && cell.worked === null && !cell.start && tagOf(rules, cell.label) === 'pc') {
+          const earliest = previous.end + rules.minRestHours * 60;
+          if (duty.start < earliest && earliest < duty.end) duty.start = earliest;
+        }
         if (inRange && previous) {
           const rest = (duty.start - previous.end) / 60;
           if (rest < rules.minRestHours) {
-            out.push({
-              key: `rest|${line.id}|${date}`,
-              rule: 'rest',
-              severity: 'block',
-              date,
-              lineId: line.id,
-              lineCode: line.code,
-              message: `${line.code} has ${formatHours(Math.max(0, rest))} h rest before ${rules.codes[duty.code].name} on ${shortDate(date)}; the minimum is ${rules.minRestHours} h.`,
-            });
+            const name = codeDef(rules, duty.code, cell.worked ? null : cell.label).name;
+            personal('rest', 'block', line, date, `${line.code} has ${formatHours(Math.max(0, rest))} h rest before ${name} on ${shortDate(date)}; the minimum is ${rules.minRestHours} h.`);
           }
         }
         previous = duty;
@@ -654,50 +943,18 @@ export function validateRoster(
         if (inRange) {
           const week = hoursOver(i, 7);
           if (week > rules.maxHours7d) {
-            out.push({
-              key: `weekly_max|${line.id}|${date}`,
-              rule: 'weekly_max',
-              severity: 'block',
-              date,
-              lineId: line.id,
-              lineCode: line.code,
-              message: `${line.code} reaches ${formatHours(week)} h in the 7 days to ${shortDate(date)}; the limit is ${rules.maxHours7d} h.`,
-            });
-          } else if (week > rules.targetHours7d) {
-            out.push({
-              key: `weekly_target|${line.id}|${date}`,
-              rule: 'weekly_target',
-              severity: 'warn',
-              date,
-              lineId: line.id,
-              lineCode: line.code,
-              message: `${line.code} reaches ${formatHours(week)} h in the 7 days to ${shortDate(date)}; the target is ${rules.targetHours7d} h.`,
-            });
+            personal('weekly_max', 'block', line, date, `${line.code} reaches ${formatHours(week)} h in the 7 days to ${shortDate(date)}; the limit is ${rules.maxHours7d} h.`);
+          } else if (hasTarget && week > rules.targetHours7d) {
+            personal('weekly_target', 'warn', line, date, `${line.code} reaches ${formatHours(week)} h in the 7 days to ${shortDate(date)}; the target is ${rules.targetHours7d} h.`);
           }
 
           const fortnight = hoursOver(i, 14);
           if (fortnight > rules.maxHours14d) {
-            out.push({
-              key: `fortnight|${line.id}|${date}`,
-              rule: 'fortnight',
-              severity: 'warn',
-              date,
-              lineId: line.id,
-              lineCode: line.code,
-              message: `${line.code} reaches ${formatHours(fortnight)} h in the 14 days to ${shortDate(date)}; the cap is ${rules.maxHours14d} h.`,
-            });
+            personal('fortnight', 'warn', line, date, `${line.code} reaches ${formatHours(fortnight)} h in the 14 days to ${shortDate(date)}; the cap is ${rules.maxHours14d} h.`);
           }
 
           if (run > rules.maxConsecutiveDuties) {
-            out.push({
-              key: `consecutive|${line.id}|${date}`,
-              rule: 'consecutive',
-              severity: 'warn',
-              date,
-              lineId: line.id,
-              lineCode: line.code,
-              message: `${line.code} is on duty ${run} days running by ${shortDate(date)}; more than ${rules.maxConsecutiveDuties} needs a look.`,
-            });
+            personal('consecutive', 'warn', line, date, `${line.code} is on duty ${run} days running by ${shortDate(date)}; more than ${rules.maxConsecutiveDuties} needs a look.`);
           }
         }
       }
@@ -712,15 +969,7 @@ export function validateRoster(
           }
         }
         if (!rested) {
-          out.push({
-            key: `weekly_rest|${line.id}|${date}`,
-            rule: 'weekly_rest',
-            severity: 'block',
-            date,
-            lineId: line.id,
-            lineCode: line.code,
-            message: `${line.code} has no full day off in the 7 days to ${shortDate(date)}.`,
-          });
+          personal('weekly_rest', 'block', line, date, `${line.code} has no full day off in the 7 days to ${shortDate(date)}.`);
         }
       }
     }
@@ -739,6 +988,8 @@ export function newViolations(before: Violation[], after: Violation[]): Violatio
 
 export interface LineTotals {
   codes: Record<ShiftCode, number>;
+  /** Calendar days away under each code HR counts. */
+  away: Record<AwayCode, number>;
   /** Days of work on the roster (console shifts and other duties), including call-ins. */
   shifts: number;
   hours: number;
@@ -751,6 +1002,7 @@ export interface LineTotals {
 export function emptyTotals(): LineTotals {
   return {
     codes: { D: 0, S: 0, N: 0, W: 0, OC: 0, X: 0, LV: 0 },
+    away: { LV: 0, SL: 0, CTO: 0, UL: 0 },
     shifts: 0,
     hours: 0,
     callIns: 0,
@@ -770,12 +1022,15 @@ export function lineTotals(
   for (const { date, cell } of cells) {
     if (!cell) continue;
     totals.codes[cell.planned] += 1;
+    const away = awayCodeOf(rules, cell.planned, cell.label);
+    if (away) totals.away[away] += 1;
     const duty = dutyOf(rules, cell, date);
     if (!duty) continue;
     totals.shifts += 1;
     totals.hours += duty.hours;
     if (duty.calledIn) totals.callIns += 1;
-    if (duty.code === 'N') totals.nights += 1;
+    // A night is a console Night or a driver's night shift.
+    if (duty.code === 'N' || (cell.worked === null && tagOf(rules, cell.label) === 'driver_night')) totals.nights += 1;
     if (isoWeekday(date) >= 6) totals.weekendShifts += 1;
     if (holidays.has(date)) totals.holidayShifts += 1;
   }
@@ -789,12 +1044,16 @@ export interface PayrollTotals {
   /** Confirmed as worked, call-ins included. */
   workedHours: number;
   callInHours: number;
+  /** Worked by a Project Coordinator covering the console in place of a desk day. */
+  coverHours: number;
   /** Above the weekly limit: paid at 1.5x. */
   overtimeHours: number;
   /** Worked on a public holiday: paid at 2x. */
   holidayHours: number;
-  /** Worked on a rostered rest day: paid at 2x. */
+  /** Worked on a rostered rest day: overtime at 1.5x, and a compensatory day earned. */
   restDayHours: number;
+  /** Days of unpaid leave, for payroll to deduct. */
+  unpaidDays: number;
   /** Past shifts nobody has confirmed as worked yet. */
   unconfirmed: number;
   sickDays: number;
@@ -824,16 +1083,18 @@ export function payrollTotals(
     plannedHours: 0,
     workedHours: 0,
     callInHours: 0,
+    coverHours: 0,
     overtimeHours: 0,
     holidayHours: 0,
     restDayHours: 0,
+    unpaidDays: 0,
     unconfirmed: 0,
     sickDays: 0,
     noShows: 0,
   };
   const workedOn = (date: string): number => {
     const cell = lookup(line.id, date);
-    if (!cell || (cell.status !== 'worked' && cell.status !== 'call-in')) return 0;
+    if (!cell || !isWorkedStatus(cell.status)) return 0;
     return dutyOf(rules, cell, date)?.hours ?? 0;
   };
 
@@ -843,12 +1104,14 @@ export function payrollTotals(
     if (isWorking(cell.planned)) totals.plannedHours += codeDef(rules, cell.planned, cell.label).hours;
     if (cell.status === 'sick') totals.sickDays += 1;
     if (cell.status === 'no-show') totals.noShows += 1;
+    if (awayCodeOf(rules, cell.planned, cell.label) === 'UL') totals.unpaidDays += 1;
     if (cell.status === 'planned' && isWorking(cell.planned) && date < today) totals.unconfirmed += 1;
 
     const hours = workedOn(date);
     if (hours === 0) continue;
     totals.workedHours += hours;
     if (cell.status === 'call-in') totals.callInHours += hours;
+    if (cell.status === 'cover') totals.coverHours += hours;
     if (holidays.has(date)) totals.holidayHours += hours;
     if (CODE_KIND[cell.planned] === 'off') totals.restDayHours += hours;
   }
@@ -879,6 +1142,62 @@ export function leaveAccrued(entitlementDays: number, startDate: string | null, 
   let months = (ty - fy) * 12 + (tm - fm);
   if (td < fd) months -= 1;
   return Math.round(Math.max(0, months) * (entitlementDays / 12) * 100) / 100;
+}
+
+// --- Compensatory time off ---------------------------------------------------
+
+export interface CtoEarned {
+  /** The date the day was earned. */
+  date: string;
+  days: number;
+  /** The last date it can be taken; null never lapses. */
+  expiresOn: string | null;
+}
+
+export interface CtoBalance {
+  earned: number;
+  taken: number;
+  /** Earned, not taken, and past its expiry. */
+  lapsed: number;
+  /** What can still be taken today. */
+  balance: number;
+  /** Of the balance, what lapses within `soonDays`. */
+  expiringSoon: number;
+  /** The earliest expiry among days still available. */
+  nextExpiry: string | null;
+}
+
+/**
+ * The compensatory-time balance. Each day taken uses the earliest-earned day
+ * that had not lapsed on the date it was taken; a day taken with nothing to
+ * draw on shows as a negative balance for HR to settle.
+ */
+export function ctoBalance(earned: CtoEarned[], takenDates: string[], today: string, soonDays = 30): CtoBalance {
+  const pool = [...earned].sort((a, b) => a.date.localeCompare(b.date)).map((entry) => ({ ...entry, left: entry.days }));
+  let unmatched = 0;
+  for (const date of [...takenDates].sort()) {
+    let need = 1;
+    for (const entry of pool) {
+      if (need <= 0) break;
+      if (entry.left <= 0 || (entry.expiresOn !== null && entry.expiresOn < date)) continue;
+      const used = Math.min(entry.left, need);
+      entry.left -= used;
+      need -= used;
+    }
+    unmatched += need;
+  }
+  const soon = addDays(today, soonDays);
+  const live = pool.filter((entry) => entry.left > 0 && (entry.expiresOn === null || entry.expiresOn >= today));
+  const sum = (entries: Array<{ left: number }>) => Math.round(entries.reduce((total, entry) => total + entry.left, 0) * 100) / 100;
+  const expiries = live.map((entry) => entry.expiresOn).filter((date): date is string => date !== null).sort();
+  return {
+    earned: Math.round(earned.reduce((total, entry) => total + entry.days, 0) * 100) / 100,
+    taken: takenDates.length,
+    lapsed: sum(pool.filter((entry) => entry.left > 0 && entry.expiresOn !== null && entry.expiresOn < today)),
+    balance: Math.round((sum(live) - unmatched) * 100) / 100,
+    expiringSoon: sum(live.filter((entry) => entry.expiresOn !== null && entry.expiresOn <= soon)),
+    nextExpiry: expiries[0] ?? null,
+  };
 }
 
 // --- Now and next ------------------------------------------------------------
@@ -960,7 +1279,7 @@ export function sanitizeRules(input: unknown, base: ShiftRules = DEFAULT_RULES):
   const extraRaw = pick('extra');
   if (extraRaw !== undefined && extraRaw !== null && !Array.isArray(extraRaw)) throw new Error('The roster codes are not valid.');
   const extraList = (extraRaw ?? []) as unknown[];
-  if (extraList.length > MAX_EXTRA_CODES) throw new Error(`A roster can have up to ${MAX_EXTRA_CODES} codes of its own.`);
+  if (extraList.length > MAX_EXTRA_CODES) throw new Error(`A roster can have up to ${MAX_EXTRA_CODES - STANDARD_CODES.length} codes of its own.`);
   const taken = new Set<string>(SHIFT_CODES.map((code) => code.toLowerCase()));
   const extra = extraList.map((item): ExtraCode => {
     const entry = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
@@ -970,22 +1289,48 @@ export function sanitizeRules(input: unknown, base: ShiftRules = DEFAULT_RULES):
     taken.add(code.toLowerCase());
     if (!isShiftCode(entry.as)) throw new Error(`Say what ${code} counts as.`);
     const name = String(entry.name ?? '').trim().slice(0, 30) || code;
-    if (!isWorking(entry.as)) return { code, name, as: entry.as, start: null, end: null, hours: null };
+    if (!isWorking(entry.as)) return { code, name, as: entry.as, start: null, end: null, hours: null, tag: null, breakHours: null };
     const start = entry.start || null;
     const end = entry.end || null;
     if (Boolean(start) !== Boolean(end)) throw new Error(`${code} needs both a start and a finish time, or neither.`);
     if ((start && !isTimeOfDay(start)) || (end && !isTimeOfDay(end))) throw new Error(`${code} needs times as HH:MM.`);
     const hours = entry.hours === undefined || entry.hours === null || entry.hours === '' ? null : Number(entry.hours);
     if (hours !== null && (!Number.isFinite(hours) || hours <= 0 || hours > 24)) throw new Error(`${code} hours must be between 0 and 24.`);
-    return { code, name, as: entry.as, start: start as string | null, end: end as string | null, hours };
+    const breakHours = entry.breakHours === undefined || entry.breakHours === null || entry.breakHours === '' ? null : Number(entry.breakHours);
+    if (breakHours !== null && (!Number.isFinite(breakHours) || breakHours < 0 || breakHours > 4)) throw new Error(`${code} break must be between 0 and 4 hours.`);
+    return { code, name, as: entry.as, start: start as string | null, end: end as string | null, hours, tag: null, breakHours: breakHours || null };
   });
+
+  // The standard codes are always there and always mean the same; a roster only sets their names and hours.
+  const standardNames = new Set(STANDARD_CODES.map((standard) => standard.code.toLowerCase()));
+  const own = extra.filter((entry) => !standardNames.has(entry.code.toLowerCase()));
+  const standard = STANDARD_CODES.map((fixed): ExtraCode => {
+    const saved = extra.find((entry) => entry.code.toLowerCase() === fixed.code.toLowerCase());
+    if (!saved) return { ...fixed };
+    if (!isWorking(fixed.as)) return { ...fixed, name: saved.name === saved.code ? fixed.name : saved.name };
+    // Saved as something else (a code a roster had made up before it became standard): the standard times stand.
+    const kept = saved.as === fixed.as;
+    return {
+      ...fixed,
+      name: saved.name === saved.code ? fixed.name : saved.name,
+      start: (kept && saved.start) || fixed.start,
+      end: (kept && saved.end) || fixed.end,
+      hours: (kept && saved.hours) || fixed.hours,
+      breakHours: kept && saved.breakHours !== null && saved.breakHours !== undefined ? saved.breakHours : (fixed.breakHours ?? null),
+    };
+  });
+  const allExtra = [...standard, ...own];
+
+  const driverAnchor = pick('driverAnchor') ?? base.driverAnchor;
+  if (!isDateKey(driverAnchor)) throw new Error('The driver anchor must be a date.');
+  if (isoWeekday(driverAnchor) !== 1) throw new Error('The driver anchor must be a Monday: the drivers change over at the start of a week.');
 
   const rules: ShiftRules = {
     timeZone,
     rotationStart,
     pattern,
     codes,
-    extra,
+    extra: allExtra,
     targetHours7d: intBetween(pick('targetHours7d'), 1, 168, 'Weekly target'),
     maxHours7d: intBetween(pick('maxHours7d'), 1, 168, 'Weekly limit'),
     maxHours14d: intBetween(pick('maxHours14d'), 1, 336, 'Two-week cap'),
@@ -995,6 +1340,10 @@ export function sanitizeRules(input: unknown, base: ShiftRules = DEFAULT_RULES):
     responseMinutes: intBetween(pick('responseMinutes'), 1, 1440, 'Response time'),
     publishLeadDays: intBetween(pick('publishLeadDays'), 0, 90, 'Publish lead'),
     weekStart: intBetween(pick('weekStart'), 1, 7, 'Week start'),
+    driverAnchor,
+    sickFullDays: intBetween(pick('sickFullDays') ?? base.sickFullDays, 0, 365, 'Sick days on full pay'),
+    sickHalfDays: intBetween(pick('sickHalfDays') ?? base.sickHalfDays, 0, 365, 'Sick days on half pay'),
+    ctoExpiryDays: intBetween(pick('ctoExpiryDays') ?? base.ctoExpiryDays, 1, 730, 'CTO expiry'),
   };
   if (rules.targetHours7d > rules.maxHours7d) throw new Error('The weekly target cannot be above the weekly limit.');
   return rules;

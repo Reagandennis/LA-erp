@@ -4,7 +4,7 @@ import { type DragEvent, useEffect, useRef, useState } from 'react';
 
 import { CODE_STYLE, CodeChip, Label, Pill, formatMonth, ghostButton, inputClass, primaryButton } from '@/app/modules/_components/shift-ui';
 import type { ImportCodeChoices, ImportCodeView, ImportPersonView, ImportPreview, ImportResult, ImportTarget } from '@/lib/shift-import';
-import { RULE_LABEL, SHIFT_CODES, type ShiftCode, type ShiftRules, type Violation, isMonthKey } from '@/lib/shift-rules';
+import { POSITION_LABEL, RULE_LABEL, SHIFT_CODES, type ShiftCode, type ShiftRules, type Violation, isMonthKey } from '@/lib/shift-rules';
 import type { LineView } from '@/lib/shift-types';
 
 interface Props {
@@ -461,7 +461,15 @@ function PersonRow({ person, lines, onChange }: { person: ImportPersonView; line
         </select>
         <p className="mt-1 text-[11px] text-gray-400">
           {person.target === 'new'
-            ? `Not on the roster yet. Added to People, outside the rotation${person.account ? `, and linked to ${person.account}'s login` : ''}.`
+            ? `Not on the roster yet. Added to People as a ${POSITION_LABEL[person.position ?? 'trc']}${
+                person.position === 'driver'
+                  ? person.cycleOffset === 1 ? ', starting on nights' : ', starting on days'
+                  : person.position === 'pc'
+                    ? ''
+                    : person.cycleOffset === null || person.cycleOffset === undefined
+                      ? ', outside the rotation'
+                      : `, on cycle day ${person.cycleOffset + 1} of the rotation`
+              }${person.account ? `, and linked to ${person.account}'s login` : ''}.`
             : person.target === 'skip'
               ? 'Nothing in this row is used.'
               : person.inactive

@@ -39,6 +39,7 @@ export default async function WhatsappPage({
         newChatPlaceholder: '+254712345678',
         multiAccount: true,
         chatActions: true,
+        messageActions: true,
       }}
     />
   );

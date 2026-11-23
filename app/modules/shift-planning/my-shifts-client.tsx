@@ -25,6 +25,8 @@ import {
 import { useNow } from '@/app/ui/use-client';
 import { useLiveRefresh } from '@/app/ui/use-live-refresh';
 import {
+  LEAVE_LABEL,
+  LEAVE_TYPES,
   type Duty,
   type ShiftCode,
   type ShiftRules,
@@ -560,7 +562,8 @@ function LeaveCard({ data, onChanged }: { data: MyShifts; onChanged: () => void 
             ))}
           </dl>
           <p className="mt-2 text-[11px] leading-snug text-gray-400">
-            {formatHours(balance.entitlement)} days a year, earned monthly. Leave is charged per rostered shift; on-call and rest days are never charged.
+            {balance.cto.balance !== 0 && `${formatHours(balance.cto.balance)} compensatory day${balance.cto.balance === 1 ? '' : 's'} to take. `}
+            {formatHours(balance.entitlement)} days a year, earned monthly. Every calendar day of a leave period is recorded, rest and on-call days included; HR applies the entitlement rule.
           </p>
         </div>
       )}
@@ -570,9 +573,9 @@ function LeaveCard({ data, onChanged }: { data: MyShifts; onChanged: () => void 
           <div>
             <Label>Type</Label>
             <select className={inputClass} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-              <option value="annual">Annual leave</option>
-              <option value="sick">Sick leave</option>
-              <option value="other">Other</option>
+              {LEAVE_TYPES.map((type) => (
+                <option key={type} value={type}>{LEAVE_LABEL[type]}</option>
+              ))}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -612,7 +615,7 @@ function LeaveCard({ data, onChanged }: { data: MyShifts; onChanged: () => void 
               </div>
               <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-gray-400">
                 <span>
-                  <span className="capitalize">{leave.type}</span> · {leave.shiftsCharged} shift{leave.shiftsCharged === 1 ? '' : 's'} charged
+                  {LEAVE_LABEL[leave.type]} · {leave.days} day{leave.days === 1 ? '' : 's'}
                 </span>
                 {leave.status === 'pending' && (
                   <button type="button" disabled={busy} onClick={() => void withdraw(leave.id)} className="font-semibold text-rose-600 hover:underline disabled:opacity-50">

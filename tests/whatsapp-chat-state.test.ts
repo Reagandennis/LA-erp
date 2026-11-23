@@ -33,7 +33,7 @@ const { resolveMessagingRequest } = vi.hoisted(() => ({ resolveMessagingRequest:
 vi.mock('../lib/messaging-routes', () => ({ resolveMessagingRequest }));
 
 const JID = '120363409684536137@g.us';
-const LINKED = { userId: 1, account: { id: 3, handle: 'laerp-user-1', provider: 'whatsapp' } };
+const LINKED = { userId: 1, account: { id: 3, userId: 1, handle: 'laerp-user-1', provider: 'whatsapp', shared: false } };
 const FOREVER = new Date('9999-12-31T00:00:00.000Z');
 
 function wacliOk() {

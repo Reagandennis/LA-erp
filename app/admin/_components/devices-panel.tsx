@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { deviceCheckSupported, suggestDeviceLabel } from '@/app/ui/device-check-client';
+import { deviceCheckProblem, deviceCheckSupported, reportDeviceCheckProblem, suggestDeviceLabel } from '@/app/ui/device-check-client';
 
 import type { AdminDevice, AdminUser } from './admin-types';
 import {
@@ -106,7 +106,9 @@ export default function DevicesPanel({
   // Read from the browser after mount so the first render matches the server's.
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSupported(deviceCheckSupported());
+      const ok = deviceCheckSupported();
+      setSupported(ok);
+      if (!ok) reportDeviceCheckProblem('session');
       setLabel((current) => current || suggestDeviceLabel());
     }, 0);
     return () => clearTimeout(timer);
@@ -194,7 +196,7 @@ export default function DevicesPanel({
           <p className="mt-2 text-xs text-gray-500">
             {supported
               ? 'You will be asked for this computer’s fingerprint, face or PIN. Passkeys that sync to other devices are refused.'
-              : 'This browser cannot register a device. Use an up-to-date Chrome, Edge or Safari.'}
+              : deviceCheckProblem()}
           </p>
         </Card>
       </div>
