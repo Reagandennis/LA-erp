@@ -42,7 +42,7 @@ function FlightRow({
     durationMinutes: flight.durationMinutes,
   });
   const trackable = isTrackable(now, schedule);
-  const { track, state } = useFlightTrack(flightNumber, schedule, trackable);
+  const { track, state } = useFlightTrack(flightNumber, schedule, trackable, { from: flight.from, to: flight.to });
   const progress = now !== null ? flightProgress(now, schedule, track) : null;
   const countdown = now !== null ? scheduleCountdown(now, schedule) : null;
 

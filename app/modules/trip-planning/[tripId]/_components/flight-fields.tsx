@@ -13,7 +13,7 @@ import { allTimeZones, localTimeZone, offsetLabel, weekdayOf, zonedToUtcIso } fr
 import { REMINDER_OPTIONS, type CrewOptions, type TripDaySummary } from '../../types';
 import type { EditorState } from '../editor-state';
 import { CrewFields } from './crew-fields';
-import { AirportInput, FlightNumberLookup, seenOn } from './flight-lookup';
+import { AirportInput, FlightNumberLookup } from './flight-lookup';
 import ServicePicker from './service-picker';
 import { TicketReader } from './ticket-reader';
 
@@ -104,14 +104,21 @@ export default function FlightFields({
    * and the duration in one patch (patch replaces the editor wholesale, so two
    * calls in one event would lose the first). What it replaced is kept for Undo.
    */
-  const [filled, setFilled] = useState<{ candidate: FlightCandidate; before: Partial<EditorState> } | null>(null);
-  const applyCandidate = (candidate: FlightCandidate) => {
+  const [filled, setFilled] = useState<{ candidate: FlightCandidate; lookedUpOn: string; before: Partial<EditorState> } | null>(null);
+  const applyCandidate = (candidate: FlightCandidate, lookedUpOn: string) => {
     setTicket(null);
     const here = arrival ? candidate.destination : candidate.origin;
     const time = arrival ? candidate.arrivalTime : candidate.departureTime;
+    // Unscheduled (no day yet): the date looked up becomes the flight's. On a
+    // day, the day's date stands and a different one is pointed out below.
+    const takeDate = !dayDate && lookedUpOn !== editor.date;
+    const match = takeDate ? days.find((d) => d.dateKey === lookedUpOn) : undefined;
     setFilled({
       candidate,
+      lookedUpOn,
       before: {
+        date: editor.date,
+        dayId: editor.dayId,
         providerName: editor.providerName,
         timezone: editor.timezone,
         time: editor.time,
@@ -121,8 +128,9 @@ export default function FlightFields({
       },
     });
     // Both ends matter on the card, so a missing duration is worked out from the two times.
-    const duration = candidate.durationMinutes ?? (editor.date ? durationFromTimes(candidate, editor.date) : null);
+    const duration = candidate.durationMinutes ?? (lookedUpOn ? durationFromTimes(candidate, lookedUpOn) : null);
     patch({
+      ...(takeDate ? { date: lookedUpOn, dayId: match ? match.id : editor.dayId } : {}),
       providerName: candidate.airline?.name ?? editor.providerName,
       timezone: here?.tz ?? editor.timezone,
       time: time ?? editor.time,
@@ -276,22 +284,31 @@ export default function FlightFields({
       <FlightNumberLookup
         value={editor.details.flightNumber ?? ''}
         date={editor.date || null}
+        airport={editor.details[hereKey] ?? null}
+        arrival={arrival}
         onChange={(value) => setDetail('flightNumber', value)}
         onPick={applyCandidate}
       />
       {filled && (
         <p className="-mt-2 text-xs text-sky-800">
-          {filled.candidate.basis === 'date' && filled.candidate.onDate
-            ? `${filled.candidate.flightNumber} as it flew on ${longDate(filled.candidate.onDate)}`
-            : filled.candidate.basis === 'weekday' && editor.date
-              ? `Filled from ${filled.candidate.runs} recent ${weekdayOf(editor.date, APP_LOCALE)} ${filled.candidate.runs === 1 ? 'run' : 'runs'} of ${filled.candidate.flightNumber}`
-              : `Filled from ${filled.candidate.runs} recent ${filled.candidate.runs === 1 ? 'run' : 'runs'} of ${filled.candidate.flightNumber}`}
-          {filled.candidate.basis !== 'date' && seenOn(filled.candidate.lastSeen) && ` · last seen ${seenOn(filled.candidate.lastSeen)}`}
-          {filled.candidate.aircraft && ` · ${filled.candidate.aircraft}`}
-          {filled.candidate.basis === 'date'
-            ? '. Actual gate times for that day.'
-            : '. Typical times, so check them against the ticket.'}
-          {!(arrival ? filled.candidate.arrivalTime : filled.candidate.departureTime) && ' No local time was known, so set the time by hand.'}{' '}
+          {filled.candidate.dayStatus === 'flown'
+            ? `${filled.candidate.flightNumber} as it flew on ${longDate(filled.lookedUpOn)}: actual times.`
+            : filled.candidate.dayStatus === 'no-record'
+              ? `FlightRadar24 has no record of ${filled.candidate.flightNumber} flying on ${longDate(filled.lookedUpOn)}; these are its usual times.`
+              : `${filled.candidate.flightNumber}'s usual times${filled.candidate.frequency ? ` (${filled.candidate.frequency})` : ''} over the last two weeks, for ${longDate(filled.lookedUpOn)}. FlightRadar24 has no timetable, so check them against the ticket.`}
+          {filled.candidate.dayStatus === 'not-usual' && (
+            <span className="font-semibold text-amber-700"> It hasn&apos;t flown on that weekday lately: check the date.</span>
+          )}
+          {filled.candidate.aircraft && ` ${filled.candidate.aircraft}.`}
+          {filled.candidate.departureEstimated &&
+            ` FlightRadar24 doesn't record take-offs at ${filled.candidate.origin?.iata ?? 'this airport'}, so the departure and duration are estimated from the landing.`}
+          {!(arrival ? filled.candidate.arrivalTime : filled.candidate.departureTime) && ' No local time was known, so set the time by hand.'}
+          {dayDate && filled.lookedUpOn !== dayDate && (
+            <span className="font-semibold text-amber-700">
+              {' '}
+              You looked up {longDate(filled.lookedUpOn)}, but this event is on {longDate(dayDate)}: add the flight from that day if that&apos;s its date.
+            </span>
+          )}{' '}
           <button type="button" onClick={undoFill} className="font-semibold underline">
             Undo
           </button>

@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const track = await lookupFlightTrack({ flightNumber, departure, arrival });
+    const track = await lookupFlightTrack({ flightNumber, departure, arrival, from: sp.get('from'), to: sp.get('to') });
     return NextResponse.json({ track });
   } catch (error) {
     if (error instanceof FlightTrackingError) {

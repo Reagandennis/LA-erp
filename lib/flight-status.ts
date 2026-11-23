@@ -179,6 +179,12 @@ export interface FlightTrack {
   /** False when FR24 has no record of the flight in the window. */
   found: boolean;
   takeoffAt: string | null;
+  /**
+   * When FR24 first picked the flight up. Where its coverage is thin (Addis
+   * Ababa among them) it never records a take-off and first sees the flight
+   * already in the air, so this is proof it has left, not when.
+   */
+  seenAt?: string | null;
   landedAt: string | null;
   ended: boolean;
   /** Live estimate while airborne. */
@@ -273,9 +279,13 @@ export function flightProgress(
   // Wheels-down is a few minutes before the gate time a schedule quotes.
   const atGate = (iso: string) => new Date(new Date(iso).getTime() + TAXI_IN_MINUTES * 60_000).toISOString();
   const takeoffDelta = track?.takeoffAt && dep !== null ? minutes(dep + TAXI_OUT_MINUTES * 60_000, track.takeoffAt) : null;
-  // The matched run is far from the itinerary's times: say so instead of reporting it as a delay.
-  if (takeoffDelta !== null && Math.abs(takeoffDelta) > MISMATCH_MINUTES) {
-    return mismatch(track?.landedAt || track?.ended ? 'landed' : 'airborne', takeoffDelta, 'took off');
+  // The matched run is far from the itinerary's times: say so instead of
+  // reporting it as a delay. Without a take-off, when FR24 first saw it will
+  // do: it is near enough for a gap of hours.
+  const seenDelta = takeoffDelta === null && track?.seenAt && dep !== null ? minutes(dep + TAXI_OUT_MINUTES * 60_000, track.seenAt) : null;
+  const leftDelta = takeoffDelta ?? seenDelta;
+  if (leftDelta !== null && Math.abs(leftDelta) > MISMATCH_MINUTES) {
+    return mismatch(track?.landedAt || track?.ended ? 'landed' : 'airborne', leftDelta, takeoffDelta !== null ? 'took off' : 'in the air');
   }
   if (dep === null && track?.landedAt && arr !== null) {
     const landingDelta = minutes(arr, atGate(track.landedAt));
@@ -307,6 +317,23 @@ export function flightProgress(
           ? `Flight ended · took off ${amount} late, landing time not recorded`
           : 'Flight ended · took off on time, landing time not recorded',
     );
+  }
+
+  // Seen in the air with no take-off on record: it has left; how late is only known from the ETA.
+  if (!track?.takeoffAt && track?.seenAt) {
+    if (track.ended) {
+      return { phase: 'landed', status: 'unknown', deltaMinutes: null, label: 'Flight ended', detail: 'Landing time not recorded' };
+    }
+    if (track.eta && arr !== null) {
+      return judged('airborne', minutes(arr, atGate(track.eta)), (status, amount) =>
+        status === 'early'
+          ? `In the air · expected ${amount} early`
+          : status === 'late'
+            ? `In the air · expected ${amount} late`
+            : 'In the air · expected on time',
+      );
+    }
+    return { phase: 'airborne', status: 'unknown', deltaMinutes: null, label: 'Departed', detail: 'On its way · take-off time not recorded by FlightRadar24' };
   }
 
   if (track?.takeoffAt) {
@@ -406,6 +433,12 @@ export interface FlightCandidate {
   destination: LookupAirport | null;
   /** "HH:MM", local to the origin; null without a zone or a run to read it from. */
   departureTime: string | null;
+  /**
+   * True when FR24 recorded no take-offs (thin coverage at the origin, e.g.
+   * Addis Ababa) and the departure and duration were worked back from the
+   * landings and the route's distance: an estimate to check against the ticket.
+   */
+  departureEstimated?: boolean;
   /** "HH:MM", local to the destination. */
   arrivalTime: string | null;
   /** Gate to gate, to the nearest five minutes. */
@@ -424,12 +457,26 @@ export interface FlightCandidate {
    * times of its runs on that weekday, or of its recent runs regardless.
    */
   basis: 'date' | 'weekday' | 'recent';
-  /** "YYYY-MM-DD" when `basis` is 'date'. */
+  /** "YYYY-MM-DD" when `basis` is 'date', or the date asked about. */
   onDate: string | null;
+  /**
+   * What this leg does on the date asked about: it flew (actual times), is
+   * expected (it usually flies that weekday), doesn't usually fly that
+   * weekday, or the day has passed with no record of it. Absent without a date.
+   */
+  dayStatus?: 'flown' | 'expected' | 'not-usual' | 'no-record';
+  /** "Daily" or "Mon, Wed, Fri": the days it flew in the last two weeks. */
+  frequency?: string | null;
+  /** The local dates it leaves its origin and lands at its destination, for the date asked about. */
+  departDate?: string | null;
+  arriveDate?: string | null;
 }
 
 export interface FlightLookup {
   query: { kind: 'flight' | 'callsign' | 'registration'; value: string };
+  /** The date looked up, local to the event's end; null for "recently". */
+  date?: string | null;
+  end?: 'departure' | 'arrival';
   candidates: FlightCandidate[];
   checkedAt: string;
 }

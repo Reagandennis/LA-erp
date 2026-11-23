@@ -119,3 +119,77 @@ describe('client itinerary flight times', () => {
     expect(text).toContain('11:40 PM GMT+3 – 5:50 AM GMT');
   });
 });
+
+describe('ET552 and other multi-leg, thinly covered flights', () => {
+  it('tracks the leg on the itinerary route, not another leg with the same number', async () => {
+    const { onRoute } = await import('../lib/flight-tracking');
+    const rows = [
+      { orig_icao: 'LIRF', dest_icao: 'CYYZ', datetime_takeoff: '2026-11-22T04:15:01Z' },
+      { orig_icao: 'HAAB', dest_icao: 'LIRF', first_seen: '2026-11-21T22:42:29Z' },
+    ];
+    expect(onRoute(rows, 'ADD', 'FCO')).toEqual([rows[1]]);
+    expect(onRoute(rows, 'FCO', null)).toEqual([rows[0]]);
+    // No route given, or none matching: every run stays in play.
+    expect(onRoute(rows, null, null)).toEqual(rows);
+    expect(onRoute(rows, 'NBO', 'DXB')).toEqual(rows);
+  });
+
+  it('reads a flight FR24 saw in the air without a take-off as departed, not delayed', async () => {
+    const { flightProgress } = await import('../lib/flight-status');
+    const schedule = { departure: '2026-11-22T21:00:00Z', arrival: '2026-11-23T03:00:00Z' };
+    const base = { found: true, takeoffAt: null, landedAt: null, ended: false, eta: null, altFt: null, gspeedKt: null, origin: 'ADD', destination: 'FCO', checkedAt: '' };
+    const now = Date.parse('2026-11-23T00:00:00Z');
+    expect(flightProgress(now, schedule, { ...base, seenAt: '2026-11-22T22:45:00Z' })).toMatchObject({ phase: 'airborne', label: 'Departed' });
+    // Before: no take-off on record read as "Delayed 2h 45m · Not departed yet".
+    expect(flightProgress(now, schedule, { ...base, seenAt: '2026-11-22T22:45:00Z' }).status).not.toBe('late');
+    expect(
+      flightProgress(now, schedule, { ...base, seenAt: '2026-11-22T22:45:00Z', eta: '2026-11-23T03:30:00Z' }),
+    ).toMatchObject({ status: 'late', label: 'Delayed 40m' });
+    // Entered at 09:00 Addis when it flies around midnight: flagged, not "Landed".
+    const entered = { departure: '2026-11-23T06:00:00Z', arrival: null };
+    expect(
+      flightProgress(Date.parse('2026-11-23T08:00:00Z'), entered, { ...base, ended: true, seenAt: '2026-11-22T22:45:00Z', landedAt: '2026-11-23T02:46:00Z' }).label,
+    ).toBe('Check time');
+  });
+
+  it('estimates the block time of a route FR24 never saw take off', async () => {
+    const { estimatedBlockMinutes } = await import('../lib/flight-lookup');
+    // ADD → FCO: OAG publishes ET552 at 6h30 (23:20 → 03:50).
+    const block = estimatedBlockMinutes({ lat: 8.98, lon: 38.8 }, { lat: 41.8, lon: 12.25 })!;
+    expect(Math.abs(block - 390)).toBeLessThanOrEqual(10);
+    // A short hop is not padded like a long-haul: NBO → MBA is about an hour.
+    expect(estimatedBlockMinutes({ lat: -1.32, lon: 36.93 }, { lat: -4.03, lon: 39.59 })).toBe(60);
+  });
+
+  it('works the departure back from the landings when no take-off was recorded', async () => {
+    const { candidatesFrom } = await import('../lib/flight-lookup');
+    const [candidate] = await candidatesFrom([
+      { flight: 'ET552', orig_icao: 'HAAB', orig_iata: 'ADD', dest_icao: 'LIRF', dest_iata: 'FCO', first_seen: '2026-11-21T22:42:29Z', datetime_landed: '2026-11-22T02:53:27Z', operating_as: 'ETH' },
+    ]);
+    expect(candidate).toMatchObject({ departureEstimated: true, durationMinutes: 395, arrivalTime: '04:03' });
+    // Landed 02:53Z + 10m taxi = 03:03Z; minus 6h35 = 20:28Z = 23:28 in Addis
+    // (published: 23:20).
+    expect(candidate!.departureTime).toBe('23:28');
+  });
+
+  it('offers the leg from the event airport first', async () => {
+    const { rankCandidates } = await import('../app/modules/trip-planning/[tripId]/_components/flight-lookup');
+    const leg = (o: string, d: string) => ({ origin: { iata: o }, destination: { iata: d } }) as never;
+    const ranked = rankCandidates([leg('FCO', 'YYZ'), leg('ADD', 'FCO')], 'ADD', false);
+    expect((ranked[0] as { origin: { iata: string } }).origin.iata).toBe('ADD');
+    expect((rankCandidates([leg('FCO', 'YYZ'), leg('ADD', 'FCO')], 'YYZ', true)[0] as { destination: { iata: string } }).destination.iata).toBe('YYZ');
+  });
+});
+
+describe('contentDisposition', () => {
+  it('survives a macOS screenshot name, whose space before PM is U+202F', async () => {
+    const { contentDisposition, fileResponse } = await import('../lib/file-response');
+    const name = 'Photo 11.20.36 PM.png';
+    const header = contentDisposition('inline', name);
+    expect(header).toBe(`inline; filename="Photo 11.20.36 PM.png"; filename*=UTF-8''Photo%2011.20.36%E2%80%AFPM.png`);
+    // Before the fix this threw "Cannot convert argument to a ByteString".
+    expect(() => fileResponse({ content: new Uint8Array([1]), mime: 'image/png', name })).not.toThrow();
+    expect(contentDisposition('attachment', 'plain.pdf')).toBe('attachment; filename="plain.pdf"');
+    expect(contentDisposition('attachment', 'a"b.pdf')).toContain('filename="ab.pdf"');
+  });
+});

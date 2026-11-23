@@ -163,7 +163,7 @@ export default function FlightCard({
   const now = useNow();
   const anchor = schedule.departure ?? schedule.arrival;
   const trackable = isTrackable(now, schedule);
-  const { track, state } = useFlightTrack(flightNumber, schedule, trackable);
+  const { track, state } = useFlightTrack(flightNumber, schedule, trackable, { from: details.departAirport, to: details.arriveAirport });
 
   const progress = now !== null ? flightProgress(now, schedule, track) : null;
   const countdown = now !== null ? scheduleCountdown(now, schedule) : null;
@@ -331,7 +331,7 @@ export default function FlightCard({
             ))}
         </div>
 
-        {track?.takeoffAt && !track.landedAt && (track.altFt != null || track.gspeedKt != null) && (
+        {(track?.takeoffAt || track?.seenAt) && !track.landedAt && !track.ended && (track.altFt != null || track.gspeedKt != null) && (
           <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
             <span className="flex items-center gap-1 font-medium text-emerald-600">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />

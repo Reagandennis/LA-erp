@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-import { classifyQuery, lookupFlights } from '../lib/flight-lookup';
+import { classifyQuery, clearLookupCache, lookupFlights } from '../lib/flight-lookup';
 import { FlightTrackingError } from '../lib/flight-tracking';
 
 const fetchMock = vi.fn();
@@ -49,6 +49,7 @@ describe('classifyQuery', () => {
 
 describe('lookupFlights', () => {
   beforeEach(() => {
+    clearLookupCache();
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
     vi.stubEnv('FR24_API_TOKEN', 'test-token');
@@ -90,7 +91,7 @@ describe('lookupFlights', () => {
 
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toContain('/api/flight-summary/full?flights=KQ100');
-    expect(url).toContain('flight_datetime_from=2026-10-20T12:00:00Z');
+    expect(url).toContain('flight_datetime_from=2026-10-16T12:00:00Z');
     expect(url).toContain('flight_datetime_to=2026-10-30T12:00:00Z');
     expect(url).toContain('sort=desc');
     expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer test-token' });
@@ -136,42 +137,48 @@ describe('lookupFlights', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("answers for the event's date with the flight as it flew that day, to the minute", async () => {
+  it("answers for the date asked with the flight as it flew that day, to the minute", async () => {
     // KQ100 on 28 Oct took off 06:55Z: 09:40 Nairobi after the taxi; landed 15:20Z: 15:30 London.
     fetchMock.mockResolvedValueOnce(list([run(28, { datetime_takeoff: '2026-10-28T06:55:00Z' }), run(27)]));
 
     const lookup = await lookupFlights('KQ100', NOW, '2026-10-28');
 
-    const url = fetchMock.mock.calls[0]![0] as string;
-    expect(url).toContain('flight_datetime_from=2026-10-27T00:00:00Z');
-    expect(url).toContain('flight_datetime_to=2026-10-30T00:00:00Z');
+    // Inside the two weeks already read: one call.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lookup.date).toBe('2026-10-28');
     expect(lookup.candidates).toHaveLength(1);
     expect(lookup.candidates[0]).toMatchObject({
       basis: 'date',
+      dayStatus: 'flown',
       onDate: '2026-10-28',
+      departDate: '2026-10-28',
+      arriveDate: '2026-10-28',
       runs: 1,
       departureTime: '09:40',
       arrivalTime: '15:30',
       // 8h25 in the air plus the taxi either side.
       durationMinutes: 530,
     });
-    // Asked again for a different day, it is a different question.
-    fetchMock.mockResolvedValueOnce(list([run(27)]));
-    expect((await lookupFlights('KQ100', NOW, '2026-10-27')).candidates[0]?.onDate).toBe('2026-10-27');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Another day reuses the runs already read: flicking through dates costs nothing.
+    expect((await lookupFlights('KQ100', NOW, '2026-10-27')).candidates[0]).toMatchObject({ dayStatus: 'flown', onDate: '2026-10-27' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to recent runs when nothing flew on the event's date", async () => {
-    fetchMock.mockResolvedValueOnce(list([])).mockResolvedValueOnce(list([run(29), run(28)]));
-
+  it('says so when a day inside the last two weeks passed without the flight', async () => {
+    fetchMock.mockResolvedValueOnce(list([run(29), run(28)]));
     const lookup = await lookupFlights('KQ100', NOW, '2026-10-26');
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]![0]).toContain('flight_datetime_from=2026-10-20T12:00:00Z');
-    expect(lookup.candidates[0]).toMatchObject({ basis: 'recent', onDate: null, runs: 2 });
+    expect(lookup.candidates[0]).toMatchObject({ dayStatus: 'no-record', basis: 'recent', runs: 2, departDate: '2026-10-26' });
   });
 
-  it("prefers the runs on the event's weekday for a date still ahead", async () => {
+  it('reads a day older than the history with a call of its own', async () => {
+    fetchMock.mockResolvedValueOnce(list([run(29)])).mockResolvedValueOnce(list([run(10)]));
+    const lookup = await lookupFlights('KQ100', NOW, '2026-10-10');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![0]).toContain('flight_datetime_from=2026-10-09T00:00:00Z');
+    expect(lookup.candidates[0]).toMatchObject({ dayStatus: 'flown', departDate: '2026-10-10' });
+  });
+
+  it("gives a date ahead the expected times, from that weekday's runs when there are two or more", async () => {
     // Fridays leave later: 23 and 30 Oct 2026 are Fridays, 29 Oct a Thursday.
     fetchMock.mockResolvedValueOnce(
       list([
@@ -183,15 +190,66 @@ describe('lookupFlights', () => {
 
     const lookup = await lookupFlights('KQ100', NOW, '2026-11-06');
 
-    // Only the ten recent days are asked for: a future date has no flights of its own.
+    // A future date has no flights of its own: only the recent runs are read.
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![0]).toContain('flight_datetime_to=2026-10-30T12:00:00Z');
     // London was still on summer time on the 23rd, so the two landings read 18:30 and 17:30 there.
-    expect(lookup.candidates[0]).toMatchObject({ basis: 'weekday', runs: 2, departureTime: '11:30', arrivalTime: '18:00' });
+    expect(lookup.candidates[0]).toMatchObject({
+      basis: 'weekday',
+      dayStatus: 'expected',
+      runs: 2,
+      departureTime: '11:30',
+      arrivalTime: '18:00',
+      departDate: '2026-11-06',
+      arriveDate: '2026-11-06',
+    });
 
-    // A weekday none of the runs fell on: every run counts, as before.
+    // A weekday none of the runs fell on: every run's times (and with only a week's runs, no claim it skips Sundays).
+    expect((await lookupFlights('KQ100', NOW, '2026-11-01')).candidates[0]).toMatchObject({ basis: 'recent', runs: 3 });
+  });
+
+  it('dates an overnight flight by the end the event is at', async () => {
+    // ET552 Addis → Rome: FR24 sees no take-off, first sees it at 01:45 Addis,
+    // lands 02:50Z (03:50 Rome). It left on the 22nd (23:20 Addis).
+    const et552 = (day: number) => ({
+      fr24_id: `et-${day}`,
+      flight: 'ET552',
+      operating_as: 'ETH',
+      orig_icao: 'HAAB',
+      orig_iata: 'ADD',
+      dest_icao: 'LIRF',
+      dest_iata: 'FCO',
+      datetime_takeoff: null,
+      first_seen: `2026-10-${day}T22:45:00Z`,
+      datetime_landed: `2026-10-${day + 1}T02:50:00Z`,
+      flight_ended: true,
+    });
+    fetchMock.mockResolvedValueOnce(list([28, 27, 26, 25, 24, 23, 22].map(et552)));
+
+    const departing = await lookupFlights('ET552', NOW, '2026-10-27', 'departure');
+    expect(departing.candidates[0]).toMatchObject({ dayStatus: 'flown', departDate: '2026-10-27', arriveDate: '2026-10-28', departureEstimated: true });
+    const arriving = await lookupFlights('ET552', NOW, '2026-10-28', 'arrival');
+    // The flight landing on the 28th is the one that left on the 27th.
+    expect(arriving.candidates[0]).toMatchObject({ dayStatus: 'flown', departDate: '2026-10-27', arriveDate: '2026-10-28' });
+    // Ahead: a daily flight, expected, leaving that evening and landing the next morning.
+    expect((await lookupFlights('ET552', NOW, '2026-11-05')).candidates[0]).toMatchObject({
+      dayStatus: 'expected',
+      frequency: 'Daily',
+      departDate: '2026-11-05',
+      arriveDate: '2026-11-06',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("flags a weekday a flight with a week's history skips, but not on too little history", async () => {
+    // Mon/Wed/Fri over two weeks: 12–30 Oct 2026.
+    fetchMock.mockResolvedValueOnce(list([30, 28, 26, 23, 21, 19].map((day) => run(day))));
+    const tuesday = await lookupFlights('KQ100', NOW, '2026-11-03');
+    expect(tuesday.candidates[0]).toMatchObject({ dayStatus: 'not-usual', frequency: 'Mon, Wed, Fri' });
+    expect((await lookupFlights('KQ100', NOW, '2026-11-04')).candidates[0]).toMatchObject({ dayStatus: 'expected' });
+
+    clearLookupCache();
     fetchMock.mockResolvedValueOnce(list([run(30), run(29)]));
-    expect((await lookupFlights('KQ100', NOW, '2026-11-01')).candidates[0]).toMatchObject({ basis: 'recent', runs: 2 });
+    expect((await lookupFlights('KQ100', NOW, '2026-11-03')).candidates[0]?.dayStatus).toBe('expected');
   });
 
   it('refuses what is neither a flight nor a tail number', async () => {

@@ -94,6 +94,32 @@ function iataFor(icao: string | null): string | null {
   return icao ? (findAirport(icao, null)?.iata ?? null) : null;
 }
 
+function airportCode(value: string | null | undefined): string | null {
+  const code = value?.trim().toUpperCase();
+  return code && /^[A-Z0-9]{3}$/.test(code) ? code : null;
+}
+
+/**
+ * The runs of the itinerary's leg. ET552 flies Addis → Rome → Toronto under
+ * one number; without this an Addis departure was tracked as the Rome →
+ * Toronto leg. Both airports matching beats one; when none match (a typo, a
+ * diversion) every run is kept rather than claiming nothing flew.
+ */
+export function onRoute<T extends { orig_icao?: string | null; dest_icao?: string | null; dest_icao_actual?: string | null }>(
+  rows: T[],
+  from: string | null,
+  to: string | null,
+): T[] {
+  if (!from && !to) return rows;
+  const score = (row: T) => {
+    const origin = iataFor(str(row.orig_icao));
+    const destinations = [iataFor(str(row.dest_icao)), iataFor(str(row.dest_icao_actual))];
+    return (from && origin === from ? 1 : 0) + (to && destinations.includes(to) ? 1 : 0);
+  };
+  const best = Math.max(0, ...rows.map(score));
+  return best === 0 ? rows : rows.filter((row) => score(row) === best);
+}
+
 /** Room for a delay when only the arrival is known: a run may take off this long after it. */
 const ARRIVAL_ONLY_SLACK_MS = 6 * 60 * 60_000;
 
@@ -129,6 +155,9 @@ export async function lookupFlightTrack(input: {
   flightNumber: string;
   departure: Date | null;
   arrival: Date | null;
+  /** The itinerary's airports (IATA). A number that flies several legs is matched on its route. */
+  from?: string | null;
+  to?: string | null;
   now?: number;
 }): Promise<FlightTrack> {
   const now = input.now ?? Date.now();
@@ -141,6 +170,7 @@ export async function lookupFlightTrack(input: {
   const empty: FlightTrack = {
     found: false,
     takeoffAt: null,
+    seenAt: null,
     landedAt: null,
     ended: false,
     eta: null,
@@ -152,7 +182,9 @@ export async function lookupFlightTrack(input: {
   };
   if (to <= from) return empty;
 
-  const key = `${input.flightNumber}|${Math.round(anchor.getTime() / 60_000)}`;
+  const fromCode = airportCode(input.from);
+  const toCode = airportCode(input.to);
+  const key = `${input.flightNumber}|${Math.round(anchor.getTime() / 60_000)}|${fromCode ?? ''}|${toCode ?? ''}`;
   const cached = cache.get(key);
   if (cached && cached.expires > now) return cached.track;
 
@@ -161,7 +193,7 @@ export async function lookupFlightTrack(input: {
       `&flight_datetime_from=${fr24Time(from)}&flight_datetime_to=${fr24Time(to)}&limit=10`,
   );
 
-  const nearest = nearestRun(summaries, input.departure, input.arrival);
+  const nearest = nearestRun(onRoute(summaries, fromCode, toCode), input.departure, input.arrival);
 
   let track: FlightTrack = empty;
   if (nearest) {
@@ -172,6 +204,7 @@ export async function lookupFlightTrack(input: {
       ...empty,
       found: true,
       takeoffAt,
+      seenAt: str(nearest.first_seen),
       landedAt,
       ended,
       origin: iataFor(str(nearest.orig_icao)),
@@ -180,7 +213,7 @@ export async function lookupFlightTrack(input: {
 
     // Airborne: the live feed adds an ETA. Matched on FR24's own id, so a
     // different flight with the same number can't lend it one.
-    if (takeoffAt && !landedAt && !ended) {
+    if ((takeoffAt || str(nearest.first_seen)) && !landedAt && !ended) {
       const live = await fr24Get<Fr24Live>(
         `/api/live/flight-positions/full?flights=${encodeURIComponent(input.flightNumber)}&limit=5`,
       ).catch(() => [] as Fr24Live[]);

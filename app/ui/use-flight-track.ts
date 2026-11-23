@@ -38,9 +38,17 @@ function pollUntil(schedule: FlightSchedule): number {
  * learn and stops once it has landed. Shared by the trip's flight cards and
  * the Ops Dashboard.
  */
-export function useFlightTrack(flightNumber: string | null, schedule: FlightSchedule, enabled: boolean) {
+export function useFlightTrack(
+  flightNumber: string | null,
+  schedule: FlightSchedule,
+  enabled: boolean,
+  /** The itinerary's airports, so the right leg of a multi-leg number is tracked. */
+  route: { from?: string | null; to?: string | null } = {},
+) {
+  const from = route.from?.trim().toUpperCase() || '';
+  const to = route.to?.trim().toUpperCase() || '';
   // Tagged with what it answers, so a stale result never shows against new times.
-  const key = `${flightNumber}|${schedule.departure}|${schedule.arrival}`;
+  const key = `${flightNumber}|${schedule.departure}|${schedule.arrival}|${from}|${to}`;
   const [result, setResult] = useState<{ key: string; track: FlightTrack | null; failed: boolean } | null>(null);
 
   useEffect(() => {
@@ -53,6 +61,8 @@ export function useFlightTrack(flightNumber: string | null, schedule: FlightSche
       const params = new URLSearchParams({ flight: flightNumber });
       if (schedule.departure) params.set('departure', schedule.departure);
       if (schedule.arrival) params.set('arrival', schedule.arrival);
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
       let track: FlightTrack | null = null;
       let failed = false;
       try {
@@ -73,7 +83,7 @@ export function useFlightTrack(flightNumber: string | null, schedule: FlightSche
       if (track?.landedAt || track?.ended) return;
       // Long past and still unseen: asking again won't change the answer, and every ask is paid.
       if (Date.now() > pollUntil({ departure: schedule.departure, arrival: schedule.arrival })) return;
-      timer = setTimeout(() => void load(), track?.takeoffAt ? POLL_AIRBORNE_MS : POLL_WAITING_MS);
+      timer = setTimeout(() => void load(), track?.takeoffAt || track?.seenAt ? POLL_AIRBORNE_MS : POLL_WAITING_MS);
     };
 
     void load();
@@ -82,7 +92,7 @@ export function useFlightTrack(flightNumber: string | null, schedule: FlightSche
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [enabled, flightNumber, key, schedule.departure, schedule.arrival]);
+  }, [enabled, flightNumber, key, schedule.departure, schedule.arrival, from, to]);
 
   const answered = result !== null && result.key === key;
   return {

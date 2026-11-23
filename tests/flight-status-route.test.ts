@@ -57,7 +57,15 @@ describe('flight status route', () => {
       flightNumber: 'KQ100',
       departure: new Date('2026-10-18T06:15:00Z'),
       arrival: new Date('2026-10-18T15:00:00Z'),
+      from: null,
+      to: null,
     });
+  });
+
+  it('passes the itinerary route through, so a multi-leg number is tracked on the right leg', async () => {
+    lookupFlightTrack.mockResolvedValue({ found: false });
+    await get('flight=ET552&departure=2026-11-26T21:00:00Z&from=ADD&to=FCO');
+    expect(lookupFlightTrack).toHaveBeenCalledWith(expect.objectContaining({ flightNumber: 'ET552', from: 'ADD', to: 'FCO' }));
   });
 
   it('passes FlightRadar24 trouble through with its status', async () => {
