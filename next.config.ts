@@ -21,6 +21,10 @@ const CONTENT_SECURITY_POLICY = [
 ].join('; ');
 
 const nextConfig: NextConfig = {
+  // deploy.sh builds into a staging folder (NEXT_DIST_DIR=.next-staging) while
+  // the live server keeps serving .next, then swaps the folders and restarts,
+  // so a deploy no longer breaks pages for the length of the build.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   // Drop the X-Powered-By header: one less byte per response and no version hint.
   poweredByHeader: false,
   // Automatic memoization for client components (the big module screens

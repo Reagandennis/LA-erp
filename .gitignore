@@ -15,6 +15,10 @@
 
 # next.js
 /.next/
+# deploy.sh's two build slots and the file naming the live one
+/.next-a/
+/.next-b/
+/.next-slot.env
 /out/
 
 # production
