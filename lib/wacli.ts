@@ -267,8 +267,9 @@ async function send(account: string, args: string[], timeoutMs: number): Promise
  */
 async function delegated(account: string, args: string[], timeoutMs: number): Promise<SendResult> {
   const { syncStatus } = await import('./whatsapp-sync');
-  const fast = syncStatus(account).running ? ['--post-send-wait', '0'] : [];
-  const deadline = `${Math.max(5, Math.floor(timeoutMs / 1000) - 10)}s`;
+  const syncRunning = syncStatus(account).running;
+  const fast = syncRunning ? ['--post-send-wait', '0'] : [];
+  const deadline = deadlineFor(timeoutMs);
   const fullArgs = ['--timeout', deadline, ...args, ...fast];
 
   for (let attempt = 0; ; attempt++) {
@@ -281,8 +282,48 @@ async function delegated(account: string, args: string[], timeoutMs: number): Pr
         await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;
       }
+      if (syncRunning && SEND_QUEUE_STALLED.test(message)) {
+        return sendWithFreshSync(account, args, timeoutMs);
+      }
       return { ok: false, error: message };
     }
+  }
+}
+
+/** wacli's deadline, a little inside ours so it answers "not sent" itself rather than being killed. */
+function deadlineFor(timeoutMs: number): string {
+  return `${Math.max(5, Math.floor(timeoutMs / 1000) - 10)}s`;
+}
+
+/**
+ * wacli's answer when the running sync accepted a delegated command but never
+ * dispatched it: "request timed out in the send queue before dispatch; it was
+ * not sent". Seen when a long-lived sync wedges (it still receives, but its
+ * outbound queue stops moving); every send then fails the same way until the
+ * sync is restarted. wacli states the message was not sent, so retrying it
+ * cannot deliver a duplicate.
+ */
+const SEND_QUEUE_STALLED = /send queue before dispatch/i;
+
+/**
+ * Recover from a wedged sync: stop it, send this command over a connection of
+ * its own, then start the sync again (withSyncPaused does both, and queues
+ * concurrent recoveries for the same account so the sync is only stopped once
+ * at a time). Sends that arrive while the sync is stopped take the same path.
+ */
+async function sendWithFreshSync(account: string, args: string[], timeoutMs: number): Promise<SendResult> {
+  console.error(`[wacli] ${account}: sync's send queue is stalled; restarting the sync and sending directly.`);
+  const { withSyncPaused } = await import('./whatsapp-sync');
+  try {
+    const data = await withSyncPaused(account, () =>
+      // No delegate is listening now, so this opens the store itself; the
+      // lock can lag the stopped process by a moment. The default
+      // post-send wait stays on to collect receipts, since no sync is up.
+      run<SentData>(['--lock-wait', '10s', '--timeout', deadlineFor(timeoutMs), ...args], timeoutMs, account),
+    );
+    return { ok: true, messageId: data?.id || undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'send failed' };
   }
 }
 

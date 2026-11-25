@@ -13,8 +13,13 @@ const { runWacli, scratch } = vi.hoisted(() => ({
 }));
 vi.mock('../lib/wacli-runtime', () => ({ runWacli, wacliScratch: () => scratch }));
 
-const { syncStatus } = vi.hoisted(() => ({ syncStatus: vi.fn() }));
-vi.mock('../lib/whatsapp-sync', () => ({ syncStatus }));
+const { syncStatus, withSyncPaused } = vi.hoisted(() => ({
+  syncStatus: vi.fn(),
+  withSyncPaused: vi.fn(async (_account: string, task: () => Promise<unknown>) => task()),
+}));
+vi.mock('../lib/whatsapp-sync', () => ({ syncStatus, withSyncPaused }));
+
+const STALLED = 'request timed out in the send queue before dispatch; it was not sent';
 
 function reply(body: unknown, error: Error | null = null) {
   runWacli.mockResolvedValueOnce({ stdout: JSON.stringify(body), stderr: '', error });
@@ -87,6 +92,58 @@ describe('wacli sendText', () => {
       error: 'recipient not on WhatsApp',
     });
     expect(runWacli).toHaveBeenCalledTimes(1);
+  });
+
+  it('restarts a wedged sync and sends directly when the send queue stalls', async () => {
+    withSyncPaused.mockClear();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { sendText } = await import('../lib/wacli');
+    reply({ success: false, data: null, error: STALLED });
+    reply({ success: true, data: { id: 'Z', sent: true }, error: null });
+
+    expect(await sendText('laerp-user-1', '1@s.whatsapp.net', 'hi')).toEqual({ ok: true, messageId: 'Z' });
+    expect(withSyncPaused).toHaveBeenCalledTimes(1);
+    expect(withSyncPaused.mock.calls[0]![0]).toBe('laerp-user-1');
+    const retry = runWacli.mock.calls[1]![0] as string[];
+    // Opens the store itself, keeps the post-send wait for receipts.
+    expect(retry).toEqual([
+      '--json',
+      '--account',
+      'laerp-user-1',
+      '--lock-wait',
+      '10s',
+      '--timeout',
+      '50s',
+      'send',
+      'text',
+      '--to',
+      '1@s.whatsapp.net',
+      '--message',
+      'hi',
+    ]);
+    error.mockRestore();
+  });
+
+  it('reports a failed recovery instead of retrying again', async () => {
+    withSyncPaused.mockClear();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { sendText } = await import('../lib/wacli');
+    reply({ success: false, data: null, error: STALLED });
+    reply({ success: false, data: null, error: 'not connected' });
+
+    expect(await sendText('laerp-user-1', '1@s.whatsapp.net', 'hi')).toEqual({ ok: false, error: 'not connected' });
+    expect(runWacli).toHaveBeenCalledTimes(2);
+    error.mockRestore();
+  });
+
+  it('does not restart anything when no sync is running', async () => {
+    withSyncPaused.mockClear();
+    syncStatus.mockReturnValue({ account: 'a', running: false, restarts: 0, uptimeMs: 0 });
+    const { sendText } = await import('../lib/wacli');
+    reply({ success: false, data: null, error: STALLED });
+
+    expect(await sendText('laerp-user-1', '1@s.whatsapp.net', 'hi')).toEqual({ ok: false, error: STALLED });
+    expect(withSyncPaused).not.toHaveBeenCalled();
   });
 });
 
