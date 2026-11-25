@@ -52,3 +52,25 @@ export async function enforceRateLimit(
     ),
   };
 }
+
+/**
+ * Claims a key that may be used once: true the first time, false ever after
+ * (until `ttlMs` has passed and the row is pruned). Unlike a rate-limit
+ * window it has no boundary to slip across, so it suits one-shot tokens whose
+ * own lifetime is shorter than `ttlMs`.
+ */
+export async function claimOnce(options: { scope: string; key: string; ttlMs: number }): Promise<boolean> {
+  const windowStart = new Date(0);
+  const bucket = await prisma.rateLimitBucket.upsert({
+    where: { scope_key_windowStart: { scope: options.scope, key: options.key, windowStart } },
+    update: { count: { increment: 1 } },
+    create: {
+      scope: options.scope,
+      key: options.key,
+      windowStart,
+      expiresAt: new Date(Date.now() + options.ttlMs),
+      count: 1,
+    },
+  });
+  return bucket.count === 1;
+}

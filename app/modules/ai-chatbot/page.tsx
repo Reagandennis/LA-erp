@@ -21,8 +21,11 @@ export default async function AiChatbotPage() {
 
   return (
     <JarvisClient
+      userId={auth.user.id}
       userName={auth.user.name}
       moduleNames={auth.user.modules.map((m) => m.name)}
+      moduleSlugs={auth.user.modules.map((m) => m.slug)}
+      isAdmin={isAdmin}
     />
   );
 }

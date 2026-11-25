@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
     phone: validation.data.phone ?? null,
     company: validation.data.company ?? null,
     address: validation.data.address ?? null,
+    billingAddress: validation.data.billingAddress ?? null,
     createdById: auth.user.id,
   });
 

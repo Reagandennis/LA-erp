@@ -2,6 +2,8 @@ import 'server-only';
 
 import type { NextRequest } from 'next/server';
 
+import type { AccessUser } from '@/lib/user';
+
 /** OpenAPI-subset schema Gemini accepts for a function parameter. */
 export interface JsonSchema {
   type: 'object' | 'string' | 'number' | 'integer' | 'boolean' | 'array';
@@ -10,6 +12,8 @@ export interface JsonSchema {
   items?: JsonSchema;
   enum?: string[];
   required?: string[];
+  /** An explicit null is meaningful (it clears the field). */
+  nullable?: boolean;
 }
 
 export interface FunctionDeclaration {
@@ -22,18 +26,46 @@ export interface ToolContext {
   userId: number;
   userName: string;
   isAdmin: boolean;
+  /** The signed-in person, for the libs that decide access from the whole user. */
+  user: AccessUser;
+  /** The person's IANA time zone; wall-clock times in tool arguments are read in it. */
+  timeZone: string;
   request: NextRequest;
 }
+
+/** A read looks something up; a write changes the platform. */
+export type ToolKind = 'read' | 'write';
 
 export interface ToolDefinition {
   functionDeclaration: FunctionDeclaration;
   handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
-  /** Module slug the user must have (admins bypass). */
-  requiredModule?: string;
+  /** Module slug(s) the user must hold, any one of them (admins bypass). */
+  requiredModule?: string | readonly string[];
   /** Role the user must have (admins bypass). */
   requiredRole?: string;
   /** Delete / void / send / approve — requires a confirmation round-trip. */
   destructive: boolean;
+  /** Left out, it follows from the name: list_, get_, find_ and search tools read. */
+  kind?: ToolKind;
+  /** What the Confirm card says will happen, e.g. "Approve invoice #12". */
+  confirmLabel?: (args: Record<string, unknown>) => string;
+}
+
+/**
+ * A handler's way of saying no: the message goes back to the model as the
+ * tool's error. Anything else a handler throws is a fault, and is logged.
+ */
+export class ToolRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ToolRefusal';
+  }
+}
+
+export function toolKind(tool: ToolDefinition): ToolKind {
+  if (tool.kind) return tool.kind;
+  if (tool.destructive) return 'write';
+  return /^(list_|get_|find_|search_|web_search$|use_area$)/.test(tool.functionDeclaration.name) ? 'read' : 'write';
 }
 
 // --- Small coercion helpers (Gemini args are untyped JSON) -----------------

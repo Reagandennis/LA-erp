@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { clearSavedChats } from '@/app/modules/ai-chatbot/storage';
+
 interface LogoutButtonProps {
   variant?: 'default' | 'ghost';
   className?: string;
@@ -23,6 +25,7 @@ export default function LogoutButton({ variant = 'default', className }: LogoutB
           try {
             await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
           } finally {
+            clearSavedChats();
             router.push('/auth/login');
             router.refresh();
           }
@@ -48,6 +51,7 @@ export default function LogoutButton({ variant = 'default', className }: LogoutB
             credentials: 'include',
           });
         } finally {
+          clearSavedChats();
           router.push('/auth/login');
           router.refresh();
         }

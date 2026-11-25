@@ -73,7 +73,7 @@ interface GenerateArgs {
   usage: { feature: AiFeature; userId?: number | null };
 }
 
-interface GenerateResult {
+export interface GenerateResult {
   parts: GeminiPart[];
   text: string;
   error: string | null;
@@ -145,6 +145,8 @@ async function generate(args: GenerateArgs): Promise<GenerateResult> {
   return { parts, text, error: null, finishReason: candidate?.finishReason };
 }
 
+export const ASSISTANT_MAX_OUTPUT_TOKENS = 4096;
+
 /** One reasoning turn with the user's scoped tools (no grounding — cost). */
 export function generateWithTools(args: {
   systemInstruction: string;
@@ -157,6 +159,9 @@ export function generateWithTools(args: {
     systemInstruction: args.systemInstruction,
     contents: args.contents,
     functionDeclarations: args.functionDeclarations,
+    // Thinking is counted against this cap, so it has to leave room for a
+    // long tool call (a quote's lines, an event's details) after the thought.
+    maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
     thinkingLevel: assistantThinking(),
     usage: { feature: 'chatbot', userId: args.userId },
   });

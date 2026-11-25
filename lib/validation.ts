@@ -410,6 +410,11 @@ const detailShapes = {
   information: {},
 } as const;
 
+/** The detail fields each category takes, for callers that build an event from loose input (the assistant). */
+export const tripItemDetailKeys = Object.fromEntries(
+  Object.entries(detailShapes).map(([category, keys]) => [category, Object.keys(keys)]),
+) as unknown as Record<keyof typeof detailShapes, readonly string[]>;
+
 const detailValue = z.string().trim().max(200);
 
 // Several catalog services can be sold on one event, joined into these two

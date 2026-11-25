@@ -11,18 +11,25 @@ import { Fragment, type ReactNode, useState } from 'react';
 
 // --- Inline ---------------------------------------------------------------
 
+// Emphasis has to hug its text and stand apart from the words around it:
+// `update_trip_status` and `a * b * c` are not italics.
 const INLINE_PATTERN =
-  /(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]]+\]\([^)\s]+\))/g;
+  /(`[^`]+`)|(\*\*(?!\s)[^*]+\*\*)|((?<![\w_])__(?!\s)[^_]+__(?![\w_]))|(\*(?![\s*])[^*\n]+(?<!\s)\*)|((?<![\w_])_(?![\s_])[^_\n]+(?<!\s)_(?![\w_]))|(\[[^\]]+\]\([^)\s]+\))/g;
+
+/** Links go to this app or to the web; anything else the model writes stays text. */
+function safeHref(href: string): string | null {
+  if (href.startsWith('/') && !href.startsWith('//')) return href;
+  return /^(https?:|mailto:)/i.test(href) ? href : null;
+}
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
   let index = 0;
 
-  INLINE_PATTERN.lastIndex = 0;
-
-  while ((match = INLINE_PATTERN.exec(text)) !== null) {
+  // matchAll works on its own copy of the pattern, so the nested call for the
+  // inside of a bold or italic run cannot disturb this one's place.
+  for (const match of text.matchAll(INLINE_PATTERN)) {
     if (match.index > lastIndex) {
       nodes.push(text.slice(lastIndex, match.index));
     }
@@ -43,28 +50,32 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     } else if (token.startsWith('**') || token.startsWith('__')) {
       nodes.push(
         <strong key={key} className="font-bold">
-          {token.slice(2, -2)}
+          {renderInline(token.slice(2, -2), key)}
         </strong>,
       );
     } else if (token.startsWith('[')) {
       const split = token.indexOf('](');
       const label = token.slice(1, split);
-      const href = token.slice(split + 2, -1);
+      const href = safeHref(token.slice(split + 2, -1));
       nodes.push(
-        <a
-          key={key}
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-bold text-primary underline underline-offset-2"
-        >
-          {label}
-        </a>,
+        href ? (
+          <a
+            key={key}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-primary underline underline-offset-2"
+          >
+            {label}
+          </a>
+        ) : (
+          <Fragment key={key}>{label}</Fragment>
+        ),
       );
     } else {
       nodes.push(
         <em key={key} className="italic">
-          {token.slice(1, -1)}
+          {renderInline(token.slice(1, -1), key)}
         </em>,
       );
     }
@@ -138,6 +149,14 @@ function splitRow(line: string) {
     .map((cell) => cell.trim());
 }
 
+const isRule = (line: string) => /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+
+/** A pipe row with a separator row (`|---|---|`) under it. */
+function startsTable(lines: string[], i: number): boolean {
+  const next = lines[i + 1];
+  return lines[i].includes('|') && next !== undefined && next.includes('|') && /^[\s|:-]+$/.test(next) && next.includes('-');
+}
+
 function parseBlocks(source: string): Block[] {
   const lines = source.replace(/\r\n/g, '\n').split('\n');
   const blocks: Block[] = [];
@@ -175,14 +194,14 @@ function parseBlocks(source: string): Block[] {
       continue;
     }
 
-    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+    if (isRule(line)) {
       blocks.push({ kind: 'rule' });
       i += 1;
       continue;
     }
 
     // Table: a pipe row followed by a separator row
-    if (line.includes('|') && i + 1 < lines.length && /^[\s|:-]+$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+    if (startsTable(lines, i)) {
       const header = splitRow(line);
       i += 2;
       const rows: string[][] = [];
@@ -226,7 +245,10 @@ function parseBlocks(source: string): Block[] {
       !/^(#{1,6})\s+/.test(lines[i]) &&
       !bullet.test(lines[i]) &&
       !numbered.test(lines[i]) &&
-      !/^\s*>\s?/.test(lines[i])
+      !/^\s*>\s?/.test(lines[i]) &&
+      // A table or a rule straight under a line of text is still a table or a rule.
+      !isRule(lines[i]) &&
+      !startsTable(lines, i)
     ) {
       body.push(lines[i]);
       i += 1;

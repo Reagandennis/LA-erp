@@ -29,11 +29,24 @@ import {
   TruckIcon,
 } from '@/app/ui/icons';
 import { ContextTokens, Markdown } from './markdown';
-import ToolCalls, { type ActionItem } from './tool-calls';
+import { activeChatKey, chatsKey, INSPECTOR_WIDTH_KEY, removeLegacyChats } from './storage';
+import ToolCalls, { type ActionItem, type Outcome, OutcomeLine } from './tool-calls';
 
-const STORAGE_CHATS = 'la-erp.jarvis.chats';
-const STORAGE_ACTIVE = 'la-erp.jarvis.active';
 const MAX_CHATS = 50;
+/** How long the server honours a confirmation; past it the card can only be dismissed. */
+const CONFIRM_TTL_MS = 10 * 60 * 1000;
+
+/** A short answer typed while a Confirm card is up is an answer to the card. */
+const TYPED_YES = /^(yes|y|yep|yeah|confirm|confirmed|go ahead|do it|proceed|ok|okay|sure)[\s.!]*$/i;
+const TYPED_NO = /^(no|n|nope|cancel|stop|don'?t|do not)[\s.!]*$/i;
+
+function browserTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // Below this the split-pane collapses to a single column and the inspector
 // becomes a full-screen sheet. Shared by the container query and the JS check.
@@ -41,7 +54,6 @@ const MOBILE_MAX_WIDTH = 767;
 const INSPECTOR_DEFAULT_WIDTH = 460;
 const INSPECTOR_MIN_WIDTH = 320;
 const INSPECTOR_MAX_WIDTH = 860;
-const INSPECTOR_WIDTH_KEY = 'la-erp.jarvis.inspector-width';
 
 interface PendingConfirmation {
   token: string;
@@ -53,6 +65,14 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   text: string;
   actions?: ActionItem[];
+  /** What the reply did, as the server counted it. Absent on chats saved before it was sent. */
+  outcome?: Outcome;
+  /** The server's account of what the reply ran; sent back with the history so later turns know. */
+  record?: string;
+  /** On a system line: what the assistant should be told happened (a cancel, a lost reply). */
+  note?: string;
+  /** The reply is holding an action for Confirm. */
+  waiting?: boolean;
   /** Epoch ms. Absent on chats saved before timestamps were added. */
   at?: number;
 }
@@ -62,13 +82,18 @@ interface Conversation {
   title: string;
   messages: ChatMessage[];
   updatedAt: number;
+  /** The action this chat is waiting on, and when it was asked. */
+  pending?: (PendingConfirmation & { at: number }) | null;
 }
 
 interface ApiResponse {
   reply?: string;
   actions?: ActionItem[];
+  outcome?: Outcome;
+  record?: string;
   pendingConfirmation?: PendingConfirmation;
   error?: string;
+  retryAfterSeconds?: number;
 }
 
 // Capability groups, each backed by the tools Jarvis can actually call.
@@ -83,52 +108,67 @@ const CATEGORIES: Array<{
   { key: 'research', label: 'Research', icon: SearchIcon },
 ];
 
+/** `needs`: the module a suggestion works in; it is only offered to people who hold one of them. */
 const CATEGORY_SUGGESTIONS: Record<
   string,
-  Array<{ heading: string; body: string; prompt: string }>
+  Array<{ heading: string; body: string; prompt: string; needs?: string[] }>
 > = {
   sales: [
     {
       heading: 'Create a client',
       body: 'Add a new account with contact details',
       prompt: 'Create a client called ',
+      needs: ['customers', 'quotes', 'invoices-review'],
     },
     {
       heading: 'Draft a quote',
       body: 'Build a quote for a client with line items',
       prompt: 'Draft a quote for ',
+      needs: ['quotes'],
     },
     {
       heading: 'Check unpaid invoices',
-      body: 'List invoices that are still outstanding',
-      prompt: 'List all unpaid invoices and their totals',
+      body: 'See what is outstanding or overdue',
+      prompt: 'Which invoices are unpaid or overdue?',
+      needs: ['invoices-review'],
     },
     {
-      heading: 'Review the product list',
-      body: 'See what products and services are on file',
-      prompt: 'Show me the products and services we offer',
+      heading: 'Look up a product or service',
+      body: 'Find it in the catalogue with its price',
+      prompt: 'Find the product or service called ',
+      needs: ['products-services', 'quotes', 'invoices-review'],
     },
   ],
   operations: [
     {
-      heading: 'List my trips',
-      body: 'See planned and active trips at a glance',
-      prompt: 'List my trips',
+      heading: 'Change a trip itinerary',
+      body: 'Add a pickup, move a time, or put a driver on an event',
+      prompt: 'On trip ',
+      needs: ['trip-planning'],
+    },
+    {
+      heading: 'See what starts next',
+      body: 'Upcoming trips, soonest first',
+      prompt: 'Which trips start next?',
+      needs: ['trip-planning'],
     },
     {
       heading: 'Add a driver',
       body: 'Register a driver against the fleet',
       prompt: 'Add a driver named ',
+      needs: ['task-assignment'],
     },
     {
       heading: 'Check vehicle status',
-      body: 'Review the fleet and what each vehicle is doing',
-      prompt: 'Show me the current status of every vehicle',
+      body: 'See which vehicles are free',
+      prompt: 'Which vehicles are available?',
+      needs: ['task-assignment', 'vehicles'],
     },
     {
       heading: 'Plan a trip',
       body: 'Create a trip with dates and a client',
       prompt: 'Plan a trip for ',
+      needs: ['trip-planning'],
     },
   ],
   planning: [
@@ -136,21 +176,25 @@ const CATEGORY_SUGGESTIONS: Record<
       heading: 'What is on today?',
       body: 'Pull up calendar entries for the day',
       prompt: 'What is on my calendar today?',
+      needs: ['calendar'],
     },
     {
       heading: 'Add a to-do',
       body: 'Capture a task with a due date',
       prompt: 'Add a to-do to ',
+      needs: ['todo-personal'],
     },
     {
       heading: 'Schedule a meeting',
       body: 'Create a calendar event with a time and place',
       prompt: 'Schedule a meeting on ',
+      needs: ['calendar'],
     },
     {
       heading: 'Show overdue tasks',
       body: 'Find the to-dos that have slipped past their date',
       prompt: 'Which of my tasks are overdue?',
+      needs: ['todo-personal'],
     },
   ],
   research: [
@@ -542,19 +586,27 @@ function InspectorBody({ action }: Readonly<{ action: ActionItem }>) {
 // --- Main -----------------------------------------------------------------
 
 export default function JarvisClient({
+  userId,
   userName,
   moduleNames,
+  moduleSlugs,
+  isAdmin,
 }: {
+  userId: number;
   userName: string;
   moduleNames: string[];
+  moduleSlugs: string[];
+  isAdmin: boolean;
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<PendingConfirmation | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // An error belongs to the chat it happened in, not to whichever is on screen.
+  const [failure, setFailure] = useState<{ chatId: string; text: string } | null>(null);
+  // Set when the server says to wait (rate limit, daily allowance).
+  const [cooldownUntil, setCooldownUntil] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
   const [category, setCategory] = useState<string | null>(null);
   const [references, setReferences] = useState<string[]>([]);
@@ -566,7 +618,7 @@ export default function JarvisClient({
   const [panelWidth, setPanelWidth] = useState(INSPECTOR_DEFAULT_WIDTH);
   const rootRef = useRef<HTMLDivElement>(null);
   const panelWidthRef = useRef(panelWidth);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -622,28 +674,29 @@ export default function JarvisClient({
   const isClient = useIsClient();
   if (isClient && !loaded) {
     setLoaded(true);
+    removeLegacyChats();
 
-    const savedWidth = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
-    if (Number.isFinite(savedWidth) && savedWidth >= INSPECTOR_MIN_WIDTH) {
-      setPanelWidth(Math.min(savedWidth, INSPECTOR_MAX_WIDTH));
-    }
-
+    // Storage can be blocked outright (private mode, policy): the page still works, it just starts empty.
     let chats: Conversation[] = [];
+    let savedActive: string | null = null;
     try {
-      const raw = localStorage.getItem(STORAGE_CHATS);
+      const savedWidth = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+      if (Number.isFinite(savedWidth) && savedWidth >= INSPECTOR_MIN_WIDTH) {
+        setPanelWidth(Math.min(savedWidth, INSPECTOR_MAX_WIDTH));
+      }
+      const raw = localStorage.getItem(chatsKey(userId));
       if (raw) chats = JSON.parse(raw) as Conversation[];
+      savedActive = localStorage.getItem(activeChatKey(userId));
     } catch {
       chats = [];
     }
-    if (!Array.isArray(chats) || chats.length === 0) {
+    chats = Array.isArray(chats) ? chats.filter((c) => c && Array.isArray(c.messages)) : [];
+    if (chats.length === 0) {
       const first = newConversation();
       chats = [first];
       setActiveId(first.id);
     } else {
-      const savedActive = localStorage.getItem(STORAGE_ACTIVE);
-      setActiveId(
-        savedActive && chats.some((c) => c.id === savedActive) ? savedActive : chats[0].id,
-      );
+      setActiveId(savedActive && chats.some((c) => c.id === savedActive) ? savedActive : chats[0].id);
     }
     setConversations(chats);
   }
@@ -652,22 +705,32 @@ export default function JarvisClient({
   useEffect(() => {
     if (!loaded) return;
     try {
-      localStorage.setItem(STORAGE_CHATS, JSON.stringify(conversations.slice(0, MAX_CHATS)));
-      if (activeId) localStorage.setItem(STORAGE_ACTIVE, activeId);
+      // The chats most recently used are the ones kept.
+      const kept = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CHATS);
+      localStorage.setItem(chatsKey(userId), JSON.stringify(kept));
+      if (activeId) localStorage.setItem(activeChatKey(userId), activeId);
     } catch {
       /* quota — ignore */
     }
-  }, [conversations, activeId, loaded]);
+  }, [conversations, activeId, loaded, userId]);
 
   const active = conversations.find((c) => c.id === activeId) ?? null;
   const messages = useMemo(() => active?.messages ?? [], [active]);
+  const pending = active?.pending ?? null;
+  const error = failure && failure.chatId === activeId ? failure.text : null;
+  const cooling = cooldownUntil > 0;
+
+  // The column is what scrolls (the list inside it never overflows), so that
+  // is what follows new replies and brings the Confirm card into view.
+  useEffect(() => {
+    columnRef.current?.scrollTo({ top: columnRef.current.scrollHeight, behavior: 'smooth' });
+  }, [activeId, messages.length, busy, pending]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: 'smooth',
-    });
-  }, [activeId, messages.length, busy, pending]);
+    if (!cooldownUntil) return;
+    const timer = setTimeout(() => setCooldownUntil(0), Math.max(0, cooldownUntil - Date.now()));
+    return () => clearTimeout(timer);
+  }, [cooldownUntil]);
 
   // Keep the composer sized to its content.
   useEffect(() => {
@@ -677,97 +740,211 @@ export default function JarvisClient({
     node.style.height = `${Math.min(node.scrollHeight, 200)}px`;
   }, [input]);
 
-  const patchActive = (updater: (c: Conversation) => Conversation) => {
-    setConversations((cur) => cur.map((c) => (c.id === activeId ? updater(c) : c)));
+  const patchChat = (chatId: string, updater: (c: Conversation) => Conversation) => {
+    setConversations((cur) => cur.map((c) => (c.id === chatId ? updater(c) : c)));
   };
 
+  /**
+   * What the server is sent of the conversation. A reply goes with the
+   * server's own record of what it ran; a system line goes as a note when it
+   * marks something the assistant has to know (a cancel, a lost reply).
+   */
   const historyFrom = (msgs: ChatMessage[]) =>
-    msgs.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, text: m.text }));
+    msgs
+      .flatMap((m) => {
+        if (m.role === 'system') return m.note ? [{ role: 'note', text: m.note }] : [];
+        if (m.role === 'assistant') return [{ role: 'assistant', text: m.text, record: m.record }];
+        return [{ role: 'user', text: m.text }];
+      })
+      .slice(-16);
 
-  const post = async (payload: Record<string, unknown>, priorMessages: ChatMessage[]) => {
+  /**
+   * Sends one request for a chat and files the reply in that chat, wherever
+   * the user has moved to since. `onFail` hears whether the server may have
+   * acted before the reply was lost (`uncertain`), or refused outright.
+   */
+  const post = async (
+    chatId: string,
+    payload: Record<string, unknown>,
+    priorMessages: ChatMessage[],
+    onFail: (text: string, uncertain: boolean) => void,
+  ) => {
     setBusy(true);
-    setError(null);
+    setFailure(null);
     try {
       const res = await fetch('/api/ai-chatbot', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, history: historyFrom(priorMessages) }),
+        body: JSON.stringify({ ...payload, history: historyFrom(priorMessages), timeZone: browserTimeZone() }),
       });
       const data = (await res.json().catch(() => null)) as ApiResponse | null;
       if (!res.ok || !data) {
-        setError(data?.error ?? 'The assistant could not respond.');
+        if (data?.retryAfterSeconds) setCooldownUntil(Date.now() + data.retryAfterSeconds * 1000);
+        // A refusal the server put into words did nothing; a bare failure may have got part-way.
+        const refused = Boolean(data?.error) && res.status < 500;
+        const text = data?.error ?? 'The assistant could not respond. If you asked for a change, check the record before sending again.';
+        setFailure({ chatId, text });
+        onFail(text, !refused);
         return;
       }
-      patchActive((c) => ({
+      patchChat(chatId, (c) => ({
         ...c,
+        pending: data.pendingConfirmation ? { ...data.pendingConfirmation, at: Date.now() } : null,
         messages: [
           ...c.messages,
           {
             role: 'assistant',
-            text: data.reply ?? 'Done.',
+            text: data.reply || 'No reply.',
             actions: data.actions,
+            outcome: data.outcome,
+            record: data.record,
+            waiting: Boolean(data.pendingConfirmation),
             at: Date.now(),
           },
         ],
         updatedAt: Date.now(),
       }));
-      setPending(data.pendingConfirmation ?? null);
     } catch {
-      setError('Network error. Please try again.');
+      const text = 'No reply came back (network error). If you asked for a change, check the record before sending again.';
+      setFailure({ chatId, text });
+      onFail(text, true);
     } finally {
       setBusy(false);
     }
   };
 
+  const confirm = () => {
+    if (!pending || busy || !active) return;
+    const chatId = active.id;
+    const held = pending;
+    if (Date.now() - held.at > CONFIRM_TTL_MS) {
+      patchChat(chatId, (c) => ({
+        ...c,
+        pending: null,
+        messages: [
+          ...c.messages,
+          {
+            role: 'system',
+            text: 'That confirmation expired. Nothing was changed.',
+            note: `The confirmation for "${held.label}" expired before the user pressed it. It was NOT run.`,
+            at: Date.now(),
+          },
+        ],
+      }));
+      return;
+    }
+    patchChat(chatId, (c) => ({ ...c, pending: null }));
+    void post(chatId, { confirmToken: held.token }, active.messages, (text, uncertain) => {
+      patchChat(chatId, (c) => ({
+        ...c,
+        messages: [
+          ...c.messages,
+          {
+            role: 'system',
+            text: uncertain ? 'No reply after confirming. Check the record before trying again.' : 'Not run.',
+            note: uncertain
+              ? `The user confirmed "${held.label}" but no reply came back. It may or may not have run: check before doing it again.`
+              : `"${held.label}" was NOT run (${text}).`,
+            at: Date.now(),
+          },
+        ],
+      }));
+    });
+  };
+
+  const cancel = () => {
+    if (!pending || !active) return;
+    const held = pending;
+    patchChat(active.id, (c) => ({
+      ...c,
+      pending: null,
+      messages: [
+        ...c.messages,
+        {
+          role: 'system',
+          text: 'Action cancelled.',
+          note: `The user cancelled "${held.label}". It was NOT run.`,
+          at: Date.now(),
+        },
+      ],
+    }));
+  };
+
   const send = (text: string) => {
     const typed = text.trim();
-    if (!typed || busy || !active) return;
+    if (!typed || busy || !active || cooling) return;
+
+    // "yes" or "no" typed under a Confirm card answers the card.
+    if (pending && TYPED_YES.test(typed)) {
+      setInput('');
+      confirm();
+      return;
+    }
+    if (pending && TYPED_NO.test(typed)) {
+      setInput('');
+      cancel();
+      return;
+    }
 
     // Referenced modules ride along as a context line the model can read.
     const prompt = references.length
       ? `[Context: ${references.join(', ')}]\n${typed}`
       : typed;
 
-    const prior = active.messages;
-    const isFirst = prior.length === 0;
-    patchActive((c) => ({
+    const chatId = active.id;
+    // Anything else typed while an action waits leaves it unconfirmed: say so, to the user and the assistant.
+    const dropped: ChatMessage[] = pending
+      ? [
+          {
+            role: 'system',
+            text: 'Action not confirmed.',
+            note: `The user did not confirm "${pending.label}" and moved on. It was NOT run.`,
+            at: Date.now(),
+          },
+        ]
+      : [];
+    const prior = [...active.messages, ...dropped];
+    const isFirst = active.messages.length === 0;
+    const sent: ChatMessage = { role: 'user', text: prompt, at: Date.now() };
+    const sentReferences = references;
+    patchChat(chatId, (c) => ({
       ...c,
       title: isFirst ? typed.slice(0, 40) : c.title,
-      messages: [...c.messages, { role: 'user', text: prompt, at: Date.now() }],
+      pending: null,
+      messages: [...c.messages, ...dropped, sent],
       updatedAt: Date.now(),
     }));
     setInput('');
     setReferences([]);
-    setPending(null);
-    void post({ prompt }, prior);
-  };
-
-  const confirm = () => {
-    if (!pending || busy || !active) return;
-    const prior = active.messages;
-    const token = pending.token;
-    setPending(null);
-    void post({ confirmToken: token }, prior);
-  };
-
-  const cancel = () => {
-    if (!pending) return;
-    setPending(null);
-    patchActive((c) => ({
-      ...c,
-      messages: [
-        ...c.messages,
-        { role: 'system', text: 'Action cancelled.', at: Date.now() },
-      ],
-    }));
+    void post(chatId, { prompt }, prior, (_text, uncertain) => {
+      // Nothing came back: take the message out of the conversation and put
+      // the words back in the box, so sending again is one press.
+      patchChat(chatId, (c) => ({
+        ...c,
+        messages: [
+          ...c.messages.filter((m) => m !== sent),
+          ...(uncertain
+            ? [
+                {
+                  role: 'system' as const,
+                  text: 'No reply came back. Your message is in the box again.',
+                  note: 'A message from the user got no reply (the request failed). Whatever it asked for may not have been done.',
+                  at: Date.now(),
+                },
+              ]
+            : []),
+        ],
+      }));
+      setInput((current) => current || typed);
+      setReferences(sentReferences);
+    });
   };
 
   const startNewChat = () => {
     const convo = newConversation();
-    setConversations((cur) => [convo, ...cur].slice(0, MAX_CHATS));
+    setConversations((cur) => [convo, ...cur]);
     setActiveId(convo.id);
-    setPending(null);
     setInput('');
     setReferences([]);
     setCategory(null);
@@ -776,23 +953,22 @@ export default function JarvisClient({
 
   const switchTo = (id: string) => {
     setActiveId(id);
-    setPending(null);
     setInput('');
     setReferences([]);
+    setInspected(null);
     setShowHistory(false);
   };
 
   const deleteChat = (id: string) => {
-    setConversations((cur) => {
-      const next = cur.filter((c) => c.id !== id);
-      if (next.length === 0) {
-        const fresh = newConversation();
-        setActiveId(fresh.id);
-        return [fresh];
-      }
-      if (id === activeId) setActiveId(next[0].id);
-      return next;
-    });
+    const next = conversations.filter((c) => c.id !== id);
+    if (next.length === 0) {
+      const fresh = newConversation();
+      setConversations([fresh]);
+      setActiveId(fresh.id);
+      return;
+    }
+    setConversations(next);
+    if (id === activeId) setActiveId([...next].sort((a, b) => b.updatedAt - a.updatedAt)[0].id);
   };
 
   const applySuggestion = (prompt: string) => {
@@ -807,7 +983,12 @@ export default function JarvisClient({
 
   const ordered = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
   const empty = messages.length === 0;
-  const suggestions = category ? CATEGORY_SUGGESTIONS[category] : null;
+  // Only what this person can actually ask for: a card for an area they lack would lead nowhere.
+  const suggestions = category
+    ? CATEGORY_SUGGESTIONS[category].filter(
+        (s) => isAdmin || !s.needs || s.needs.some((slug) => moduleSlugs.includes(slug)),
+      )
+    : null;
   const activeCategory = CATEGORIES.find((c) => c.key === category);
   const firstName = userName.split(' ')[0];
 
@@ -972,7 +1153,7 @@ export default function JarvisClient({
           )}
           <button
             type="submit"
-            disabled={busy || !input.trim()}
+            disabled={busy || cooling || !input.trim()}
             aria-label="Send"
             className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
           >
@@ -989,7 +1170,7 @@ export default function JarvisClient({
       <style>{JARVIS_CSS}</style>
 
       <div className="flex h-full">
-        <div className="jarvis-chat-column relative min-w-0 flex-1 overflow-y-auto">
+        <div ref={columnRef} className="jarvis-chat-column relative min-w-0 flex-1 overflow-y-auto">
           {/* History control — sticky so it survives scrolling inside the column. */}
           <div className="pointer-events-none sticky top-0 z-20 flex justify-end px-6 pt-4">
             <button
@@ -1047,7 +1228,12 @@ export default function JarvisClient({
                 })}
               </div>
 
-              {suggestions && (
+              {suggestions && suggestions.length === 0 && (
+                <p className="text-sm text-gray-500">
+                  You don&apos;t have access to these areas yet. Ask IT for permission.
+                </p>
+              )}
+              {suggestions && suggestions.length > 0 && (
                 <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
                   {suggestions.map((suggestion) => (
                     <button
@@ -1068,7 +1254,7 @@ export default function JarvisClient({
           </div>
         ) : (
           <>
-            <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto">
+            <div className="flex-1 space-y-5">
               {messages.map((message, index) => {
                 const previous = index > 0 ? messages[index - 1] : null;
                 const divider = dayDivider(message, previous);
@@ -1114,6 +1300,13 @@ export default function JarvisClient({
                       </span>
                       <div className="min-w-0 flex-1">
                         <Markdown compact>{message.text}</Markdown>
+                        {message.outcome && (
+                          <OutcomeLine
+                            outcome={message.outcome}
+                            actions={message.actions ?? []}
+                            waiting={message.waiting}
+                          />
+                        )}
                         {message.actions && message.actions.length > 0 && (
                           <ToolCalls
                             actions={message.actions}
@@ -1154,9 +1347,12 @@ export default function JarvisClient({
 
               {pending && !busy && (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                  <p className="text-sm font-bold text-amber-900">Confirm: {pending.label}?</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-700">
+                    Waiting for you
+                  </p>
+                  <p className="mt-1 text-sm font-bold text-amber-900">{pending.label}</p>
                   <p className="mt-0.5 text-xs text-amber-700">
-                    This action changes or removes data and needs your confirmation.
+                    Nothing has changed yet. Press Confirm (or type yes) to go ahead, Cancel (or no) to leave it.
                   </p>
                   <div className="mt-3 flex gap-2">
                     <button
@@ -1273,7 +1469,7 @@ export default function JarvisClient({
                     type="button"
                     onClick={() => deleteChat(c.id)}
                     aria-label="Delete chat"
-                    className="shrink-0 text-gray-300 opacity-0 transition-opacity hover:text-rose-500 group-hover:opacity-100"
+                    className="shrink-0 text-gray-300 transition-opacity hover:text-rose-500 focus:opacity-100 md:opacity-0 md:group-hover:opacity-100"
                   >
                     <CloseIcon className="h-3.5 w-3.5" />
                   </button>
