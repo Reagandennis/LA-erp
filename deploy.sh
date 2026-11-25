@@ -64,7 +64,9 @@ wait_healthy() {
 APP_PORT="$(env_value PORT)"
 APP_PORT="${APP_PORT:-3100}"
 
-if ! systemctl cat la-erp 2>/dev/null | grep -q '^EnvironmentFile=-*/.*\.next-slot\.env'; then
+# (Read the unit first: with pipefail, `systemctl cat | grep -q` can fail at
+# random when grep exits early.)
+if ! grep -q '^EnvironmentFile=-*/.*\.next-slot\.env' <<< "$(systemctl cat la-erp 2>/dev/null)"; then
   fail "la-erp.service does not load $SLOT_FILE, so a new build slot would never go live."
   echo "Add this line under [Service], after the .env EnvironmentFile line, then run: sudo systemctl daemon-reload"
   echo "  EnvironmentFile=-$SLOT_FILE"
@@ -90,8 +92,11 @@ else
   echo "Dependencies unchanged — skipping install."
 fi
 
-ACTIVE_SLOT="$(sed -nE 's/^NEXT_DIST_DIR=(.*)$/\1/p' "$SLOT_FILE" 2>/dev/null | tail -n 1)"
-ACTIVE_SLOT="${ACTIVE_SLOT:-.next}"
+ACTIVE_SLOT=.next   # builds made before the slots existed
+if [ -f "$SLOT_FILE" ]; then
+  slot="$(sed -nE 's/^NEXT_DIST_DIR=(.*)$/\1/p' "$SLOT_FILE" | tail -n 1)"
+  [ -n "$slot" ] && ACTIVE_SLOT="$slot"
+fi
 NEW_SLOT=.next-a
 [ "$ACTIVE_SLOT" = .next-a ] && NEW_SLOT=.next-b
 
